@@ -1,0 +1,120 @@
+{
+  "project_name": "AJAX AI Agent",
+  "theme": "Dark",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Retro-Futurism (Terminal Look)",
+  "vibe": "High-tech, CLI/Terminal aesthetic, professional developer tool, raw capability, cyberpunk but clean",
+  "typography": {
+    "font_pairings": {
+      "headings": "JetBrains Mono",
+      "body": "IBM Plex Sans",
+      "code": "JetBrains Mono"
+    },
+    "rules": [
+      "No standard sans (Inter, Roboto) for headings.",
+      "Headings should use `tracking-tight` and bold weights.",
+      "Use uppercase with wide tracking `tracking-[0.2em]` for overlines and section labels (e.g., 'SYSTEM LOGS', 'INTEGRATIONS').",
+      "Line height: `leading-none` for headings, `leading-relaxed` for UI body text.",
+      "Sizes: H1 (text-3xl/4xl for dashboard panels), H2 (text-xl), body (text-sm/text-base)."
+    ]
+  },
+  "colors": {
+    "background": {
+      "base": "#000000",
+      "panel": "#0A0A0A",
+      "surface": "#121212"
+    },
+    "accent": {
+      "primary": "#00E559",
+      "secondary": "#FFB000",
+      "danger": "#FF3B30",
+      "info": "#007AFF"
+    },
+    "text": {
+      "primary": "#EDEDED",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A"
+    },
+    "border": {
+      "default": "#27272A",
+      "focus": "#00E559"
+    },
+    "rules": [
+      "Never use pure #000000 without texture or 1px subtle borders defining boundaries.",
+      "Primary Accent (Terminal Green) is for active status, executing states, and primary CTAs.",
+      "Secondary Accent (Amber) is for RAG reasoning, background tasks, and warnings.",
+      "Always set hover text color explicitly: `hover:bg-zinc-900 hover:text-green-400`."
+    ]
+  },
+  "layout_spacing": {
+    "strategy": "The 'Control Room' Grid",
+    "properties": {
+      "gap": "gap-4 md:gap-6",
+      "padding": "p-4 sm:p-6"
+    },
+    "rules": [
+      "Every pixel utilized. Use `h-full` to stretch panels.",
+      "Dense data correlation.",
+      "Desktop view: Left sidebar (history), Center (chat/code execution), Right Sidebar (integrations/RAG).",
+      "Containers with borders must have internal padding.",
+      "Mobile-first, but optimized heavily for wide desktop terminal views."
+    ]
+  },
+  "surface_strategy": {
+    "type": "Grid Borders + Terminal Look",
+    "rules": [
+      "Use pure flat solid backgrounds. No glassmorphism, no soft shadows.",
+      "Cards/Panels: Flat background, 1px subtle border (`border-zinc-800`), no radius (`rounded-none` or max `rounded-sm`).",
+      "Headers: Solid backgrounds with a hard 1px bottom border.",
+      "Active/Focus states: Glow effects with drop-shadows on borders, e.g., `drop-shadow-[0_0_8px_rgba(0,229,89,0.5)]`."
+    ]
+  },
+  "components": {
+    "buttons": "Square edges, ghost or outline styles preferred. Primary button uses solid green with black text. Include `data-testid`.",
+    "inputs": "Flat, transparent backgrounds with 1px border. Focus state turns border to accent green.",
+    "chat_bubbles": "No standard chat bubbles. Use CLI line format: user input prefixed with `>` and AI output prefixed with `AJAX:` or rendering markdown plainly.",
+    "status_cards": "Use for integrations (Gmail, WA, IG, X). Display pulsing dot (green = connected, gray/red = disconnected).",
+    "code_blocks": "Dark background (`#0A0A0A`), syntax highlighting, strictly monospaced. Top bar with language label and 'Copy' button."
+  },
+  "motion_interactions": {
+    "rules": [
+      "Animations should be mechanical and fast (0.15s ease), not bouncy.",
+      "Use typewriter effect or fast sequential loading for AI streaming responses.",
+      "Focus states MUST have high contrast (e.g., `focus:ring-1 focus:ring-green-500`)."
+    ]
+  },
+  "icons_assets": {
+    "libraries_to_install": [
+      "lucide-react",
+      "react-icons",
+      "framer-motion"
+    ],
+    "icon_strategy": "lucide-react for system icons, react-icons for integration brands (FaGithub, FaGoogle, FaInstagram, FaTwitter, FaWhatsapp)",
+    "image_urls": [
+      {
+        "category": "background_texture_optional",
+        "description": "Dark LED grid for subtle background overlay on empty states",
+        "url": "https://images.unsplash.com/photo-1554934991-78d3b7b533c6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxkYXJrJTIwbW9kZSUyMGFic3RyYWN0JTIwdGVjaG5vbG9neSUyMGdyaWR8ZW58MHx8fHwxNzc2OTE2OTQxfDA&ixlib=rb-4.1.0&q=85"
+      },
+      {
+        "category": "rag_reasoning_background",
+        "description": "Abstract black and amber network texture for the RAG reasoning visualization panel",
+        "url": "https://images.unsplash.com/photo-1734359052795-44d73f9b6167?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwzfHxkYXJrJTIwbW9kZSUyMGFic3RyYWN0JTIwdGVjaG5vbG9neSUyMGdyaWR8ZW58MHx8fHwxNzc2OTE2OTQxfDA&ixlib=rb-4.1.0&q=85"
+      }
+    ]
+  },
+  "testing_attributes": {
+    "rules": [
+      "All interactive elements MUST include a `data-testid` attribute. Format: kebab-case, role-based.",
+      "Examples: `data-testid=\"chat-input\"`, `data-testid=\"send-message-btn\"`, `data-testid=\"connect-gmail-btn\"`."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Initialize React with Vite, Tailwind CSS, and Shadcn UI (already present).",
+    "Install `react-icons` for specific brand icons (Gmail/Google, WhatsApp, Instagram, X/Twitter).",
+    "Implement a 3-pane layout for Desktop: Sidebar (History), Main Area (Chat/Code Sandbox), Right Panel (Integrations/RAG logs).",
+    "For the chat interface, avoid 'iMessage bubble' styles. Use a developer/CLI format with markdown rendering.",
+    "Implement a dedicated tab or split-pane in the main area for the Code Execution output.",
+    "Build 'Integration Status Cards' using Shadcn components, stripping default soft shadows and rounding. Use sharp corners and glowing green/red dots for status.",
+    "Ensure `JetBrains Mono` and `IBM Plex Sans` are imported via Google Fonts."
+  ]
+}
