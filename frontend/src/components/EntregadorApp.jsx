@@ -165,7 +165,7 @@ export function EntregadorApp() {
 
         if (data.type === "novo_pedido") {
           // Toca notificação sonora (se suportado)
-          try { new Audio("/notification.mp3").play(); } catch {}
+          new Audio("/notification.mp3").play().catch(() => {});
           setPedidoPendente(data.pedido);
         }
 
@@ -181,8 +181,8 @@ export function EntregadorApp() {
 
     ws.onclose = () => {
       setConectado(false);
-      // Reconecta após 3s
-      setTimeout(conectar, 3000);
+      // Reconecta após 1s (mais rápido)
+      setTimeout(conectar, 1000);
     };
 
     ws.onerror = () => ws.close();

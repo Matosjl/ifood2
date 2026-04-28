@@ -71,6 +71,21 @@ const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
   const [showDespachar, setShowDespachar] = useState(false);
   const [erroDespacho, setErroDespacho] = useState("");
 
+  // Poll entregadores online enquanto modal de despacho está aberto
+  // ← DEVE ficar ANTES de qualquer early return (regra de hooks do React)
+  useEffect(() => {
+    if (!showDespachar) return;
+    const fetchOnline = async () => {
+      try {
+        const r = await axios.get(${API}/entregador/online);
+        setEntregadoresOnline(r.data?.online || []);
+      } catch { setEntregadoresOnline([]); }
+    };
+    fetchOnline();
+    const interval = setInterval(fetchOnline, 2000);
+    return () => clearInterval(interval);
+  }, [showDespachar]);
+
   // ← hooks ANTES do early return
   if (!order) return null;
 
@@ -255,7 +270,7 @@ const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
                 </div>
               )}
               {entregadoresOnline.length === 0 && (
-                <span className="font-mono text-[10px] text-[#FF4444]">Nenhum entregador online. Digite o ID manualmente:</span>
+                <span className="font-mono text-[10px] text-[#FF4444]">Nenhum entregador online. Digite o ID manualmente (atualizando a cada 2s...):</span>
               )}
               <input
                 value={entregadorId}
