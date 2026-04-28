@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { RestaurantePage } from "@/components/RestaurantePage";
 import { OwnerLogin } from "@/components/OwnerLogin";
 import { OwnerDashboard } from "@/components/OwnerDashboard";
@@ -15,6 +15,26 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"
 const API = `${BACKEND_URL}/api`;
 const LM_STUDIO_URL = "http://127.0.0.1:1234";
 const LM_MODEL = "deepseek-r1-distill-qwen-1.5b";
+
+// ── Rota protegida: valida JWT localmente (sem chamada de rede) ──────────────
+const isTokenValid = () => {
+  const token = localStorage.getItem("owner_token");
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+};
+
+const ProtectedRoute = ({ children }) => {
+  if (!isTokenValid()) {
+    localStorage.removeItem("owner_token");
+    return <Navigate to="/owner/login" replace />;
+  }
+  return children;
+};
 
 // Main AJAX AI Agent Layout Component
 const AjaxAgent = () => {
@@ -210,7 +230,7 @@ function App() {
         <Route path="/" element={<AjaxAgent />} />
         <Route path="/restaurante/:id" element={<RestaurantePage />} />
         <Route path="/owner/login" element={<OwnerLogin />} />
-        <Route path="/owner" element={<OwnerDashboard />} />
+        <Route path="/owner" element={<ProtectedRoute><OwnerDashboard /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>
   );

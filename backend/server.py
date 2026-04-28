@@ -14,6 +14,8 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 
+import httpx
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -27,9 +29,15 @@ OWNER_PASSWORD = os.environ.get('OWNER_PASSWORD', 'troque_esta_senha_agora')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'ajax-jwt-secret')
 JWT_EXPIRE_HOURS = 8
 
+# Evolution API
+EVOLUTION_API_URL = os.environ.get('EVOLUTION_API_URL', '')
+EVOLUTION_API_KEY = os.environ.get('EVOLUTION_API_KEY', '')
+EVOLUTION_INSTANCE = os.environ.get('EVOLUTION_INSTANCE', '')
+
 # In-memory fallback + login attempts
 _memory_store: List[dict] = []
 _restaurants_store: List[dict] = []
+_estoque_store: List[dict] = []
 _mongo_available: Optional[bool] = None
 _login_attempts: dict = {}  # ip -> {count, blocked_until}
 _recovery_tokens: dict = {}  # token -> expires_at
@@ -292,6 +300,223 @@ async def owner_summary():
         "mrr": total_mrr,
         "total_earned": total_earned,
     }
+
+# ── WhatsApp ─────────────────────────────────────────────────────────────────
+
+class WhatsAppOrderItem(BaseModel):
+    name: str
+    qtd: int
+    salePrice: float
+
+class WhatsAppOrderRequest(BaseModel):
+    phone: str
+    cliente: str
+    tipo: str
+    itens: List[WhatsAppOrderItem]
+    total: float
+    pagamento: str
+    observacao: Optional[str] = ""
+    agendado: Optional[bool] = False
+    horarioAgendado: Optional[str] = ""
+    restaurante: Optional[str] = "Restaurante"
+
+@api_router.post("/whatsapp/send-order")
+async def send_whatsapp_order(body: WhatsAppOrderRequest):
+    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY or not EVOLUTION_INSTANCE:
+        raise HTTPException(status_code=503, detail="Evolution API não configurada. Verifique o .env.")
+
+    # Formata número: remove tudo que não é dígito, garante DDI 55
+    phone_clean = ''.join(filter(str.isdigit, body.phone))
+    if not phone_clean.startswith('55'):
+        phone_clean = '55' + phone_clean
+
+    # Monta mensagem
+    itens_txt = '\n'.join([f'  • {i.qtd}x {i.name} — R$ {(i.salePrice * i.qtd):.2f}' for i in body.itens])
+    tipo_txt = '🛵 Entrega' if body.tipo == 'entrega' else '🏪 Retirada'
+    agendado_txt = f'\n⏰ Agendado para: {body.horarioAgendado}' if body.agendado and body.horarioAgendado else ''
+    obs_txt = f'\n📝 Obs: {body.observacao}' if body.observacao else ''
+
+    mensagem = (
+        f'✅ *Pedido Confirmado!*\n'
+        f'━━━━━━━━━━━━━━━━━━━━\n'
+        f'🏠 *{body.restaurante}*\n\n'
+        f'👤 Olá, *{body.cliente}*!\n'
+        f'Seu pedido foi recebido com sucesso.\n\n'
+        f'🛒 *Itens:*\n{itens_txt}\n\n'
+        f'💳 Pagamento: *{body.pagamento}*\n'
+        f'📦 Tipo: *{tipo_txt}*{agendado_txt}{obs_txt}\n\n'
+        f'💰 *Total: R$ {body.total:.2f}*\n'
+        f'━━━━━━━━━━━━━━━━━━━━\n'
+        f'Obrigado pela preferência! 🙏'
+    )
+
+    url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+    payload = {"number": phone_clean, "text": mensagem}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client_http:
+            resp = await client_http.post(url, json=payload, headers=headers)
+            if resp.status_code not in (200, 201):
+                raise HTTPException(status_code=resp.status_code, detail=f"Evolution API erro: {resp.text}")
+            return {"ok": True, "message": "WhatsApp enviado com sucesso.", "to": phone_clean}
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout ao conectar com Evolution API.")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Erro de conexão com Evolution API: {str(e)}")
+
+# ── Estoque ──────────────────────────────────────────────────────────────────
+
+class EstoqueItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    restauranteId: str
+    categoria: str
+    nome: str
+    quantidade: float
+    precoCusto: float = 0.0
+    precoVenda: float
+    porKg: bool = False
+    foto: Optional[str] = None
+    criadoEm: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class EstoqueItemCreate(BaseModel):
+    restauranteId: str
+    categoria: str
+    nome: str
+    quantidade: float
+    precoCusto: float = 0.0
+    precoVenda: float
+    porKg: bool = False
+    foto: Optional[str] = None
+
+class EstoqueItemUpdate(BaseModel):
+    quantidade: Optional[float] = None
+    precoCusto: Optional[float] = None
+    precoVenda: Optional[float] = None
+
+@api_router.post("/estoque")
+async def criar_item_estoque(body: EstoqueItemCreate):
+    item = EstoqueItem(**body.model_dump())
+    doc = item.model_dump()
+    if await check_mongo():
+        await db.estoque.insert_one(doc)
+    else:
+        _estoque_store.append(doc)
+    return item
+
+@api_router.get("/estoque/{restaurante_id}")
+async def listar_estoque(restaurante_id: str):
+    if await check_mongo():
+        docs = await db.estoque.find({"restauranteId": restaurante_id}, {"_id": 0}).to_list(1000)
+        return docs
+    return [i for i in _estoque_store if i["restauranteId"] == restaurante_id]
+
+@api_router.patch("/estoque/{item_id}")
+async def atualizar_item_estoque(item_id: str, body: EstoqueItemUpdate):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+    if await check_mongo():
+        await db.estoque.update_one({"id": item_id}, {"$set": updates})
+    else:
+        for i in _estoque_store:
+            if i["id"] == item_id:
+                i.update(updates)
+                break
+    return {"ok": True}
+
+@api_router.delete("/estoque/{item_id}")
+async def deletar_item_estoque(item_id: str):
+    global _estoque_store
+    if await check_mongo():
+        await db.estoque.delete_one({"id": item_id})
+    else:
+        _estoque_store = [i for i in _estoque_store if i["id"] != item_id]
+    return {"ok": True}
+
+# ── Financeiro ───────────────────────────────────────────────────────────────
+
+class VendaItem(BaseModel):
+    name: str
+    qtd: int
+    salePrice: float
+    costPrice: float = 0.0
+
+class VendaCreate(BaseModel):
+    numeroPedido: str
+    cliente: str
+    itens: List[VendaItem]
+    total: float
+    pagamento: str
+    tipo: str
+    finalizadoEm: str
+    restauranteId: Optional[str] = ""
+
+class CaixaCreate(BaseModel):
+    restauranteId: str
+    fundo: float
+    abertoEm: str
+    status: str = "aberto"
+
+class CaixaFechar(BaseModel):
+    dinheiro: float = 0
+    pix: float = 0
+    cartao: float = 0
+    totalInformado: float = 0
+    totalVendido: float = 0
+    liquido: float = 0
+
+@api_router.post("/financeiro/venda")
+async def registrar_venda(body: VendaCreate):
+    doc = body.model_dump()
+    doc["registradoEm"] = datetime.now(timezone.utc).isoformat()
+    if await check_mongo():
+        await db.vendas.insert_one(doc)
+    return {"ok": True}
+
+@api_router.get("/financeiro/vendas/{restaurante_id}/hoje")
+async def vendas_hoje(restaurante_id: str):
+    hoje = datetime.now(timezone.utc).date().isoformat()
+    if await check_mongo():
+        docs = await db.vendas.find(
+            {"restauranteId": restaurante_id, "finalizadoEm": {"$regex": f"^{hoje}"}},
+            {"_id": 0}
+        ).to_list(1000)
+        return docs
+    return []
+
+@api_router.post("/financeiro/caixa")
+async def abrir_caixa(body: CaixaCreate):
+    doc = body.model_dump()
+    if await check_mongo():
+        # Fecha qualquer caixa aberto anterior
+        await db.caixas.update_many(
+            {"restauranteId": body.restauranteId, "status": "aberto"},
+            {"$set": {"status": "fechado", "fechadoEm": datetime.now(timezone.utc).isoformat()}}
+        )
+        await db.caixas.insert_one(doc)
+    return {"ok": True, "caixa": doc}
+
+@api_router.get("/financeiro/caixa/{restaurante_id}/hoje")
+async def caixa_hoje(restaurante_id: str):
+    if await check_mongo():
+        doc = await db.caixas.find_one(
+            {"restauranteId": restaurante_id, "status": "aberto"},
+            {"_id": 0}
+        )
+        if doc:
+            return doc
+    return {"status": "fechado"}
+
+@api_router.patch("/financeiro/caixa/{restaurante_id}/fechar")
+async def fechar_caixa(restaurante_id: str, body: CaixaFechar):
+    updates = {**body.model_dump(), "status": "fechado", "fechadoEm": datetime.now(timezone.utc).isoformat()}
+    if await check_mongo():
+        await db.caixas.update_one(
+            {"restauranteId": restaurante_id, "status": "aberto"},
+            {"$set": updates}
+        )
+    return {"ok": True}
 
 # ── General routes ────────────────────────────────────────────────────────────
 

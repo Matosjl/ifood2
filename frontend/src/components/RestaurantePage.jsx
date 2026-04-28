@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MenuItemForm } from "@/components/MenuItemForm";
+import axios from "axios";
 import { DigitalMenu } from "@/components/DigitalMenu";
+import { NovoPedido } from "@/components/NovoPedido";
+import { Estoque } from "@/components/Estoque";
+import { Financeiro } from "@/components/Financeiro";
+
+const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
 
 const STATUS_OPTIONS = ["TODOS", "PENDENTE", "ACEITO", "EM PREPARO", "ENTREGUE", "CANCELADO"];
 const STATUS_COLORS = {
@@ -11,40 +16,238 @@ const STATUS_COLORS = {
   ENTREGUE: "#00E559",
   CANCELADO: "#FF4444",
 };
-
 const PAYMENT_ICONS = { PIX: "◈", DINHEIRO: "₿", CARTÃO: "▣", "VALE REFEIÇÃO": "◉" };
 
 const MOCK_ORDERS = [
-  { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "ENTREGUE", type: "ENTREGA", payment: "PIX", time: "14:32" },
-  { id: "#1043", client: "Maria L.", items: ["Pizza Margherita"], total: 54.8, status: "EM PREPARO", type: "ENTREGA", payment: "CARTÃO", time: "14:45" },
-  { id: "#1044", client: "Carlos M.", items: ["X-Bacon Duplo"], total: 28.9, status: "PENDENTE", type: "RETIRADA", payment: "DINHEIRO", time: "14:50" },
-  { id: "#1045", client: "Ana P.", items: ["Suco de Laranja", "Pizza Margherita"], total: 59.8, status: "ACEITO", type: "ENTREGA", payment: "PIX", time: "14:55" },
-  { id: "#1046", client: "Pedro R.", items: ["X-Burguer Especial"], total: 28.9, status: "CANCELADO", type: "RETIRADA", payment: "CARTÃO", time: "15:00" },
+  { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "ENTREGUE", type: "ENTREGA", payment: "PIX", time: "14:32", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 99999-0001", endereco: { rua: "Rua das Flores", numero: "123", cep: "01310-100", referencia: "Próximo ao mercado" } },
+  { id: "#1043", client: "Maria L.", items: ["Pizza Margherita"], total: 54.8, status: "EM PREPARO", type: "ENTREGA", payment: "CARTÃO", time: "14:45", agendado: true, horarioAgendado: new Date(Date.now() + 25 * 60000).toISOString(), observacao: "Sem cebola", telefone: "(11) 98888-0002", endereco: { rua: "Av. Paulista", numero: "900", cep: "01310-200", referencia: "" } },
+  { id: "#1044", client: "Carlos M.", items: ["X-Bacon Duplo"], total: 28.9, status: "PENDENTE", type: "RETIRADA", payment: "DINHEIRO", time: "14:50", agendado: false, horarioAgendado: "", observacao: "Troco para R$50", telefone: "(11) 97777-0003", endereco: null },
+  { id: "#1045", client: "Ana P.", items: ["Suco de Laranja", "Pizza Margherita"], total: 59.8, status: "ACEITO", type: "ENTREGA", payment: "PIX", time: "14:55", agendado: true, horarioAgendado: new Date(Date.now() + 8 * 60000).toISOString(), observacao: "", telefone: "(11) 96666-0004", endereco: { rua: "Rua Augusta", numero: "500", cep: "01305-000", referencia: "Portão azul" } },
+  { id: "#1046", client: "Pedro R.", items: ["X-Burguer Especial"], total: 28.9, status: "CANCELADO", type: "RETIRADA", payment: "CARTÃO", time: "15:00", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 95555-0005", endereco: null },
 ];
 
 const TABS = [
   { id: "pedidos", label: "PEDIDOS" },
-  { id: "add-item", label: "ADICIONAR ITEM" },
+  { id: "novo-pedido", label: "NOVO PEDIDO" },
   { id: "cardapio", label: "CARDÁPIO DIGITAL" },
+  { id: "estoque", label: "ESTOQUE" },
+  { id: "financeiro", label: "💰 FINANCEIRO" },
 ];
 
-// ── View: Cards ──────────────────────────────────────────────────────────────
-const CardView = ({ orders }) => (
+// ── Countdown ─────────────────────────────────────────────────────────────────
+const Countdown = ({ horario }) => {
+  const [diff, setDiff] = useState(0);
+
+  useEffect(() => {
+    const calc = () => setDiff(new Date(horario) - Date.now());
+    calc();
+    const t = setInterval(calc, 1000);
+    return () => clearInterval(t);
+  }, [horario]);
+
+  if (diff <= 0) return <span className="font-mono text-xs text-[#FF4444]">⚠ ATRASADO</span>;
+
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  const color = diff < 5 * 60000 ? "#FF4444" : diff < 15 * 60000 ? "#FFB800" : "#00E559";
+
+  return (
+    <span className="font-mono text-xs font-bold" style={{ color }}>
+      ⏱ {h > 0 ? `${h}h ` : ""}{String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}
+    </span>
+  );
+};
+
+// ── Modal de Detalhes ─────────────────────────────────────────────────────────
+const OrderModal = ({ order, onClose, onStatusChange }) => {
+  const [erroPagamento, setErroPagamento] = useState(false);
+  const [showPaymentSelect, setShowPaymentSelect] = useState(false);
+  const [pagamentoTemp, setPagamentoTemp] = useState("");
+  if (!order) return null;
+
+  const PAYMENT_METHODS = ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Vale Refeição"];
+
+  const nextStatus = {
+    PENDENTE: "ACEITO",
+    ACEITO: "EM PREPARO",
+    "EM PREPARO": "ENTREGUE",
+  };
+
+  // Ao tentar avançar para ENTREGUE, verifica pagamento
+  const handleAvancar = (id, novoStatus) => {
+    if (novoStatus === "ENTREGUE") {
+      const pg = (order.payment || "").trim();
+      const semPagamento = !pg || pg === "" || pg === "NÃO REGISTRADO" || pg === "NAO REGISTRADO";
+      if (semPagamento) {
+        setErroPagamento(true);
+        setShowPaymentSelect(true);
+        return;
+      }
+    }
+    setErroPagamento(false);
+    onStatusChange(id, novoStatus);
+  };
+
+  const confirmarPagamentoEFinalizar = () => {
+    if (!pagamentoTemp) return;
+    onStatusChange(order.id, "ENTREGUE", pagamentoTemp);
+    setShowPaymentSelect(false);
+    setErroPagamento(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-[#0A0A0A] border border-[#27272A] w-full max-w-lg flex flex-col gap-0 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#27272A]"
+          style={{ borderLeftWidth: 3, borderLeftColor: STATUS_COLORS[order.status] || "#27272A" }}>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-sm text-[#EDEDED] font-bold">{order.id}</span>
+            <span className="font-mono text-xs px-2 py-0.5 border"
+              style={{ color: STATUS_COLORS[order.status], borderColor: STATUS_COLORS[order.status] }}>
+              {order.status}
+            </span>
+            <span className="font-mono text-xs text-[#71717A]">{order.type}</span>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs text-[#71717A] hover:text-[#EDEDED]">✕</button>
+        </div>
+
+        <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh]">
+          {/* Agendamento countdown */}
+          {order.agendado && order.horarioAgendado && (
+            <div className="bg-[#111] border border-[#27272A] px-3 py-2 flex items-center justify-between">
+              <span className="font-mono text-xs text-[#71717A]">AGENDADO PARA {new Date(order.horarioAgendado).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+              <Countdown horario={order.horarioAgendado} />
+            </div>
+          )}
+
+          {/* Cliente */}
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">CLIENTE</span>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-sm text-[#EDEDED]">{order.client}</span>
+              {order.telefone && (
+                <span className="font-mono text-xs text-[#A1A1AA]">📞 {order.telefone}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Itens */}
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">ITENS</span>
+            <div className="flex flex-col gap-1">
+              {order.items.map((item, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[#00E559] font-mono text-xs">›</span>
+                  <span className="font-mono text-xs text-[#EDEDED]">{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Endereço */}
+          {order.endereco && (
+            <div className="flex flex-col gap-2">
+              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">ENDEREÇO DE ENTREGA</span>
+              <div className="bg-[#111] border border-[#27272A] p-3 flex flex-col gap-1">
+                <span className="font-mono text-xs text-[#EDEDED]">{order.endereco.rua}, {order.endereco.numero}</span>
+                {order.endereco.cep && <span className="font-mono text-xs text-[#71717A]">CEP: {order.endereco.cep}</span>}
+                {order.endereco.referencia && <span className="font-mono text-xs text-[#A1A1AA]">Ref: {order.endereco.referencia}</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Observação */}
+          {order.observacao && (
+            <div className="flex flex-col gap-1">
+              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">OBSERVAÇÃO</span>
+              <span className="font-mono text-xs text-[#FFB800] bg-[#FFB800]/5 border border-[#FFB800]/20 px-3 py-2">{order.observacao}</span>
+            </div>
+          )}
+
+          {/* Pagamento + Total */}
+          <div className="flex items-center justify-between border-t border-[#27272A] pt-3">
+            <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[order.payment]} {order.payment}</span>
+            <span className="font-mono text-lg text-[#00E559] font-bold">R$ {order.total.toFixed(2).replace(".", ",")}</span>
+          </div>
+
+          {/* Erro de pagamento */}
+          {erroPagamento && (
+            <div className="bg-[#FF4444]/10 border border-[#FF4444] px-3 py-2 font-mono text-xs text-[#FF4444]">
+              ⚠ Pedido sem pagamento registrado. Selecione a forma de pagamento para finalizar.
+            </div>
+          )}
+
+          {/* Seleção de pagamento ao finalizar */}
+          {showPaymentSelect && (
+            <div className="flex flex-col gap-2">
+              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">FORMA DE PAGAMENTO</span>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_METHODS.map(m => (
+                  <button key={m} onClick={() => setPagamentoTemp(m)}
+                    className={`py-2 border font-mono text-xs transition-colors ${
+                      pagamentoTemp === m ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10" : "border-[#27272A] text-[#71717A] hover:border-[#00E559] hover:text-[#00E559]"
+                    }`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={confirmarPagamentoEFinalizar}
+                disabled={!pagamentoTemp}
+                className="w-full py-2 bg-[#00E559] text-black font-mono text-xs font-bold disabled:opacity-40 hover:bg-[#00c44d] transition-colors"
+              >
+                ✓ CONFIRMAR E FINALIZAR
+              </button>
+            </div>
+          )}
+
+          {/* Avançar status */}
+          {nextStatus[order.status] && !showPaymentSelect && (
+            <button
+              onClick={() => handleAvancar(order.id, nextStatus[order.status])}
+              className="w-full py-2 font-mono text-xs font-bold text-black transition-colors"
+              style={{ backgroundColor: STATUS_COLORS[nextStatus[order.status]] }}
+            >
+              AVANÇAR → {nextStatus[order.status]}
+            </button>
+          )}
+          {order.status === "PENDENTE" && (
+            <button
+              onClick={() => onStatusChange(order.id, "CANCELADO")}
+              className="w-full py-2 font-mono text-xs font-bold border border-[#FF4444] text-[#FF4444] hover:bg-[#FF4444]/10 transition-colors"
+            >
+              CANCELAR PEDIDO
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Views ─────────────────────────────────────────────────────────────────────
+const CardView = ({ orders, onSelect }) => (
   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
     {orders.map((o) => (
-      <div key={o.id} className="bg-[#0A0A0A] border border-[#27272A] p-4 flex flex-col gap-2 hover:border-[#3F3F46] transition-colors">
+      <div key={o.id} onClick={() => onSelect(o)}
+        className="bg-[#0A0A0A] border border-[#27272A] p-4 flex flex-col gap-2 hover:border-[#3F3F46] cursor-pointer transition-colors">
         <div className="flex justify-between items-center">
           <span className="font-mono text-xs text-[#71717A]">{o.id}</span>
-          <span className="font-mono text-xs px-2 py-0.5 border" style={{ color: STATUS_COLORS[o.status] || "#71717A", borderColor: STATUS_COLORS[o.status] || "#27272A" }}>{o.status}</span>
+          <span className="font-mono text-xs px-2 py-0.5 border"
+            style={{ color: STATUS_COLORS[o.status] || "#71717A", borderColor: STATUS_COLORS[o.status] || "#27272A" }}>
+            {o.status}
+          </span>
         </div>
         <span className="font-mono text-sm text-[#EDEDED]">{o.client}</span>
         <div className="font-mono text-xs text-[#71717A]">{o.items.join(", ")}</div>
-        <div className="flex justify-between items-center mt-1">
-          <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[o.payment]} {o.payment}</span>
-          <span className="font-mono text-xs px-2 py-0.5 bg-[#1A1A1A] text-[#A1A1AA]">{o.type}</span>
-        </div>
+        {o.agendado && o.horarioAgendado && <Countdown horario={o.horarioAgendado} />}
         <div className="flex justify-between items-center border-t border-[#27272A] pt-2 mt-1">
-          <span className="font-mono text-xs text-[#71717A]">{o.time}</span>
+          <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[o.payment]} {o.payment}</span>
           <span className="font-mono text-sm text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
         </div>
       </div>
@@ -52,20 +255,19 @@ const CardView = ({ orders }) => (
   </div>
 );
 
-// ── View: Lista ───────────────────────────────────────────────────────────────
-const ListView = ({ orders }) => (
+const ListView = ({ orders, onSelect }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[600px]">
       <thead>
         <tr className="border-b border-[#27272A]">
-          {["#", "CLIENTE", "ITENS", "PAGAMENTO", "TIPO", "TOTAL", "STATUS"].map((h) => (
+          {["#", "CLIENTE", "ITENS", "PAGAMENTO", "TIPO", "TOTAL", "STATUS", "TEMPO"].map((h) => (
             <th key={h} className="px-4 py-2 text-left font-mono text-xs text-[#71717A]">{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {orders.map((o) => (
-          <tr key={o.id} className="border-b border-[#27272A] hover:bg-[#111]">
+          <tr key={o.id} onClick={() => onSelect(o)} className="border-b border-[#27272A] hover:bg-[#111] cursor-pointer">
             <td className="px-4 py-3 font-mono text-xs text-[#71717A]">{o.id}</td>
             <td className="px-4 py-3 font-mono text-sm text-[#EDEDED]">{o.client}</td>
             <td className="px-4 py-3 font-mono text-xs text-[#71717A]">{o.items.join(", ")}</td>
@@ -73,6 +275,7 @@ const ListView = ({ orders }) => (
             <td className="px-4 py-3 font-mono text-xs text-[#A1A1AA]">{o.type}</td>
             <td className="px-4 py-3 font-mono text-sm text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</td>
             <td className="px-4 py-3 font-mono text-xs" style={{ color: STATUS_COLORS[o.status] || "#71717A" }}>{o.status}</td>
+            <td className="px-4 py-3">{o.agendado && o.horarioAgendado ? <Countdown horario={o.horarioAgendado} /> : <span className="font-mono text-xs text-[#3F3F46]">—</span>}</td>
           </tr>
         ))}
       </tbody>
@@ -80,8 +283,7 @@ const ListView = ({ orders }) => (
   </div>
 );
 
-// ── View: Kanban ──────────────────────────────────────────────────────────────
-const KanbanView = ({ orders }) => {
+const KanbanView = ({ orders, onSelect }) => {
   const cols = STATUS_OPTIONS.filter((s) => s !== "TODOS");
   return (
     <div className="flex gap-3 p-4 overflow-x-auto min-h-[300px]">
@@ -89,17 +291,20 @@ const KanbanView = ({ orders }) => {
         const colOrders = orders.filter((o) => o.status === col);
         return (
           <div key={col} className="min-w-[200px] flex flex-col gap-2">
-            <div className="font-mono text-xs px-2 py-1 border-b" style={{ color: STATUS_COLORS[col], borderColor: STATUS_COLORS[col] }}>
+            <div className="font-mono text-xs px-2 py-1 border-b"
+              style={{ color: STATUS_COLORS[col], borderColor: STATUS_COLORS[col] }}>
               {col} <span className="text-[#71717A]">({colOrders.length})</span>
             </div>
             {colOrders.map((o) => (
-              <div key={o.id} className="bg-[#0A0A0A] border border-[#27272A] p-3 flex flex-col gap-1">
+              <div key={o.id} onClick={() => onSelect(o)}
+                className="bg-[#0A0A0A] border border-[#27272A] p-3 flex flex-col gap-1 cursor-pointer hover:border-[#3F3F46] transition-colors">
                 <div className="flex justify-between">
                   <span className="font-mono text-xs text-[#71717A]">{o.id}</span>
                   <span className="font-mono text-xs text-[#A1A1AA]">{o.time}</span>
                 </div>
                 <span className="font-mono text-sm text-[#EDEDED]">{o.client}</span>
                 <span className="font-mono text-xs text-[#71717A]">{o.items[0]}{o.items.length > 1 ? ` +${o.items.length - 1}` : ""}</span>
+                {o.agendado && o.horarioAgendado && <Countdown horario={o.horarioAgendado} />}
                 <div className="flex justify-between items-center mt-1">
                   <span className="font-mono text-xs text-[#A1A1AA]">{o.type}</span>
                   <span className="font-mono text-xs text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
@@ -114,15 +319,16 @@ const KanbanView = ({ orders }) => {
   );
 };
 
-// ── View: Compacto ────────────────────────────────────────────────────────────
-const CompactView = ({ orders }) => (
+const CompactView = ({ orders, onSelect }) => (
   <div className="flex flex-col divide-y divide-[#27272A]">
     {orders.map((o) => (
-      <div key={o.id} className="flex items-center gap-3 px-4 py-2 hover:bg-[#111]">
+      <div key={o.id} onClick={() => onSelect(o)}
+        className="flex items-center gap-3 px-4 py-2 hover:bg-[#111] cursor-pointer">
         <span className="font-mono text-xs text-[#71717A] w-14">{o.id}</span>
         <span className="font-mono text-sm text-[#EDEDED] flex-1 truncate">{o.client}</span>
-        <span className="font-mono text-xs text-[#A1A1AA] hidden sm:block">{PAYMENT_ICONS[o.payment]} {o.payment}</span>
-        <span className="font-mono text-xs text-[#A1A1AA] hidden sm:block">{o.type}</span>
+        {o.agendado && o.horarioAgendado
+          ? <Countdown horario={o.horarioAgendado} />
+          : <span className="font-mono text-xs text-[#A1A1AA] hidden sm:block">{o.time}</span>}
         <span className="font-mono text-xs text-[#00E559] w-20 text-right">R$ {o.total.toFixed(2).replace(".", ",")}</span>
         <span className="font-mono text-xs w-20 text-right" style={{ color: STATUS_COLORS[o.status] || "#71717A" }}>{o.status}</span>
       </div>
@@ -131,12 +337,13 @@ const CompactView = ({ orders }) => (
 );
 
 // ── Pedidos Tab ───────────────────────────────────────────────────────────────
-const PedidosTab = () => {
+const PedidosTab = ({ orders, onStatusChange }) => {
   const [statusFilter, setStatusFilter] = useState("TODOS");
   const [typeFilter, setTypeFilter] = useState("TODOS");
   const [viewMode, setViewMode] = useState("cards");
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
-  const filtered = MOCK_ORDERS.filter(
+  const filtered = orders.filter(
     (o) =>
       (statusFilter === "TODOS" || o.status === statusFilter) &&
       (typeFilter === "TODOS" || o.type === typeFilter)
@@ -149,84 +356,74 @@ const PedidosTab = () => {
     { id: "compacto", label: "≡ COMPACTO" },
   ];
 
+  const handleStatusChange = (id, newStatus, novoPagamento) => {
+    onStatusChange(id, newStatus, novoPagamento);
+    setSelectedOrder((prev) => prev ? { ...prev, status: newStatus, ...(novoPagamento ? { payment: novoPagamento } : {}) } : null);
+    if (newStatus === "ENTREGUE" || newStatus === "CANCELADO") setSelectedOrder(null);
+  };
+
   return (
-    <div className="flex flex-col gap-0">
-      {/* Filters bar */}
-      <div className="flex flex-wrap gap-2 px-4 py-3 border-b border-[#27272A] bg-[#0A0A0A]">
-        {/* Status filter */}
-        <div className="flex flex-wrap gap-1">
-          {STATUS_OPTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className="font-mono text-xs px-2 py-1 border transition-colors"
-              style={{
-                borderColor: statusFilter === s ? (STATUS_COLORS[s] || "#00E559") : "#27272A",
-                color: statusFilter === s ? (STATUS_COLORS[s] || "#00E559") : "#71717A",
-                background: statusFilter === s ? "rgba(0,0,0,0.4)" : "transparent",
-              }}
-            >
-              {s}
-            </button>
-          ))}
+    <>
+      <div className="flex flex-col gap-0">
+        <div className="flex flex-wrap gap-2 px-4 py-3 border-b border-[#27272A] bg-[#0A0A0A]">
+          <div className="flex flex-wrap gap-1">
+            {STATUS_OPTIONS.map((s) => (
+              <button key={s} onClick={() => setStatusFilter(s)}
+                className="font-mono text-xs px-2 py-1 border transition-colors"
+                style={{
+                  borderColor: statusFilter === s ? (STATUS_COLORS[s] || "#00E559") : "#27272A",
+                  color: statusFilter === s ? (STATUS_COLORS[s] || "#00E559") : "#71717A",
+                  background: statusFilter === s ? "rgba(0,0,0,0.4)" : "transparent",
+                }}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="w-px bg-[#27272A] hidden sm:block" />
+          <div className="flex gap-1">
+            {["TODOS", "ENTREGA", "RETIRADA"].map((t) => (
+              <button key={t} onClick={() => setTypeFilter(t)}
+                className="font-mono text-xs px-2 py-1 border transition-colors"
+                style={{ borderColor: typeFilter === t ? "#00BFFF" : "#27272A", color: typeFilter === t ? "#00BFFF" : "#71717A" }}>
+                {t === "ENTREGA" ? "🛵 " : t === "RETIRADA" ? "🏪 " : ""}{t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 ml-auto">
+            {views.map((v) => (
+              <button key={v.id} onClick={() => setViewMode(v.id)}
+                className="font-mono text-xs px-2 py-1 border transition-colors"
+                style={{ borderColor: viewMode === v.id ? "#00E559" : "#27272A", color: viewMode === v.id ? "#00E559" : "#71717A" }}>
+                {v.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="w-px bg-[#27272A] hidden sm:block" />
-
-        {/* Delivery type filter */}
-        <div className="flex gap-1">
-          {["TODOS", "ENTREGA", "RETIRADA"].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              className="font-mono text-xs px-2 py-1 border transition-colors"
-              style={{
-                borderColor: typeFilter === t ? "#00BFFF" : "#27272A",
-                color: typeFilter === t ? "#00BFFF" : "#71717A",
-              }}
-            >
-              {t === "ENTREGA" ? "🛵 " : t === "RETIRADA" ? "🏪 " : ""}{t}
-            </button>
-          ))}
+        <div className="px-4 py-2 font-mono text-xs text-[#71717A] border-b border-[#27272A]">
+          {filtered.length} pedido{filtered.length !== 1 ? "s" : ""}
+          {statusFilter !== "TODOS" && ` · ${statusFilter}`}
+          {typeFilter !== "TODOS" && ` · ${typeFilter}`}
         </div>
 
-        {/* View mode */}
-        <div className="flex gap-1 ml-auto">
-          {views.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setViewMode(v.id)}
-              className="font-mono text-xs px-2 py-1 border transition-colors"
-              style={{
-                borderColor: viewMode === v.id ? "#00E559" : "#27272A",
-                color: viewMode === v.id ? "#00E559" : "#71717A",
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 font-mono text-xs text-[#3F3F46]">NENHUM PEDIDO ENCONTRADO</div>
+        ) : (
+          <>
+            {viewMode === "cards" && <CardView orders={filtered} onSelect={setSelectedOrder} />}
+            {viewMode === "lista" && <ListView orders={filtered} onSelect={setSelectedOrder} />}
+            {viewMode === "kanban" && <KanbanView orders={filtered} onSelect={setSelectedOrder} />}
+            {viewMode === "compacto" && <CompactView orders={filtered} onSelect={setSelectedOrder} />}
+          </>
+        )}
       </div>
 
-      {/* Count */}
-      <div className="px-4 py-2 font-mono text-xs text-[#71717A] border-b border-[#27272A]">
-        {filtered.length} pedido{filtered.length !== 1 ? "s" : ""}
-        {statusFilter !== "TODOS" && ` · ${statusFilter}`}
-        {typeFilter !== "TODOS" && ` · ${typeFilter}`}
-      </div>
-
-      {/* Content */}
-      {filtered.length === 0 ? (
-        <div className="text-center py-16 font-mono text-xs text-[#3F3F46]">NENHUM PEDIDO ENCONTRADO</div>
-      ) : (
-        <>
-          {viewMode === "cards" && <CardView orders={filtered} />}
-          {viewMode === "lista" && <ListView orders={filtered} />}
-          {viewMode === "kanban" && <KanbanView orders={filtered} />}
-          {viewMode === "compacto" && <CompactView orders={filtered} />}
-        </>
-      )}
-    </div>
+      <OrderModal
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+        onStatusChange={handleStatusChange}
+      />
+    </>
   );
 };
 
@@ -248,13 +445,89 @@ export function RestaurantePage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pedidos");
   const [menuItems, setMenuItems] = useState([]);
+  const [orders, setOrders] = useState(MOCK_ORDERS);
+  const [estoqueItens, setEstoqueItens] = useState([]);
+  const [vendasFinanceiro, setVendasFinanceiro] = useState([]);
 
   const restaurantName = `Restaurante ${id || ""}`;
-  const handleAddItem = (item) => setMenuItems((prev) => [item, ...prev]);
+
+  // Ao adicionar item no estoque: atualiza cardápio e redireciona
+  const handleItemAdicionado = (item, categoria) => {
+    const itemCardapio = {
+      id: item.id,
+      name: item.nome,
+      description: "",
+      category: categoria,
+      salePrice: item.precoVenda,
+      costPrice: item.precoCusto,
+      photo: item.foto || null,
+    };
+    setMenuItems(prev => [...prev, itemCardapio]);
+    setActiveTab("cardapio");
+  };
+
+  // Diminui estoque ao criar pedido
+  const diminuirEstoque = (itensPedido) => {
+    setEstoqueItens(prev => prev.map(item => {
+      const vendido = itensPedido.find(i => i.id === item.id || i.name === item.nome || i.name === item.name);
+      if (!vendido) return item;
+      const novaQtd = Math.max(0, (item.quantidade ?? item.stock ?? 0) - vendido.qtd);
+      return { ...item, quantidade: novaQtd };
+    }));
+  };
+
+  const handleNovoPedido = (pedido) => {
+    const novo = {
+      id: `#${1047 + orders.length}`,
+      client: pedido.cliente,
+      items: pedido.itens.map((i) => i.name),
+      itensCompletos: pedido.itens, // guarda itens completos para financeiro
+      total: pedido.total,
+      status: "PENDENTE",
+      type: pedido.tipo === "entrega" ? "ENTREGA" : "RETIRADA",
+      payment: pedido.pagamento || "",
+      pago: pedido.pago || false,
+      time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+      agendado: pedido.agendado,
+      horarioAgendado: pedido.horarioAgendado || "",
+      observacao: pedido.observacao || "",
+      telefone: pedido.telefone || "",
+      endereco: pedido.endereco,
+    };
+    setOrders((prev) => [novo, ...prev]);
+    diminuirEstoque(pedido.itens);
+    setActiveTab("pedidos");
+  };
+
+  // Ao finalizar (ENTREGUE), envia para financeiro
+  const registrarVendaFinanceiro = (order, pagamento) => {
+    const venda = {
+      numeroPedido: order.id,
+      cliente: order.client,
+      itens: order.itensCompletos || order.items.map(name => ({ name, qtd: 1, salePrice: 0, costPrice: 0 })),
+      total: order.total,
+      pagamento: pagamento || order.payment,
+      tipo: order.type,
+      finalizadoEm: new Date().toISOString(),
+      restauranteId: id || "",
+    };
+    setVendasFinanceiro(prev => [...prev, venda]);
+    // Persiste no backend
+    axios.post(`${API}/financeiro/venda`, venda).catch(() => {});
+  };
+
+  const handleStatusChange = (orderId, newStatus, novoPagamento) => {
+    setOrders((prev) => prev.map((o) => {
+      if (o.id !== orderId) return o;
+      const updated = { ...o, status: newStatus };
+      if (novoPagamento) updated.payment = novoPagamento;
+      if (newStatus === "ENTREGUE") registrarVendaFinanceiro(updated, novoPagamento);
+      return updated;
+    }));
+  };
 
   return (
     <div className="min-h-screen w-full bg-black text-[#EDEDED] flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#27272A]">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate("/")} className="font-mono text-xs text-[#71717A] hover:text-[#EDEDED] transition-colors">
@@ -265,28 +538,23 @@ export function RestaurantePage() {
         <span className="font-mono text-xs text-[#71717A] hidden sm:block">PAINEL DO RESTAURANTE</span>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-[#27272A] overflow-x-auto">
         {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             className={`px-5 py-2 font-mono text-xs border-b-2 whitespace-nowrap transition-colors ${
-              activeTab === tab.id
-                ? "border-[#00E559] text-[#00E559]"
-                : "border-transparent text-[#71717A] hover:text-[#A1A1AA]"
-            }`}
-          >
+              activeTab === tab.id ? "border-[#00E559] text-[#00E559]" : "border-transparent text-[#71717A] hover:text-[#A1A1AA]"
+            }`}>
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === "pedidos" && <PedidosTab />}
-        {activeTab === "add-item" && <MenuItemForm onAdd={handleAddItem} />}
-        {activeTab === "cardapio" && <DigitalMenu items={menuItems} restaurantName={restaurantName} />}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} /></div>}
+        {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
+        {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
+        {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
+        {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
       </div>
 
       <Footer />

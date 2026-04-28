@@ -314,11 +314,6 @@ export function OwnerDashboard() {
   const [showChat, setShowChat] = useState(false);
 
   const fetchAll = async () => {
-    const token = localStorage.getItem("owner_token");
-    if (!token) {
-      navigate("/owner/login");
-      return;
-    }
     setLoading(true);
     setError("");
     try {

@@ -31,17 +31,27 @@ export function DigitalMenu({ items = MOCK_ITEMS, restaurantName = "Restaurante"
             {categoryItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-[#0A0A0A] border border-[#27272A] p-4 flex justify-between items-start hover:border-[#3F3F46] transition-colors"
+                className="bg-[#0A0A0A] border border-[#27272A] flex hover:border-[#3F3F46] transition-colors overflow-hidden"
               >
-                <div className="flex flex-col gap-1 flex-1 mr-4">
-                  <span className="font-mono text-sm text-[#EDEDED]">{item.name}</span>
-                  {item.description && (
-                    <span className="font-mono text-xs text-[#71717A] leading-relaxed">{item.description}</span>
-                  )}
+                {/* Foto */}
+                {item.photo && (
+                  <img
+                    src={item.photo}
+                    alt={item.name}
+                    className="w-20 h-20 object-cover shrink-0"
+                  />
+                )}
+                <div className="flex justify-between items-start p-4 flex-1 min-w-0">
+                  <div className="flex flex-col gap-1 flex-1 mr-4">
+                    <span className="font-mono text-sm text-[#EDEDED]">{item.name}</span>
+                    {item.description && (
+                      <span className="font-mono text-xs text-[#71717A] leading-relaxed">{item.description}</span>
+                    )}
+                  </div>
+                  <span className="font-mono text-sm text-[#00E559] whitespace-nowrap">
+                    R$ {Number(item.salePrice).toFixed(2).replace(".", ",")}
+                  </span>
                 </div>
-                <span className="font-mono text-sm text-[#00E559] whitespace-nowrap">
-                  R$ {item.salePrice.toFixed(2).replace(".", ",")}
-                </span>
               </div>
             ))}
           </div>
