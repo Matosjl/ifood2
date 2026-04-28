@@ -8,18 +8,19 @@ import { Financeiro } from "@/components/Financeiro";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
 
-const STATUS_OPTIONS = ["TODOS", "PENDENTE", "ACEITO", "EM PREPARO", "ENTREGUE", "CANCELADO"];
+const STATUS_OPTIONS = ["TODOS", "PENDENTE", "ACEITO", "EM PREPARO", "SAIU PARA ENTREGA", "FINALIZADO", "CANCELADO"];
 const STATUS_COLORS = {
   PENDENTE: "#FFB800",
   ACEITO: "#00BFFF",
   "EM PREPARO": "#FF8C00",
-  ENTREGUE: "#00E559",
+  "SAIU PARA ENTREGA": "#A855F7",
+  FINALIZADO: "#00E559",
   CANCELADO: "#FF4444",
 };
 const PAYMENT_ICONS = { PIX: "◈", DINHEIRO: "₿", CARTÃO: "▣", "VALE REFEIÇÃO": "◉" };
 
 const MOCK_ORDERS = [
-  { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "ENTREGUE", type: "ENTREGA", payment: "PIX", time: "14:32", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 99999-0001", endereco: { rua: "Rua das Flores", numero: "123", cep: "01310-100", referencia: "Próximo ao mercado" } },
+  { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "FINALIZADO", type: "ENTREGA", payment: "PIX", time: "14:32", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 99999-0001", endereco: { rua: "Rua das Flores", numero: "123", cep: "01310-100", referencia: "Próximo ao mercado" } },
   { id: "#1043", client: "Maria L.", items: ["Pizza Margherita"], total: 54.8, status: "EM PREPARO", type: "ENTREGA", payment: "CARTÃO", time: "14:45", agendado: true, horarioAgendado: new Date(Date.now() + 25 * 60000).toISOString(), observacao: "Sem cebola", telefone: "(11) 98888-0002", endereco: { rua: "Av. Paulista", numero: "900", cep: "01310-200", referencia: "" } },
   { id: "#1044", client: "Carlos M.", items: ["X-Bacon Duplo"], total: 28.9, status: "PENDENTE", type: "RETIRADA", payment: "DINHEIRO", time: "14:50", agendado: false, horarioAgendado: "", observacao: "Troco para R$50", telefone: "(11) 97777-0003", endereco: null },
   { id: "#1045", client: "Ana P.", items: ["Suco de Laranja", "Pizza Margherita"], total: 59.8, status: "ACEITO", type: "ENTREGA", payment: "PIX", time: "14:55", agendado: true, horarioAgendado: new Date(Date.now() + 8 * 60000).toISOString(), observacao: "", telefone: "(11) 96666-0004", endereco: { rua: "Rua Augusta", numero: "500", cep: "01305-000", referencia: "Portão azul" } },
@@ -60,38 +61,69 @@ const Countdown = ({ horario }) => {
 };
 
 // ── Modal de Detalhes ─────────────────────────────────────────────────────────
-const OrderModal = ({ order, onClose, onStatusChange }) => {
+const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
   const [erroPagamento, setErroPagamento] = useState(false);
   const [showPaymentSelect, setShowPaymentSelect] = useState(false);
   const [pagamentoTemp, setPagamentoTemp] = useState("");
+  const [despachando, setDespachando] = useState(false);
+  const [entregadorId, setEntregadorId] = useState("");
+  const [entregadoresOnline, setEntregadoresOnline] = useState([]);
+  const [showDespachar, setShowDespachar] = useState(false);
+  const [erroDespacho, setErroDespacho] = useState("");
+
+  // ← hooks ANTES do early return
   if (!order) return null;
+
+  const confirmarDespacho = async () => {
+    if (!entregadorId.trim()) return;
+    setDespachando(true);
+    setErroDespacho("");
+    try {
+      await onDespachar(order, entregadorId.trim());
+    } catch {
+      // falha na API do entregador não bloqueia o avanço do status
+    }
+    setShowDespachar(false);
+    setEntregadorId("");
+    onStatusChange(order.id, "SAIU PARA ENTREGA");
+    setDespachando(false);
+  };
 
   const PAYMENT_METHODS = ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Vale Refeição"];
 
   const nextStatus = {
     PENDENTE: "ACEITO",
     ACEITO: "EM PREPARO",
-    "EM PREPARO": "ENTREGUE",
   };
 
-  // Ao tentar avançar para ENTREGUE, verifica pagamento
   const handleAvancar = (id, novoStatus) => {
-    if (novoStatus === "ENTREGUE") {
-      const pg = (order.payment || "").trim();
-      const semPagamento = !pg || pg === "" || pg === "NÃO REGISTRADO" || pg === "NAO REGISTRADO";
-      if (semPagamento) {
-        setErroPagamento(true);
-        setShowPaymentSelect(true);
-        return;
-      }
-    }
     setErroPagamento(false);
     onStatusChange(id, novoStatus);
   };
 
+  const handleFinalizar = () => {
+    const pg = (order.payment || "").trim();
+    const semPagamento = !pg || pg === "NÃO REGISTRADO" || pg === "NAO REGISTRADO";
+    if (semPagamento) {
+      setErroPagamento(true);
+      setShowPaymentSelect(true);
+      return;
+    }
+    onStatusChange(order.id, "FINALIZADO");
+  };
+
+  const handleEnviarParaEntrega = async () => {
+    setErroDespacho("");
+    try {
+      const r = await axios.get(`${API}/entregador/online`);
+      setEntregadoresOnline(r.data?.online || []);
+    } catch { setEntregadoresOnline([]); }
+    setShowDespachar(true);
+  };
+
   const confirmarPagamentoEFinalizar = () => {
     if (!pagamentoTemp) return;
-    onStatusChange(order.id, "ENTREGUE", pagamentoTemp);
+    onStatusChange(order.id, "FINALIZADO", pagamentoTemp);
     setShowPaymentSelect(false);
     setErroPagamento(false);
   };
@@ -206,23 +238,102 @@ const OrderModal = ({ order, onClose, onStatusChange }) => {
             </div>
           )}
 
-          {/* Avançar status */}
-          {nextStatus[order.status] && !showPaymentSelect && (
-            <button
-              onClick={() => handleAvancar(order.id, nextStatus[order.status])}
-              className="w-full py-2 font-mono text-xs font-bold text-black transition-colors"
-              style={{ backgroundColor: STATUS_COLORS[nextStatus[order.status]] }}
-            >
-              AVANÇAR → {nextStatus[order.status]}
-            </button>
+          {/* Painel de despacho */}
+          {showDespachar && (
+            <div className="flex flex-col gap-2">
+              <span className="font-mono text-[10px] text-[#00BFFF] tracking-widest">SELECIONAR ENTREGADOR</span>
+              {entregadoresOnline.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {entregadoresOnline.map(eid => (
+                    <button key={eid} onClick={() => setEntregadorId(eid)}
+                      className={`font-mono text-xs px-2 py-1 border transition-colors ${
+                        entregadorId === eid ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10" : "border-[#27272A] text-[#71717A] hover:border-[#00BFFF]"
+                      }`}>
+                      🟢 {eid}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {entregadoresOnline.length === 0 && (
+                <span className="font-mono text-[10px] text-[#FF4444]">Nenhum entregador online. Digite o ID manualmente:</span>
+              )}
+              <input
+                value={entregadorId}
+                onChange={e => setEntregadorId(e.target.value)}
+                placeholder="Ex: carlos, moto01, joao..."
+                className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-3 py-2 focus:outline-none focus:border-[#00BFFF]"
+              />
+              {erroDespacho && (
+                <div className="font-mono text-xs text-[#FF4444] bg-[#FF4444]/10 border border-[#FF4444]/30 px-3 py-2">
+                  ⚠ {erroDespacho}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => { setShowDespachar(false); setEntregadorId(""); setErroDespacho(""); }}
+                  className="py-2 border border-[#27272A] text-[#71717A] font-mono text-xs hover:border-[#FF4444] hover:text-[#FF4444] transition-colors">
+                  CANCELAR
+                </button>
+                <button onClick={confirmarDespacho} disabled={despachando || !entregadorId.trim()}
+                  className="py-2 bg-[#00BFFF] text-black font-mono text-xs font-bold disabled:opacity-40 hover:bg-[#00a8e0] transition-colors">
+                  {despachando ? "ENVIANDO..." : "🛵 DESPACHAR"}
+                </button>
+              </div>
+            </div>
           )}
-          {order.status === "PENDENTE" && (
-            <button
-              onClick={() => onStatusChange(order.id, "CANCELADO")}
-              className="w-full py-2 font-mono text-xs font-bold border border-[#FF4444] text-[#FF4444] hover:bg-[#FF4444]/10 transition-colors"
-            >
-              CANCELAR PEDIDO
-            </button>
+
+          {/* Botão principal de ação por status */}
+          {!showPaymentSelect && !showDespachar && (
+            <>
+              {/* PENDENTE / ACEITO: avança normalmente */}
+              {nextStatus[order.status] && (
+                <button
+                  onClick={() => handleAvancar(order.id, nextStatus[order.status])}
+                  className="w-full py-2 font-mono text-xs font-bold text-black transition-colors"
+                  style={{ backgroundColor: STATUS_COLORS[nextStatus[order.status]] }}
+                >
+                  AVANÇAR → {nextStatus[order.status]}
+                </button>
+              )}
+
+              {/* EM PREPARO + ENTREGA: despachar para entregador */}
+              {order.status === "EM PREPARO" && order.type === "ENTREGA" && (
+                <button
+                  onClick={handleEnviarParaEntrega}
+                  className="w-full py-2 font-mono text-xs font-bold border-2 border-[#A855F7] text-[#A855F7] hover:bg-[#A855F7]/10 transition-colors"
+                >
+                  🛵 DESPACHAR PARA ENTREGA
+                </button>
+              )}
+
+              {/* EM PREPARO + RETIRADA: finalizar direto */}
+              {order.status === "EM PREPARO" && order.type === "RETIRADA" && (
+                <button
+                  onClick={handleFinalizar}
+                  className="w-full py-2 font-mono text-xs font-bold text-black bg-[#00E559] hover:bg-[#00c44d] transition-colors"
+                >
+                  ✓ FINALIZAR
+                </button>
+              )}
+
+              {/* SAIU PARA ENTREGA: finalizar */}
+              {order.status === "SAIU PARA ENTREGA" && (
+                <button
+                  onClick={handleFinalizar}
+                  className="w-full py-2 font-mono text-xs font-bold text-black bg-[#00E559] hover:bg-[#00c44d] transition-colors"
+                >
+                  ✓ FINALIZAR
+                </button>
+              )}
+
+              {order.status === "PENDENTE" && (
+                <button
+                  onClick={() => onStatusChange(order.id, "CANCELADO")}
+                  className="w-full py-2 font-mono text-xs font-bold border border-[#FF4444] text-[#FF4444] hover:bg-[#FF4444]/10 transition-colors"
+                >
+                  CANCELAR PEDIDO
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -337,7 +448,7 @@ const CompactView = ({ orders, onSelect }) => (
 );
 
 // ── Pedidos Tab ───────────────────────────────────────────────────────────────
-const PedidosTab = ({ orders, onStatusChange }) => {
+const PedidosTab = ({ orders, onStatusChange, onDespachar }) => {
   const [statusFilter, setStatusFilter] = useState("TODOS");
   const [typeFilter, setTypeFilter] = useState("TODOS");
   const [viewMode, setViewMode] = useState("cards");
@@ -359,7 +470,7 @@ const PedidosTab = ({ orders, onStatusChange }) => {
   const handleStatusChange = (id, newStatus, novoPagamento) => {
     onStatusChange(id, newStatus, novoPagamento);
     setSelectedOrder((prev) => prev ? { ...prev, status: newStatus, ...(novoPagamento ? { payment: novoPagamento } : {}) } : null);
-    if (newStatus === "ENTREGUE" || newStatus === "CANCELADO") setSelectedOrder(null);
+    if (newStatus === "FINALIZADO" || newStatus === "CANCELADO" || newStatus === "SAIU PARA ENTREGA") setSelectedOrder(null);
   };
 
   return (
@@ -422,6 +533,7 @@ const PedidosTab = ({ orders, onStatusChange }) => {
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
         onStatusChange={handleStatusChange}
+        onDespachar={onDespachar}
       />
     </>
   );
@@ -461,6 +573,7 @@ export function RestaurantePage() {
       salePrice: item.precoVenda,
       costPrice: item.precoCusto,
       photo: item.foto || null,
+      variacoes: item.variacoes || [],
     };
     setMenuItems(prev => [...prev, itemCardapio]);
     setActiveTab("cardapio");
@@ -521,9 +634,24 @@ export function RestaurantePage() {
       if (o.id !== orderId) return o;
       const updated = { ...o, status: newStatus };
       if (novoPagamento) updated.payment = novoPagamento;
-      if (newStatus === "ENTREGUE") registrarVendaFinanceiro(updated, novoPagamento);
+      if (newStatus === "FINALIZADO") registrarVendaFinanceiro(updated, novoPagamento);
       return updated;
     }));
+  };
+
+  const handleDespachar = async (order, entregadorId) => {
+    const payload = {
+      entregadorId,
+      orderId: order.id,
+      restaurante: restaurantName,
+      endereco: order.endereco ? `${order.endereco.rua}, ${order.endereco.numero}` : "Endereço não informado",
+      referencia: order.endereco?.referencia || "",
+      itens: order.itensCompletos || order.items.map(name => ({ name, qtd: 1 })),
+      pagamento: order.payment || "",
+      observacao: order.observacao || "",
+      taxaEntrega: 5.0,
+    };
+    await axios.post(`${API}/entregador/despachar`, payload);
   };
 
   return (
@@ -550,7 +678,7 @@ export function RestaurantePage() {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} /></div>}
+        {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} /></div>}
         {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
         {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
         {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
