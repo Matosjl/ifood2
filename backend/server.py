@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,9 +10,11 @@ import hashlib
 import secrets
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict, Set
 import uuid
 from datetime import datetime, timezone, timedelta
+import asyncio
+import json
 
 import httpx
 
@@ -433,6 +435,43 @@ async def deletar_item_estoque(item_id: str):
     else:
         _estoque_store = [i for i in _estoque_store if i["id"] != item_id]
     return {"ok": True}
+
+# ── WebSocket Tracking ───────────────────────────────────────────────────────
+
+# Salas: order_id -> set de WebSockets conectados
+_tracking_rooms: Dict[str, Set[WebSocket]] = {}
+
+@app.websocket("/ws/track/{order_id}")
+async def ws_track(websocket: WebSocket, order_id: str):
+    """Clientes se conectam aqui para receber posição do entregador em tempo real."""
+    await websocket.accept()
+    _tracking_rooms.setdefault(order_id, set()).add(websocket)
+    try:
+        while True:
+            # Mantém conexão viva; entregador envia coords via POST /api/track/{order_id}
+            await asyncio.sleep(30)
+            await websocket.send_text(json.dumps({"ping": True}))
+    except (WebSocketDisconnect, Exception):
+        _tracking_rooms.get(order_id, set()).discard(websocket)
+
+class TrackUpdate(BaseModel):
+    lat: float
+    lng: float
+    status: Optional[str] = "O entregador está a caminho"
+
+@api_router.post("/track/{order_id}")
+async def push_location(order_id: str, body: TrackUpdate):
+    """App do entregador envia coordenadas aqui; broadcast para todos os clientes da sala."""
+    payload = json.dumps({"lat": body.lat, "lng": body.lng, "status": body.status})
+    room = _tracking_rooms.get(order_id, set())
+    dead = set()
+    for ws in room:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.add(ws)
+    room -= dead
+    return {"ok": True, "clients": len(room)}
 
 # ── Financeiro ───────────────────────────────────────────────────────────────
 

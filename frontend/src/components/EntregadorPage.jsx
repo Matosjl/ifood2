@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TrackingScreen } from "./TrackingScreen";
 
 const MOCK_ENTREGADORES = [
   { id: 1, nome: "Carlos Silva", status: "disponível", distancia: "0.8km" },
@@ -6,14 +7,40 @@ const MOCK_ENTREGADORES = [
   { id: 3, nome: "Pedro Lima", status: "em entrega", distancia: "2.1km" },
 ];
 
-export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir }) {
-  const [selecionado, setSelecionado] = useState({}); // pedidoId -> entregadorId
+export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir, restaurante }) {
+  const [selecionado, setSelecionado] = useState({});
+  const [rastreando, setRastreando] = useState(null); // pedido sendo rastreado
 
   const atribuir = (pedidoId) => {
     const entregadorId = selecionado[pedidoId];
     if (!entregadorId) return;
     onAtribuir?.(pedidoId, entregadorId);
   };
+
+  if (rastreando) {
+    const entregadorId = selecionado[rastreando.id];
+    const entregador = MOCK_ENTREGADORES.find(e => String(e.id) === String(entregadorId)) || MOCK_ENTREGADORES[0];
+    return (
+      <TrackingScreen
+        orderId={rastreando.id}
+        entregador={{
+          nome: entregador.nome,
+          placa: entregador.placa || "ABC-1234",
+          telefone: entregador.telefone || "",
+          foto: entregador.foto || null,
+        }}
+        restaurante={{
+          nome: restaurante?.nome || "Restaurante",
+          coords: restaurante?.coords || { lat: -23.5505, lng: -46.6333 },
+        }}
+        cliente={{
+          endereco: rastreando.endereco ? `${rastreando.endereco.rua}, ${rastreando.endereco.numero}` : "Cliente",
+          coords: rastreando.coords || { lat: -23.5605, lng: -46.6433 },
+        }}
+        onFechar={() => setRastreando(null)}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 max-w-3xl mx-auto w-full">
@@ -77,10 +104,16 @@ export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir }) 
                 ATRIBUIR
               </button>
               {pedido.status === "em entrega" && (
-                <button onClick={() => onConcluir?.(pedido.id)}
-                  className="font-mono text-xs px-4 py-2 border border-[#00E559] text-[#00E559] hover:bg-[#00E559]/10 transition-colors">
-                  ✓ CONCLUIR
-                </button>
+                <>
+                  <button onClick={() => setRastreando(pedido)}
+                    className="font-mono text-xs px-4 py-2 border border-[#00BFFF] text-[#00BFFF] hover:bg-[#00BFFF]/10 transition-colors">
+                    📍 RASTREAR
+                  </button>
+                  <button onClick={() => onConcluir?.(pedido.id)}
+                    className="font-mono text-xs px-4 py-2 border border-[#00E559] text-[#00E559] hover:bg-[#00E559]/10 transition-colors">
+                    ✓ CONCLUIR
+                  </button>
+                </>
               )}
             </div>
 
