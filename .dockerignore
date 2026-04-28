@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv/
+env/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs e dados locais
+*.log
+*.sqlite3
+*.db
+data/
+mongodb_data/
+redis_data/
+
+# Testes
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend (não precisa no backend)
+frontend/
+node_modules/
+
+# Documentação
+README.md
+PLANO_PROFISSIONAL.md
+TODO*.md
+test_result.md
+
+# Outros
+Iniciar_iFood2.bat
+

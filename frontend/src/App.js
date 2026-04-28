@@ -11,6 +11,9 @@ import { HistorySidebar } from "@/components/HistorySidebar";
 import { ChatInterface } from "@/components/ChatInterface";
 import { CodeSandbox } from "@/components/CodeSandbox";
 import { IntegrationsPanel } from "@/components/IntegrationsPanel";
+import { PainelPedidosRestaurante } from "@/components/PainelPedidosRestaurante";
+import { AcompanhamentoPedido } from "@/components/AcompanhamentoPedido";
+import { CheckoutPage } from "@/components/CheckoutPage";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 const API = `${BACKEND_URL}/api`;
@@ -233,6 +236,9 @@ function App() {
         <Route path="/entregador/:id" element={<EntregadorApp />} />
         <Route path="/owner/login" element={<OwnerLogin />} />
         <Route path="/owner" element={<ProtectedRoute><OwnerDashboard /></ProtectedRoute>} />
+        <Route path="/restaurante/pedidos" element={<PainelPedidosRestaurante />} />
+        <Route path="/pedido/:pedidoId" element={<AcompanhamentoPedido />} />
+        <Route path="/checkout" element={<CheckoutPage />} />
       </Routes>
     </BrowserRouter>
   );
