@@ -52,7 +52,24 @@ module.exports = {
   				'3': 'hsl(var(--chart-3))',
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
+  			},
+  			terminal: {
+  				green: '#00E559',
+  				amber: '#FFB000',
+  				danger: '#FF3B30',
+  				info: '#007AFF',
+  				bg: '#000000',
+  				panel: '#0A0A0A',
+  				surface: '#121212',
+  				border: '#27272A',
+  				text: '#EDEDED',
+  				'text-secondary': '#A1A1AA',
+  				'text-muted': '#71717A',
   			}
+  		},
+  		fontFamily: {
+  			mono: ['JetBrains Mono', 'monospace'],
+  			sans: ['IBM Plex Sans', 'sans-serif'],
   		},
   		keyframes: {
   			'accordion-down': {

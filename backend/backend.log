@@ -1,0 +1,324 @@
+INFO:     Will watch for changes in these directories: ['C:\\Users\\sealo\\Desktop\\Ifood2\\https---github.com-Matosjl-ifood2\\backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [15896] using WatchFiles
+INFO:     Started server process [22908]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:63543 - "GET /api/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63545 - "GET /api/status HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\uvicorn\protocols\http\httptools_impl.py", line 426, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\uvicorn\middleware\proxy_headers.py", line 84, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\applications.py", line 123, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\exceptions.py", line 65, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 756, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 776, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 297, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 77, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 72, in app
+    response = await func(request)
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\routing.py", line 278, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        dependant=dependant, values=values, is_coroutine=is_coroutine
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\routing.py", line 191, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\backend\server.py", line 60, in get_status_checks
+    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\motor\core.py", line 1657, in _to_list
+    result = get_more_result.result()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\cursor.py", line 1153, in _refresh
+    self.__session = self.__collection.database.client._ensure_session()
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1868, in _ensure_session
+    return self.__start_session(True, causal_consistency=False)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1811, in __start_session
+    self._topology._check_implicit_session_support()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 583, in _check_implicit_session_support
+    self._check_session_support()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 599, in _check_session_support
+    self._select_servers_loop(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        readable_server_selector, self.get_server_selection_timeout(), None
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 269, in _select_servers_loop
+    raise ServerSelectionTimeoutError(
+        f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
+    )
+pymongo.errors.ServerSelectionTimeoutError: localhost:27017: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente, Timeout: 30s, Topology Description: <TopologyDescription id: 69efcecacd96b40c541acad3, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('localhost:27017: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente')>]>
+INFO:     127.0.0.1:53238 - "GET /api/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50496 - "HEAD /api/ HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:56166 - "POST /api/status HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\uvicorn\protocols\http\httptools_impl.py", line 426, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\uvicorn\middleware\proxy_headers.py", line 84, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\applications.py", line 123, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\middleware\exceptions.py", line 65, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 756, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 776, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 297, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 77, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\starlette\routing.py", line 72, in app
+    response = await func(request)
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\routing.py", line 278, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        dependant=dependant, values=values, is_coroutine=is_coroutine
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\fastapi\routing.py", line 191, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\backend\server.py", line 54, in create_status_check
+    _ = await db.status_checks.insert_one(doc)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\collection.py", line 671, in insert_one
+    self._insert_one(
+    ~~~~~~~~~~~~~~~~^
+        document,
+        ^^^^^^^^^
+    ...<5 lines>...
+        comment=comment,
+        ^^^^^^^^^^^^^^^^
+    ),
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\collection.py", line 611, in _insert_one
+    self.__database.client._retryable_write(acknowledged, _insert_command, session)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1567, in _retryable_write
+    with self._tmp_session(session) as s:
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1885, in _tmp_session
+    s = self._ensure_session(session)
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1868, in _ensure_session
+    return self.__start_session(True, causal_consistency=False)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\mongo_client.py", line 1811, in __start_session
+    self._topology._check_implicit_session_support()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 583, in _check_implicit_session_support
+    self._check_session_support()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 599, in _check_session_support
+    self._select_servers_loop(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        readable_server_selector, self.get_server_selection_timeout(), None
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\sealo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pymongo\topology.py", line 269, in _select_servers_loop
+    raise ServerSelectionTimeoutError(
+        f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
+    )
+pymongo.errors.ServerSelectionTimeoutError: localhost:27017: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente, Timeout: 30s, Topology Description: <TopologyDescription id: 69efcecacd96b40c541acad3, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('localhost:27017: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente')>]>
+WARNING:  WatchFiles detected changes in 'server.py'. Reloading...
+INFO:     127.0.0.1:57937 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53927 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53713 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52156 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53553 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49232 - "GET /api/health HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [22908]
+INFO:     Started server process [19464]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:52130 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57080 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62252 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49227 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54315 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54928 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52226 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51143 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63978 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60084 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61141 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52423 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61541 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53503 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50329 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61258 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61224 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50331 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61172 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57067 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51812 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59726 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50060 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62947 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51676 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56884 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61537 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56768 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52082 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58463 - "POST /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58465 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59043 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61920 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55546 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60206 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60206 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62161 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62161 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54857 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63916 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59097 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64099 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61202 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62394 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62085 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64588 - "GET /api/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64591 - "POST /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64593 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50825 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50825 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64802 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56049 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50513 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54300 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61480 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64739 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61693 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52155 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64382 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65116 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61097 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58079 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62242 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52431 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60085 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50063 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59610 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62501 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57228 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54445 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61807 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63921 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63372 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57488 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49666 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50673 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63693 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52399 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55790 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50468 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52292 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62074 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50075 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56067 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61292 - "GET /api/health HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'server.py'. Reloading...
+INFO:     127.0.0.1:53303 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49914 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58095 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62477 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63818 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50491 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50684 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62892 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62621 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52625 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55650 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56251 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [19464]
+INFO:     Started server process [19908]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:61428 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49382 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49820 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59367 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50288 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59705 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65105 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51778 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51778 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52930 - "GET /api/health HTTP/1.1" 200 OK
