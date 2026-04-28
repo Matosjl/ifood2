@@ -1,20 +1,48 @@
 import { useState } from "react";
+import axios from "axios";
 import { TrackingScreen } from "./TrackingScreen";
 
+const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
+
 const MOCK_ENTREGADORES = [
-  { id: 1, nome: "Carlos Silva", status: "disponível", distancia: "0.8km" },
-  { id: 2, nome: "Ana Souza", status: "disponível", distancia: "1.2km" },
-  { id: 3, nome: "Pedro Lima", status: "em entrega", distancia: "2.1km" },
+  { id: "e1", nome: "Carlos Silva", status: "disponível", distancia: "0.8km", placa: "ABC-1234", telefone: "" },
+  { id: "e2", nome: "Ana Souza",   status: "disponível", distancia: "1.2km", placa: "DEF-5678", telefone: "" },
+  { id: "e3", nome: "Pedro Lima",  status: "em entrega", distancia: "2.1km", placa: "GHI-9012", telefone: "" },
 ];
 
 export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir, restaurante }) {
   const [selecionado, setSelecionado] = useState({});
   const [rastreando, setRastreando] = useState(null); // pedido sendo rastreado
 
-  const atribuir = (pedidoId) => {
-    const entregadorId = selecionado[pedidoId];
+  const [despachando, setDespachando] = useState({});
+  const [feedbacks, setFeedbacks]     = useState({});
+
+  const despachar = async (pedido) => {
+    const entregadorId = selecionado[pedido.id];
     if (!entregadorId) return;
-    onAtribuir?.(pedidoId, entregadorId);
+    const entregador = MOCK_ENTREGADORES.find(e => e.id === entregadorId);
+    setDespachando(d => ({ ...d, [pedido.id]: true }));
+    try {
+      await axios.post(`${API}/entregador/despachar`, {
+        entregadorId,
+        orderId: pedido.id,
+        restaurante: restaurante?.nome || "Restaurante",
+        endereco: pedido.endereco ? `${pedido.endereco.rua}, ${pedido.endereco.numero}` : "",
+        referencia: pedido.endereco?.referencia || "",
+        itens: (pedido.itensCompletos || pedido.items?.map(name => ({ name, qtd: 1 })) || []),
+        pagamento: pedido.payment || "",
+        observacao: pedido.observacao || "",
+        taxaEntrega: 5.0,
+      });
+      setFeedbacks(f => ({ ...f, [pedido.id]: "ok" }));
+      onAtribuir?.(pedido.id, entregadorId);
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Erro ao despachar";
+      setFeedbacks(f => ({ ...f, [pedido.id]: detail }));
+    } finally {
+      setDespachando(d => ({ ...d, [pedido.id]: false }));
+      setTimeout(() => setFeedbacks(f => { const n = { ...f }; delete n[pedido.id]; return n; }), 4000);
+    }
   };
 
   if (rastreando) {
@@ -98,10 +126,11 @@ export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir, re
                   <option key={e.id} value={e.id}>{e.nome} — {e.distancia}</option>
                 ))}
               </select>
-              <button onClick={() => atribuir(pedido.id)}
-                disabled={!selecionado[pedido.id]}
+              <button
+                onClick={() => despachar(pedido)}
+                disabled={!selecionado[pedido.id] || despachando[pedido.id]}
                 className="font-mono text-xs px-4 py-2 bg-[#00E559] text-black font-bold hover:bg-[#00c44d] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                ATRIBUIR
+                {despachando[pedido.id] ? "..." : "🛵 DESPACHAR"}
               </button>
               {pedido.status === "em entrega" && (
                 <>
@@ -117,6 +146,15 @@ export function EntregadorPage({ pedidosEntrega = [], onAtribuir, onConcluir, re
               )}
             </div>
 
+            {feedbacks[pedido.id] && (
+              <div className={`font-mono text-xs px-3 py-2 border ${
+                feedbacks[pedido.id] === "ok"
+                  ? "border-[#00E559]/40 text-[#00E559] bg-[#00E559]/5"
+                  : "border-[#FF4444]/40 text-[#FF4444] bg-[#FF4444]/5"
+              }`}>
+                {feedbacks[pedido.id] === "ok" ? "✓ Pedido enviado ao entregador" : `⚠ ${feedbacks[pedido.id]}`}
+              </div>
+            )}
             {pedido.status === "em entrega" && (
               <span className="font-mono text-xs text-[#FFB800]">
                 🛵 EM ENTREGA — {MOCK_ENTREGADORES.find(e => String(e.id) === String(selecionado[pedido.id]))?.nome || "Entregador atribuído"}

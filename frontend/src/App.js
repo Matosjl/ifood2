@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { RestaurantePage } from "@/components/RestaurantePage";
 import { OwnerLogin } from "@/components/OwnerLogin";
 import { OwnerDashboard } from "@/components/OwnerDashboard";
+import { EntregadorApp } from "@/components/EntregadorApp";
 import axios from "axios";
 import { Header } from "@/components/Header";
 import { HistorySidebar } from "@/components/HistorySidebar";
@@ -229,6 +230,7 @@ function App() {
       <Routes>
         <Route path="/" element={<AjaxAgent />} />
         <Route path="/restaurante/:id" element={<RestaurantePage />} />
+        <Route path="/entregador/:id" element={<EntregadorApp />} />
         <Route path="/owner/login" element={<OwnerLogin />} />
         <Route path="/owner" element={<ProtectedRoute><OwnerDashboard /></ProtectedRoute>} />
       </Routes>

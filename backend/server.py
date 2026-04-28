@@ -440,6 +440,8 @@ async def deletar_item_estoque(item_id: str):
 
 # Salas: order_id -> set de WebSockets conectados
 _tracking_rooms: Dict[str, Set[WebSocket]] = {}
+# Entregadores conectados: entregador_id -> WebSocket
+_entregador_sockets: Dict[str, WebSocket] = {}
 
 @app.websocket("/ws/track/{order_id}")
 async def ws_track(websocket: WebSocket, order_id: str):
@@ -448,7 +450,6 @@ async def ws_track(websocket: WebSocket, order_id: str):
     _tracking_rooms.setdefault(order_id, set()).add(websocket)
     try:
         while True:
-            # Mantém conexão viva; entregador envia coords via POST /api/track/{order_id}
             await asyncio.sleep(30)
             await websocket.send_text(json.dumps({"ping": True}))
     except (WebSocketDisconnect, Exception):
@@ -472,6 +473,65 @@ async def push_location(order_id: str, body: TrackUpdate):
             dead.add(ws)
     room -= dead
     return {"ok": True, "clients": len(room)}
+
+@app.websocket("/ws/entregador/{entregador_id}")
+async def ws_entregador(websocket: WebSocket, entregador_id: str):
+    """App do entregador conecta aqui para receber pedidos e enviar respostas."""
+    await websocket.accept()
+    _entregador_sockets[entregador_id] = websocket
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+
+            msg_type = data.get("type")
+            order_id = data.get("orderId")
+
+            if msg_type == "resposta" and order_id:
+                resposta = data.get("resposta")
+                # Notifica clientes rastreando se entregue
+                if resposta == "entregue":
+                    room = _tracking_rooms.get(order_id, set())
+                    payload = json.dumps({"type": "entregue", "orderId": order_id, "status": "Entregue"})
+                    for ws in list(room):
+                        try: await ws.send_text(payload)
+                        except Exception: pass
+
+    except (WebSocketDisconnect, Exception):
+        _entregador_sockets.pop(entregador_id, None)
+
+class DespacharPedidoRequest(BaseModel):
+    entregadorId: str
+    orderId: str
+    restaurante: str
+    endereco: str
+    referencia: Optional[str] = ""
+    itens: List[dict] = []
+    pagamento: Optional[str] = ""
+    observacao: Optional[str] = ""
+    taxaEntrega: float = 5.0
+    distanciaKm: Optional[float] = None
+
+@api_router.post("/entregador/despachar")
+async def despachar_pedido(body: DespacharPedidoRequest):
+    """Restaurante despacha pedido para um entregador específico."""
+    ws = _entregador_sockets.get(body.entregadorId)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Entregador não conectado.")
+    try:
+        await ws.send_text(json.dumps({"type": "novo_pedido", "pedido": body.model_dump()}))
+    except Exception:
+        _entregador_sockets.pop(body.entregadorId, None)
+        raise HTTPException(status_code=503, detail="Falha ao enviar para o entregador.")
+    return {"ok": True}
+
+@api_router.get("/entregador/online")
+async def entregadores_online():
+    """Retorna IDs de entregadores conectados."""
+    return {"online": list(_entregador_sockets.keys())}
 
 # ── Financeiro ───────────────────────────────────────────────────────────────
 
