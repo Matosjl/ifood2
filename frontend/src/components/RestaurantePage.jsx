@@ -29,7 +29,7 @@ const MOCK_ORDERS = [
 
 const TABS = [
   { id: "pedidos", label: "PEDIDOS" },
-  { id: "novo-pedido", label: "NOVO PEDIDO" },
+  { id: "novo-pedido", label: "NOVO PEDIDO", highlight: true },
   { id: "cardapio", label: "CARDÁPIO DIGITAL" },
   { id: "estoque", label: "ESTOQUE" },
   { id: "financeiro", label: "💰 FINANCEIRO" },
@@ -77,7 +77,7 @@ const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
     if (!showDespachar) return;
     const fetchOnline = async () => {
       try {
-        const r = await axios.get(${API}/entregador/online);
+        const r = await axios.get(`${API}/entregador/online`);
         setEntregadoresOnline(r.data?.online || []);
       } catch { setEntregadoresOnline([]); }
     };
@@ -682,14 +682,22 @@ export function RestaurantePage() {
       </div>
 
       <div className="flex border-b border-[#27272A] overflow-x-auto">
-        {TABS.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={`px-5 py-2 font-mono text-xs border-b-2 whitespace-nowrap transition-colors ${
-              activeTab === tab.id ? "border-[#00E559] text-[#00E559]" : "border-transparent text-[#71717A] hover:text-[#A1A1AA]"
-            }`}>
-            {tab.label}
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          const isHighlight = tab.highlight && !isActive;
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`px-5 py-2 font-mono text-xs border-b-2 whitespace-nowrap transition-colors ${
+                isActive
+                  ? "border-[#00E559] text-[#00E559]"
+                  : isHighlight
+                    ? "border-transparent text-[#FFB800] hover:text-[#FFD700] animate-pulse font-bold"
+                    : "border-transparent text-[#71717A] hover:text-[#A1A1AA]"
+              }`}>
+              {tab.highlight && <span className="mr-1">✨</span>}{tab.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex-1 overflow-hidden">

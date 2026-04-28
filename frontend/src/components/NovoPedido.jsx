@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
@@ -25,6 +25,30 @@ const emptyOrder = {
   cliente: "", telefone: "", tipo: "retirada",
   pagamento: "", pago: false, agendado: false,
   horarioAgendado: "", observacao: "", tempo: 30,
+};
+
+// ── Minutos Restantes ─────────────────────────────────────────────────────────
+const MinutosRestantes = ({ horario }) => {
+  const [minutos, setMinutos] = useState(0);
+
+  useEffect(() => {
+    const calc = () => {
+      const diff = new Date(horario) - Date.now();
+      setMinutos(Math.ceil(diff / 60000));
+    };
+    calc();
+    const t = setInterval(calc, 30000);
+    return () => clearInterval(t);
+  }, [horario]);
+
+  if (minutos <= 0) return <span className="font-mono text-xs text-[#FF4444] font-bold">⚠ ATRASADO</span>;
+
+  const color = minutos < 5 ? "#FF4444" : minutos < 15 ? "#FFB800" : "#00E559";
+  return (
+    <span className="font-mono text-xs font-bold" style={{ color }}>
+      ⏱ {minutos} min restante{minutos !== 1 ? "s" : ""}
+    </span>
+  );
 };
 
 // ── Modal de Variações ───────────────────────────────────────────────────────────────
@@ -272,8 +296,8 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
                       </>
                     ) : (
                       <button onClick={() => addItem(item)}
-                        className="font-mono text-xs px-3 py-1.5 border border-[#27272A] text-[#71717A] hover:border-[#00E559] hover:text-[#00E559] transition-colors">
-                        + ADD
+                        className="font-mono text-xs px-4 py-2 border-2 border-[#00E559] text-[#00E559] bg-[#00E559]/10 hover:bg-[#00E559] hover:text-black transition-colors font-bold shadow-[0_0_8px_rgba(0,229,89,0.3)]">
+                        ➕ ADICIONAR
                       </button>
                     )}
                   </div>
@@ -336,8 +360,16 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
             <span className="font-mono text-[10px] text-[#71717A]">AGENDAR HORÁRIO</span>
           </label>
           {form.agendado && (
-            <input type="datetime-local" value={form.horarioAgendado} onChange={e => set("horarioAgendado", e.target.value)}
-              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559] w-full" />
+            <>
+              <input type="datetime-local" value={form.horarioAgendado} onChange={e => set("horarioAgendado", e.target.value)}
+                className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559] w-full" />
+              {form.horarioAgendado && (
+                <div className="bg-[#111] border border-[#27272A] px-3 py-2 flex items-center justify-between">
+                  <span className="font-mono text-[10px] text-[#71717A]">TEMPO ATÉ O AGENDAMENTO</span>
+                  <MinutosRestantes horario={form.horarioAgendado} />
+                </div>
+              )}
+            </>
           )}
         </div>
 
