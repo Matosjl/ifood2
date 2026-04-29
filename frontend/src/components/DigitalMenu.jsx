@@ -20,6 +20,33 @@ export function DigitalMenu({ items = MOCK_ITEMS, restaurantName = "Restaurante"
         <p className="font-mono text-xs text-[#71717A] mt-1">CARDÁPIO DIGITAL</p>
       </div>
 
+      {/* PDF Upload section */}
+      <div className="bg-[#0A0A0A] border border-[#27272A] p-4 mb-6">
+        <span className="font-mono text-xs text-[#FFB800] tracking-widest block mb-2">UPLOAD CARDÁPIO PDF (RESTAURANTE)</span>
+        <input 
+          type="file" 
+          accept="application/pdf" 
+          id="pdfUpload" 
+          className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-sm px-3 py-2 w-full focus:outline-none focus:border-[#00E559]"
+          onChange={async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('restauranteId', 'teste');
+            try {
+              const res = await axios.post(`${API}/cardapio/pdf-upload`, formData, {
+                headers: {'Content-Type': 'multipart/form-data'}
+              });
+              alert(`Itens detectados: ${res.data.itensDetectados.length}\nPreview: ${res.data.rawPreview.slice(0, 200)}...`);
+              // Auto-add? window.location.reload(); or parent refresh
+            } catch (err) {
+              alert('Erro ao processar PDF: ' + err.response?.data?.detail);
+            }
+          }} 
+        />
+      </div>
+
       {Object.entries(grouped).map(([category, categoryItems]) => (
         <div key={category} className="mb-8">
           <div className="flex items-center gap-3 mb-4">

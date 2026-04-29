@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
@@ -27,7 +27,116 @@ const emptyOrder = {
   horarioAgendado: "", observacao: "", tempo: 30,
 };
 
+// ── Minutos Restantes ─────────────────────────────────────────────────────────
+const MinutosRestantes = ({ horario }) => {
+  const [minutos, setMinutos] = useState(0);
+
+  useEffect(() => {
+    const calc = () => {
+      const diff = new Date(horario) - Date.now();
+      setMinutos(Math.ceil(diff / 60000));
+    };
+    calc();
+    const t = setInterval(calc, 30000);
+    return () => clearInterval(t);
+  }, [horario]);
+
+  if (minutos <= 0) return <span className="font-mono text-xs text-[#FF4444] font-bold">⚠ ATRASADO</span>;
+
+  const color = minutos < 5 ? "#FF4444" : minutos < 15 ? "#FFB800" : "#00E559";
+  return (
+    <span className="font-mono text-xs font-bold" style={{ color }}>
+      ⏱ {minutos} min restante{minutos !== 1 ? "s" : ""}
+    </span>
+  );
+};
+
 // ── Modal de Variações ───────────────────────────────────────────────────────────────
+const ModalKg = ({ item, onConfirmar, onFechar }) => {
+  const [grams, setGrams] = useState(500); // default 500g
+  const price = (item.precoVenda * (grams / 1000)).toFixed(2);
+
+  const confirmar = () => {
+    onConfirmar({
+      ...item, 
+      precoUnitario: parseFloat(price),
+      grams,
+      name: `${item.name} (${grams}g)`
+    });
+    onFechar();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onFechar}>
+      <div className="bg-[#0A0A0A] border border-[#27272A] w-full max-w-sm flex flex-col gap-3 p-6" onClick={e => e.stopPropagation()}>
+        <div className="text-center mb-4">
+          <span className="font-mono text-xs text-[#00E559] tracking-widest block">VENDA POR KG</span>
+          <span className="font-mono text-sm text-[#EDEDED]">{item.name}</span>
+          <span className="font-mono text-xs text-[#71717A]">R$ {item.precoVenda.toFixed(2)} / kg</span>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="font-mono text-xs text-[#71717A]">Gramas</label>
+            <input type="number" min="1" max="5000" value={grams} onChange={e => setGrams(parseInt(e.target.value) || 0)}
+              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-lg px-3 py-3 text-center focus:outline-none focus:border-[#00E559]" />
+          </div>
+          <div className="text-center py-2 bg-[#0A0A0A] border border-[#27272A] rounded">
+            <span className="font-mono text-sm text-[#00E559] font-bold">R$ {price.replace('.', ',')}</span>
+          </div>
+          <button onClick={confirmar} className="w-full py-3 bg-[#00E559] text-black font-mono font-bold text-sm hover:bg-[#00c44d]">
+            ➕ ADICIONAR
+          </button>
+        </div>
+        <button onClick={onFechar} className="font-mono text-xs text-[#71717A] mt-2 hover:text-[#EDEDED]">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ModalEdit = ({ item, onUpdate, onClose }) => {
+  const [changes, setChanges] = useState({nome: item.nome || '', precoVenda: item.precoVenda || 0});
+  
+  const save = () => {
+    onUpdate(item.id, changes);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-[#0A0A0A] border border-[#27272A] w-full max-w-sm flex flex-col gap-3 overflow-hidden max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#27272A]">
+          <div className="flex flex-col gap-0.5">
+            <span className="font-mono text-xs text-[#A855F7] tracking-widest">EDITAR PRODUTO</span>
+            <span className="font-mono text-sm text-[#EDEDED]">{item.name}</span>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs text-[#71717A]">✕</button>
+        </div>
+        <div className="p-4 flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="font-mono text-xs text-[#71717A]">Nome</label>
+            <input value={changes.nome} onChange={e => setChanges(c => ({...c, nome: e.target.value}))}
+              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-sm px-3 py-2 focus:outline-none focus:border-[#00E559]" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="font-mono text-xs text-[#71717A]">Preço Venda (R$)</label>
+            <input type="number" step="0.01" value={changes.precoVenda} onChange={e => setChanges(c => ({...c, precoVenda: parseFloat(e.target.value) || 0}))}
+              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-sm px-3 py-2 focus:outline-none focus:border-[#00E559]" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button onClick={save} className="flex-1 bg-[#00E559] text-black font-mono text-xs font-bold py-2 hover:bg-[#00c44d]">
+              ✓ SALVAR
+            </button>
+            <button onClick={onClose} className="flex-1 border border-[#27272A] text-[#71717A] font-mono text-xs py-2 hover:border-[#FF4444] hover:text-[#FF4444]">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ModalVariacoes = ({ item, onConfirmar, onFechar }) => {
   const variacoes = item.variacoes || [];
   const [selecionadas, setSelecionadas] = useState([]);
@@ -117,6 +226,8 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
   const [fotoPreview, setFotoPreview] = useState(null);
   const [wppStatus, setWppStatus] = useState(null);
   const [modalVariacao, setModalVariacao] = useState(null); // item com variações
+  const [editItem, setEditItem] = useState(null);
+  const [kgItem, setKgItem] = useState(null);
   const fileRef = useRef();
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -132,6 +243,11 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
   const qtdNoCarrinho = (id) => carrinho.find(i => i.id === id)?.qtd || 0;
 
   const addItem = (item) => {
+    // Kg pricing
+    if (item.porKg) {
+      setKgItem(item);
+      return;
+    }
     // Se categoria tem variações e o item tem variações cadastradas, abre modal
     if (temVariacao(item.category) && item.variacoes?.length > 0) {
       setModalVariacao(item);
@@ -175,10 +291,54 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
     reader.readAsDataURL(file);
   };
 
+  const updateItem = async (itemId, changes) => {
+    try {
+      await axios.patch(`${API}/estoque/${itemId}`, changes);
+      console.log("Produto atualizado", changes);
+      // Refresh stock from parent
+      window.dispatchEvent(new CustomEvent('stockUpdated'));
+    } catch (err) {
+      console.error("Erro update item", err);
+    }
+    setEditItem(null);
+  };
+
   const confirmarPagamento = (metodo) => {
     set("pagamento", metodo);
     set("pago", true);
     setShowPayment(false);
+  };
+
+  const printPedido = (type) => {
+    const width = type === '58' ? '58mm' : '80mm';
+    const fontSize = type === '58' ? '9px' : '11px';
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: 'Courier New', monospace; font-size: ${fontSize}; margin: 5mm; padding: 5mm; max-width: ${width}; color: black; }
+h3 { margin: 0 0 5mm 0; font-size: 1.2em; text-align: center; }
+p { margin: 0 0 2mm 0; }
+li { margin: 1mm 0; }
+.total { font-weight: bold; font-size: 1.3em; text-align: right; margin-top: 3mm; }
+</style>
+</head>
+<body>
+<h3>Pedido Novo</h3>
+<p>Cliente: ${form.cliente || 'N/A'}</p>
+<p>Tel: ${form.telefone || 'N/A'} | ${form.tipo === 'entrega' ? 'Entrega' : 'Retirada'}</p>
+<ul>
+${carrinho.map(i => `<li>${i.qtd}x ${i.name} <span style='float: right;'>R$ ${ (i.salePrice * i.qtd).toFixed(2).replace('.', ',') }</span></li>`).join('')}
+</ul>
+<p>Total: <span class="total">R$ ${total.toFixed(2).replace('.', ',')}</span></p>
+${form.observacao ? `<p><strong>Obs:</strong> ${form.observacao}</p>` : ''}
+<script>window.onload = () => { window.print(); setTimeout(() => window.close(), 1000); };</script>
+</body>
+</html>`;
+    const printWin = window.open('', '_blank');
+    printWin.document.write(html);
+    printWin.document.close();
   };
 
   const handleFinalizar = async () => {
@@ -196,6 +356,16 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
     };
 
     onPedidoCriado?.(pedido);
+
+    // Abate do estoque
+    try {
+      await axios.post(`${API}/estoque/deduzir`, {
+        restauranteId: "teste",
+        itens: carrinho.map(i => ({itemId: i.id, qtd: i.qtd})),
+      });
+    } catch (err) {
+      console.error("Falha no abatimento do estoque", err);
+    }
 
     // Envia WhatsApp se tiver telefone
     if (form.telefone) {
@@ -254,6 +424,7 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
                       <span className="font-mono text-[10px] text-[#71717A] truncate">{item.description}</span>
                     )}
                     <span className="font-mono text-xs text-[#00E559]">R$ {Number(item.salePrice).toFixed(2).replace(".", ",")}</span>
+                    <button onClick={() => setEditItem(item)} className="font-mono text-[10px] text-[#A855F7] hover:text-[#C084FC] ml-1">✏️</button>
                   </div>
 
                   {/* Controles */}
@@ -272,8 +443,8 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
                       </>
                     ) : (
                       <button onClick={() => addItem(item)}
-                        className="font-mono text-xs px-3 py-1.5 border border-[#27272A] text-[#71717A] hover:border-[#00E559] hover:text-[#00E559] transition-colors">
-                        + ADD
+                        className="font-mono text-xs px-4 py-2 border-2 border-[#00E559] text-[#00E559] bg-[#00E559]/10 hover:bg-[#00E559] hover:text-black transition-colors font-bold shadow-[0_0_8px_rgba(0,229,89,0.3)]">
+                        ➕ ADICIONAR
                       </button>
                     )}
                   </div>
@@ -336,8 +507,16 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
             <span className="font-mono text-[10px] text-[#71717A]">AGENDAR HORÁRIO</span>
           </label>
           {form.agendado && (
-            <input type="datetime-local" value={form.horarioAgendado} onChange={e => set("horarioAgendado", e.target.value)}
-              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559] w-full" />
+            <>
+              <input type="datetime-local" value={form.horarioAgendado} onChange={e => set("horarioAgendado", e.target.value)}
+                className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559] w-full" />
+              {form.horarioAgendado && (
+                <div className="bg-[#111] border border-[#27272A] px-3 py-2 flex items-center justify-between">
+                  <span className="font-mono text-[10px] text-[#71717A]">TEMPO ATÉ O AGENDAMENTO</span>
+                  <MinutosRestantes horario={form.horarioAgendado} />
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -414,6 +593,16 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
             </div>
           )}
         </div>
+
+        {modalVariacao && (
+          <ModalVariacoes item={modalVariacao} onConfirmar={addItemDireto} onFechar={() => setModalVariacao(null)} />
+        )}
+        {editItem && (
+          <ModalEdit item={editItem} onUpdate={updateItem} onClose={() => setEditItem(null)} />
+        )}
+        {kgItem && (
+          <ModalKg item={kgItem} onConfirmar={addItemDireto} onFechar={() => setKgItem(null)} />
+        )}
 
         {/* Observação */}
         <div className="px-4 pt-3 pb-0">

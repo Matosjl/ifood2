@@ -86,6 +86,7 @@ export function PainelPedidosRestaurante() {
   const wsRef = useRef(null);
   const prevPedidosRef = useRef([]);
   const audioEnabledRef = useRef(false);
+  const [delayAlerts, setDelayAlerts] = useState([]);
 
   const restauranteId = "teste"; // TODO: pegar do contexto/auth real
 
@@ -159,6 +160,43 @@ export function PainelPedidosRestaurante() {
   // Habilita áudio após primeiro clique do usuário
   const enableAudio = () => {
     audioEnabledRef.current = true;
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const alerts = pedidos.filter(p => p.status === 'pendente' && (Date.now() - new Date(p.criadoEm).getTime()) > 15 * 60 * 1000).map(p => p.id);
+      setDelayAlerts(alerts);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [pedidos]);
+
+  const reimprimirPedido = (pedido) => {
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: monospace; font-size: 10px; margin: 0; padding: 10mm; max-width: 80mm; }
+h2 { text-align: center; margin-bottom: 5mm; }
+li { margin: 1mm 0; }
+.total { font-weight: bold; font-size: 12px; text-align: right; }
+</style>
+</head>
+<body>
+<h2>#${pedido.id.slice(-6).toUpperCase()}</h2>
+<p>Cliente: ${pedido.clienteNome}</p>
+<p>Tel: ${pedido.clienteTelefone}</p>
+<ul>
+${pedido.itens.map(i => `<li>${i.qtd}x ${i.nome} <span style='float:right'>R$ ${(i.qtd * i.precoUnitario).toFixed(2).replace('.', ',')}</span></li>`).join('')}
+</ul>
+<p class="total">Total: R$ ${pedido.total.toFixed(2).replace('.', ',')}</p>
+${pedido.observacao ? `<p>Obs: ${pedido.observacao}</p>` : ''}
+<script>window.onload = () => { window.print(); setTimeout(() => window.close(), 1000); }</script>
+</body>
+</html>`;
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
   };
 
   const handleStatusChange = async (pedidoId, novoStatus, motivo = null) => {
@@ -321,6 +359,13 @@ export function PainelPedidosRestaurante() {
                     </div>
                   </div>
 
+                  {/* 15min delay alert */}
+                  {pedido.status === 'pendente' && delayAlerts.includes(pedido.id) && (
+                    <div className="bg-[#FF4444]/20 border border-[#FF4444] p-2 rounded animate-pulse">
+                      <span className="font-mono text-xs font-bold text-[#FF4444]">⚠️ PEDIDO ATRASADO >15min!</span>
+                    </div>
+                  )}
+
                   {/* Endereço (se entrega) */}
                   {pedido.tipo === "entrega" && pedido.endereco && (
                     <div className="font-mono text-xs text-[#A1A1AA] bg-black p-2 border border-[#27272A]">
@@ -332,7 +377,7 @@ export function PainelPedidosRestaurante() {
                   {/* Itens */}
                   <div className="flex flex-col gap-1">
                     {pedido.itens?.map((item, idx) => (
-                      <div key={idx} className="flex justify-between font-mono text-xs">
+                      <div key={idx} className="flex justify-between font-mono text-sm leading-4">
                         <span className="text-[#EDEDED]">
                           {item.qtd}x {item.nome}
                           {item.tamanho && ` (${item.tamanho})`}
@@ -402,6 +447,9 @@ export function PainelPedidosRestaurante() {
                       ))}
                     </div>
                   )}
+                  <button onClick={() => reimprimirPedido(pedido)} className="font-mono text-xs px-4 py-2 bg-[#007AFF] text-white font-bold hover:bg-[#0056b3] transition-colors mt-1">
+                    🖨 Reimprimir
+                  </button>
 
                   {/* Motivo cancelamento */}
                   {pedido.status === "cancelado" && pedido.motivoCancelamento && (
