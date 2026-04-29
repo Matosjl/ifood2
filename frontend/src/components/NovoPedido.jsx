@@ -25,7 +25,14 @@ const emptyOrder = {
   cliente: "", telefone: "", tipo: "retirada",
   pagamento: "", pago: false, agendado: false,
   horarioAgendado: "", observacao: "", tempo: 30,
+  mesa: "",
 };
+
+const MOCK_CLIENTES = [
+  { id: 1, nome: "João Silva", telefone: "(11) 99999-0001", cpf: "123.456.789-00", gmail: "joao@gmail.com", nascimento: "1990-05-10", pais: "Brasil", obs: "Cliente frequente", promo: true },
+  { id: 2, nome: "Maria Souza", telefone: "(11) 98888-0002", cpf: "", gmail: "maria@gmail.com", nascimento: "1995-09-21", pais: "Brasil", obs: "", promo: false },
+];
+const MESAS = Array.from({ length: 20 }, (_, i) => `Mesa ${i + 1}`);
 
 // ── Minutos Restantes ─────────────────────────────────────────────────────────
 const MinutosRestantes = ({ horario }) => {
@@ -228,10 +235,48 @@ export function NovoPedido({ onPedidoCriado, itensEstoque = [] }) {
   const [modalVariacao, setModalVariacao] = useState(null); // item com variações
   const [editItem, setEditItem] = useState(null);
   const [kgItem, setKgItem] = useState(null);
+  const [clientes, setClientes] = useState(MOCK_CLIENTES);
+  const [buscaCliente, setBuscaCliente] = useState("");
+  const [clienteEncontrado, setClienteEncontrado] = useState(null);
+  const [showCadastroCliente, setShowCadastroCliente] = useState(false);
+  const [novoCliente, setNovoCliente] = useState({
+    nome: "", cpf: "", gmail: "", nascimento: "", pais: "Brasil", obs: "", promo: false, telefone: "",
+  });
   const fileRef = useRef();
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setEnd = (k, v) => setEndereco(e => ({ ...e, [k]: v }));
+  const setNovo = (k, v) => setNovoCliente(c => ({ ...c, [k]: v }));
+
+  const buscarCliente = () => {
+    const termo = buscaCliente.trim().toLowerCase();
+    if (!termo) return;
+    const found = clientes.find(
+      (c) =>
+        (c.telefone || "").toLowerCase().includes(termo) ||
+        (c.nome || "").toLowerCase().includes(termo)
+    );
+    if (found) {
+      setClienteEncontrado(found);
+      set("cliente", found.nome || "");
+      set("telefone", found.telefone || "");
+      setShowCadastroCliente(false);
+    } else {
+      setClienteEncontrado(null);
+      setShowCadastroCliente(true);
+      setNovoCliente((c) => ({ ...c, nome: form.cliente || "", telefone: buscaCliente || "" }));
+    }
+  };
+
+  const cadastrarNovoCliente = () => {
+    if (!novoCliente.nome || !novoCliente.telefone) return;
+    const novo = { ...novoCliente, id: Date.now() };
+    setClientes(prev => [novo, ...prev]);
+    setClienteEncontrado(novo);
+    set("cliente", novo.nome);
+    set("telefone", novo.telefone);
+    setShowCadastroCliente(false);
+  };
 
   // Agrupa cardápio por categoria
   const grouped = cardapio.reduce((acc, item) => {
@@ -484,15 +529,77 @@ ${form.observacao ? `<p><strong>Obs:</strong> ${form.observacao}</p>` : ''}
             </div>
           </div>
 
+          {/* Busca cliente */}
+          <div className="flex flex-col gap-2">
+            <label className="font-mono text-[10px] text-[#71717A]">BUSCAR CLIENTE (telefone ou nome)</label>
+            <div className="flex gap-2">
+              <input value={buscaCliente} onChange={e => setBuscaCliente(e.target.value)}
+                placeholder="Digite telefone ou nome"
+                className="flex-1 bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559]" />
+              <button type="button" onClick={buscarCliente}
+                className="px-3 py-1.5 border border-[#00E559] text-[#00E559] font-mono text-xs hover:bg-[#00E559]/10">
+                BUSCAR
+              </button>
+            </div>
+
+            {clienteEncontrado && (
+              <div className="border border-[#00E559]/30 bg-[#00E559]/5 px-2 py-1.5 font-mono text-[10px] text-[#00E559]">
+                Cliente encontrado: {clienteEncontrado.nome} · {clienteEncontrado.telefone}
+              </div>
+            )}
+
+            {showCadastroCliente && (
+              <div className="border border-[#FFB800]/40 bg-[#FFB800]/5 p-3 flex flex-col gap-2">
+                <span className="font-mono text-[10px] text-[#FFB800] tracking-widest">NOVO CLIENTE</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={novoCliente.nome} onChange={e => setNovo("nome", e.target.value)} placeholder="Nome *"
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                  <input value={novoCliente.telefone} onChange={e => setNovo("telefone", e.target.value)} placeholder="Telefone *"
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                  <input value={novoCliente.cpf} onChange={e => setNovo("cpf", e.target.value)} placeholder="CPF (opcional)"
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                  <input value={novoCliente.gmail} onChange={e => setNovo("gmail", e.target.value)} placeholder="Gmail"
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                  <input type="date" value={novoCliente.nascimento} onChange={e => setNovo("nascimento", e.target.value)}
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                  <input value={novoCliente.pais} onChange={e => setNovo("pais", e.target.value)} placeholder="País"
+                    className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5" />
+                </div>
+                <textarea value={novoCliente.obs} onChange={e => setNovo("obs", e.target.value)} placeholder="Obs"
+                  rows={2}
+                  className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 resize-none" />
+                <label className="flex items-center gap-2 font-mono text-[10px] text-[#71717A]">
+                  <input type="checkbox" checked={novoCliente.promo} onChange={e => setNovo("promo", e.target.checked)} className="accent-[#00E559]" />
+                  Receber mensagens promocionais
+                </label>
+                <button type="button" onClick={cadastrarNovoCliente}
+                  className="py-2 bg-[#00E559] text-black font-mono text-xs font-bold hover:bg-[#00c44d]">
+                  + CADASTRAR CLIENTE
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Tipo */}
           <div className="flex gap-2">
-            {["retirada", "entrega"].map(t => (
+            {["retirada", "entrega", "comer_aqui"].map(t => (
               <button key={t} type="button" onClick={() => set("tipo", t)}
                 className={`flex-1 font-mono text-xs py-1.5 border transition-colors ${form.tipo === t ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10" : "border-[#27272A] text-[#71717A]"}`}>
-                {t === "retirada" ? "🏪 RETIRADA" : "🛵 ENTREGA"}
+                {t === "retirada" ? "🏪 RETIRADA" : t === "entrega" ? "🛵 ENTREGA" : "🍽 COMER AQUI"}
               </button>
             ))}
           </div>
+
+          {form.tipo === "comer_aqui" && (
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-[10px] text-[#71717A]">MESA *</label>
+              <select value={form.mesa} onChange={e => set("mesa", e.target.value)}
+                className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-[#00E559]">
+                <option value="">Selecione uma mesa</option>
+                {MESAS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Tempo estimado */}
           <div className="flex items-center gap-2">

@@ -575,6 +575,11 @@ export function RestaurantePage() {
   const [orders, setOrders] = useState(MOCK_ORDERS);
   const [estoqueItens, setEstoqueItens] = useState([]);
   const [vendasFinanceiro, setVendasFinanceiro] = useState([]);
+  const [lojaAtiva, setLojaAtiva] = useState(true);
+  const [mesas] = useState(Array.from({ length: 20 }, (_, i) => ({ id: `Mesa ${i + 1}`, status: i % 3 === 0 ? "ocupada" : "livre" })));
+  const [impressoras, setImpressoras] = useState([{ nome: "EPSON-TM-T20", ativa: true }]);
+  const [novaImpressora, setNovaImpressora] = useState("");
+  const [showQrWpp, setShowQrWpp] = useState(false);
 
   const restaurantName = `Restaurante ${id || ""}`;
 
@@ -669,6 +674,13 @@ export function RestaurantePage() {
     await axios.post(`${API}/entregador/despachar`, payload);
   };
 
+  const addImpressora = () => {
+    const nome = novaImpressora.trim();
+    if (!nome) return;
+    setImpressoras(prev => [...prev, { nome, ativa: true }]);
+    setNovaImpressora("");
+  };
+
   return (
     <div className="min-h-screen w-full bg-black text-[#EDEDED] flex flex-col">
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#27272A]">
@@ -700,12 +712,86 @@ export function RestaurantePage() {
         })}
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} /></div>}
-        {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
-        {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
-        {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
-        {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
+      <div className="flex-1 overflow-hidden flex">
+        <div className="flex-1 min-w-0">
+          {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} /></div>}
+          {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
+          {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
+          {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
+          {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
+        </div>
+
+        <aside className="w-[320px] border-l border-[#27272A] bg-[#0A0A0A] p-4 overflow-y-auto flex flex-col gap-4">
+          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">LOJA DE PEDIDOS</span>
+            <button
+              onClick={() => setLojaAtiva(v => !v)}
+              className={`py-2 font-mono text-xs border ${
+                lojaAtiva
+                  ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10"
+                  : "border-[#FF4444] text-[#FF4444] bg-[#FF4444]/10"
+              }`}
+            >
+              {lojaAtiva ? "🟢 RESTAURANTE ATIVO" : "🔴 RESTAURANTE DESATIVADO"}
+            </button>
+          </div>
+
+          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">MESAS</span>
+            <div className="grid grid-cols-2 gap-2">
+              {mesas.map((m) => (
+                <div key={m.id} className={`px-2 py-1 border font-mono text-[10px] ${m.status === "ocupada" ? "border-[#FFB800] text-[#FFB800]" : "border-[#27272A] text-[#A1A1AA]"}`}>
+                  {m.id} · {m.status}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">INTEGRAÇÃO WHATSAPP (EVOLUTION)</span>
+            <button
+              onClick={() => setShowQrWpp(v => !v)}
+              className="py-2 border border-[#00BFFF] text-[#00BFFF] font-mono text-xs hover:bg-[#00BFFF]/10"
+            >
+              {showQrWpp ? "OCULTAR QR CODE" : "ABRIR QR CODE"}
+            </button>
+            {showQrWpp && (
+              <div className="border border-[#27272A] p-3 text-center">
+                <div className="w-40 h-40 mx-auto bg-white text-black flex items-center justify-center font-mono text-xs">
+                  QR CODE
+                </div>
+                <span className="font-mono text-[10px] text-[#71717A] block mt-2">
+                  Escaneie no WhatsApp (mock Evolution API)
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
+            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">IMPRESSÕES</span>
+            <div className="flex gap-2">
+              <input
+                value={novaImpressora}
+                onChange={(e) => setNovaImpressora(e.target.value)}
+                placeholder="Nome da impressora"
+                className="flex-1 bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-2 py-1.5"
+              />
+              <button onClick={addImpressora} className="px-2 border border-[#00E559] text-[#00E559] font-mono text-xs">
+                +
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {impressoras.map((imp, idx) => (
+                <div key={`${imp.nome}-${idx}`} className="flex items-center justify-between border border-[#27272A] px-2 py-1">
+                  <span className="font-mono text-[10px] text-[#EDEDED]">{imp.nome}</span>
+                  <span className={`font-mono text-[10px] ${imp.ativa ? "text-[#00E559]" : "text-[#71717A]"}`}>
+                    {imp.ativa ? "ATIVA" : "INATIVA"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
       </div>
 
       <Footer />
