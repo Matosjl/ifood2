@@ -3,28 +3,26 @@
 # 5 serviços: Frontend | API FastAPI | MongoDB | Redis | Celery Worker
 # ═══════════════════════════════════════════════════════════════════════════════
 
-version: "3.9"
+# Version removed (obsolete in Docker Compose v2+)
 
 services:
   frontend:
-    image: node:20-alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: ifood2_frontend
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
       - "3000:3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
-    command: sh -c "yarn install && yarn start"
-    stdin_open: true
-    tty: true
-    depends_on:
-      - api
+      - HOST=0.0.0.0
+      - REACT_APP_BACKEND_URL=http://api:8000
     networks:
       - ifood2_net
+    depends_on:
+      api:
+        condition: service_healthy
 
   # ── 1. API FastAPI ──────────────────────────────────────────────────────────
 
@@ -36,6 +34,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    entrypoint: ["/app/entrypoint.sh"]
     environment:
       - MONGO_URL=mongodb://db:27017
       - DB_NAME=ifood2
@@ -46,14 +45,17 @@ services:
       - JWT_SECRET=${JWT_SECRET:-ajax-jwt-secret}
       - OLLAMA_API_URL=${OLLAMA_API_URL:-}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000
     env_file:
       - ./backend/.env
-    depends_on:
-      - db
-      - redis
     networks:
       - ifood2_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:

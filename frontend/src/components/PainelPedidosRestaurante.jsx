@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { subscribePush } from "@/lib/pushNotifications";
 
-const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+const API = `${BACKEND_URL}/api`;
+const WS_URL = BACKEND_URL.replace(/^http/, "ws");
 
 const STATUS_LABELS = {
   pendente: { label: "PENDENTE", color: "#FFB000", bg: "#FFB000/10" },
@@ -23,6 +25,9 @@ const STATUS_FLOW = [
   "em_entrega",
   "entregue",
 ];
+
+// Status que requerem atenção ativa do restaurante
+const STATUS_ATIVOS = ["pendente", "confirmado", "em_preparo", "pronto", "em_entrega"];
 
 const STATUS_ACTIONS = {
   pendente: [
@@ -81,7 +86,7 @@ export function PainelPedidosRestaurante() {
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [filtroStatus, setFiltroStatus] = useState("ativos");
   const [novoPedidoAlert, setNovoPedidoAlert] = useState(false);
   const wsRef = useRef(null);
   const prevPedidosRef = useRef([]);
@@ -92,12 +97,16 @@ export function PainelPedidosRestaurante() {
 
   const fetchPedidos = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const params = { restaurante_id: restauranteId, limit: 100 };
-      if (filtroStatus !== "todos") params.status = filtroStatus;
+      // "todos" e "ativos" buscam sem filtro de status no backend (filtragem local)
+      if (filtroStatus !== "todos" && filtroStatus !== "ativos") {
+        params.status = filtroStatus;
+      }
       const res = await axios.get(`${API}/pedidos`, { params });
-      const novos = res.data.pedidos || [];
-      // Detecta novos pedidos pendentes
+      const novos = res.data?.pedidos ?? [];
+      // Detecta novos pedidos pendentes para notificação sonora
       const prevIds = new Set(prevPedidosRef.current.map((p) => p.id));
       const temNovo = novos.some((p) => p.status === "pendente" && !prevIds.has(p.id));
       if (temNovo && audioEnabledRef.current) {
@@ -116,8 +125,11 @@ export function PainelPedidosRestaurante() {
 
   // Conecta WebSocket para updates em tempo real
   useEffect(() => {
+    let isMounted = true;
+
     const connectWS = () => {
-      const ws = new WebSocket(`ws://localhost:8000/ws/track/${restauranteId}`);
+      if (!isMounted) return;
+      const ws = new WebSocket(`${WS_URL}/api/ws/track/${restauranteId}`);
       ws.onopen = () => {
         console.log("[WS] Conectado ao painel de pedidos");
       };
@@ -126,7 +138,7 @@ export function PainelPedidosRestaurante() {
           const data = JSON.parse(event.data);
           if (data.type === "pedido_status_update") {
             fetchPedidos();
-            if (data.status === "pendente") {
+            if (data.status === "pendente" && audioEnabledRef.current) {
               playNotificationSound();
               setNovoPedidoAlert(true);
               setTimeout(() => setNovoPedidoAlert(false), 5000);
@@ -135,14 +147,20 @@ export function PainelPedidosRestaurante() {
         } catch {}
       };
       ws.onclose = () => {
-        console.log("[WS] Desconectado, reconectando em 3s...");
-        setTimeout(connectWS, 3000);
+        if (isMounted) {
+          console.log("[WS] Desconectado, reconectando em 3s...");
+          setTimeout(connectWS, 3000);
+        }
       };
       ws.onerror = () => ws.close();
       wsRef.current = ws;
     };
+
     connectWS();
-    return () => wsRef.current?.close();
+    return () => {
+      isMounted = false;
+      wsRef.current?.close();
+    };
   }, [fetchPedidos, restauranteId]);
 
   // Polling de fallback (a cada 10s)
@@ -205,6 +223,11 @@ ${pedido.observacao ? `<p>Obs: ${pedido.observacao}</p>` : ''}
         status: novoStatus,
         motivoCancelamento: motivo,
       });
+      // Impressão automática silenciosa ao confirmar pedido
+      if (novoStatus === "confirmado") {
+        const pedido = pedidos.find(p => p.id === pedidoId);
+        if (pedido) reimprimirPedido(pedido);
+      }
       fetchPedidos();
     } catch (err) {
       setError(`Erro ao atualizar status: ${err.message}`);
@@ -214,6 +237,8 @@ ${pedido.observacao ? `<p>Obs: ${pedido.observacao}</p>` : ''}
   const pedidosFiltrados =
     filtroStatus === "todos"
       ? pedidos
+      : filtroStatus === "ativos"
+      ? pedidos.filter((p) => STATUS_ATIVOS.includes(p.status))
       : pedidos.filter((p) => p.status === filtroStatus);
 
   const pedidosAtivos = pedidos.filter((p) =>
@@ -256,10 +281,20 @@ ${pedido.observacao ? `<p>Obs: ${pedido.observacao}</p>` : ''}
         {/* Filtros de status */}
         <div className="flex flex-wrap gap-2">
           <button
+            onClick={() => setFiltroStatus("ativos")}
+            className={`font-mono text-xs px-3 py-1.5 border transition-colors ${
+              filtroStatus === "ativos"
+                ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10"
+                : "border-[#27272A] text-[#71717A] hover:border-[#3F3F46]"
+            }`}
+          >
+            ATIVOS ({pedidos.filter((p) => STATUS_ATIVOS.includes(p.status)).length})
+          </button>
+          <button
             onClick={() => setFiltroStatus("todos")}
             className={`font-mono text-xs px-3 py-1.5 border transition-colors ${
               filtroStatus === "todos"
-                ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10"
+                ? "border-[#A1A1AA] text-[#A1A1AA] bg-[#A1A1AA]/10"
                 : "border-[#27272A] text-[#71717A] hover:border-[#3F3F46]"
             }`}
           >
@@ -308,7 +343,11 @@ ${pedido.observacao ? `<p>Obs: ${pedido.observacao}</p>` : ''}
           <div className="text-center font-mono text-xs text-[#71717A] py-12">CARREGANDO PEDIDOS...</div>
         ) : pedidosFiltrados.length === 0 ? (
           <div className="text-center font-mono text-xs text-[#3F3F46] py-12">
-            {filtroStatus === "todos" ? "NENHUM PEDIDO ENCONTRADO" : `NENHUM PEDIDO ${STATUS_LABELS[filtroStatus]?.label}`}
+            {filtroStatus === "ativos"
+              ? "NENHUM PEDIDO ATIVO NO MOMENTO"
+              : filtroStatus === "todos"
+              ? "NENHUM PEDIDO ENCONTRADO"
+              : `NENHUM PEDIDO ${STATUS_LABELS[filtroStatus]?.label}`}
           </div>
         ) : (
           <div className="grid gap-3">

@@ -41,8 +41,9 @@ const FechamentoCaixa = ({ caixa, vendas, onFechar }) => {
   const [cartao, setCartao] = useState("");
 
   const totalInformado = (parseFloat(dinheiro) || 0) + (parseFloat(pix) || 0) + (parseFloat(cartao) || 0);
-  const totalVendido = vendas.reduce((s, v) => s + v.total, 0);
-  const liquido = totalVendido - caixa.fundo;
+  // Suporta objetos do backend (campo "total") e do mock local (campo "total" ou "salePrice")
+  const totalVendido = vendas.reduce((s, v) => s + (Number(v.total) || 0), 0);
+  const liquido = totalVendido - (caixa?.fundo || 0);
 
   return (
     <div className="flex flex-col gap-4 max-w-md">
@@ -310,41 +311,35 @@ export function Financeiro({ vendas = [], restauranteId }) {
   }, [restauranteId]);
 
   const handleAbrirCaixa = async (fundo) => {
-    const novoCaixa = { restauranteId, fundo };
     try {
-      const res = await axios.post(`${API}/financeiro/caixa`, novoCaixa);
-      setCaixa(res.data);
+      await axios.post(`${API}/financeiro/caixa`, { restauranteId, fundo });
+      // Recarrega do backend para garantir o objeto completo (id, abertoEm, etc.)
+      const r = await axios.get(`${API}/financeiro/caixa/${restauranteId}/hoje`);
+      if (r.data?.status === "aberto") setCaixa(r.data);
     } catch (err) {
-      console.error("Erro abrir caixa:", err);
+      console.error("Erro abrir caixa:", err?.response?.data?.detail || err.message);
     }
   };
 
   const handleFecharCaixa = async (resumo) => {
     try {
-      await axios.patch(`${API}/financeiro/caixa/${restauranteId}/fechar`, resumo);
+      const res = await axios.patch(`${API}/financeiro/caixa/${restauranteId}/fechar`, {
+        dinheiro: resumo.dinheiro,
+        pix: resumo.pix,
+        cartao: resumo.cartao,
+        outros: resumo.outros || 0,
+      });
+      const fechado = {
+        ...caixa,
+        ...res.data,
+        fechadoEm: new Date().toISOString(),
+        status: "fechado",
+      };
+      setHistoricoCaixa(p => [fechado, ...p]);
       setCaixa(null);
-      // Limpa pedidos do dia (após fechar caixa)
-      setVendasFinanceiro([]);
     } catch (err) {
-      console.error("Erro fechar caixa:", err);
+      console.error("Erro fechar caixa:", err?.response?.data?.detail || err.message);
     }
-  };
-
-  const handleAbrirCaixa = async (fundo) => {
-    const novoCaixa = { restauranteId, fundo, abertoEm: new Date().toISOString(), status: "aberto" };
-    try {
-      await axios.post(`${API}/financeiro/caixa`, novoCaixa);
-    } catch {}
-    setCaixa(novoCaixa);
-  };
-
-  const handleFecharCaixa = async (resumo) => {
-    const fechado = { ...caixa, ...resumo, fechadoEm: new Date().toISOString(), status: "fechado" };
-    try {
-      await axios.patch(`${API}/financeiro/caixa/${restauranteId}/fechar`, resumo);
-    } catch {}
-    setHistoricoCaixa(p => [fechado, ...p]);
-    setCaixa(null);
   };
 
   const totalVendido = vendas.reduce((s, v) => s + v.total, 0);

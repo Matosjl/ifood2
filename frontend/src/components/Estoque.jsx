@@ -163,54 +163,6 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
     reader.readAsDataURL(file);
   };
 
-  const iniciarEdicao = (item) => {
-    setEditandoId(item.id);
-    setEditForm({
-      nome: item.nome,
-      categoria: item.categoria,
-      quantidade: item.quantidade,
-      precoCusto: item.precoCusto,
-      precoVenda: item.precoVenda,
-      porKg: item.porKg,
-      foto: item.foto || null,
-    });
-  };
-
-  const cancelarEdicao = () => {
-    setEditandoId(null);
-    setEditForm({});
-    if (editFileRef.current) editFileRef.current.value = "";
-  };
-
-  const salvarEdicao = async (itemId) => {
-    const payload = {
-      nome: editForm.nome,
-      categoria: editForm.categoria,
-      quantidade: parseFloat(editForm.quantidade),
-      precoCusto: parseFloat(editForm.precoCusto) || 0,
-      precoVenda: parseFloat(editForm.precoVenda),
-      porKg: editForm.porKg,
-      foto: editForm.foto,
-    };
-    const updates = Object.fromEntries(Object.entries(payload).filter(([_, v]) => v !== undefined && v !== ""));
-
-    setItens(prev => prev.map(i => i.id === itemId ? { ...i, ...updates } : i));
-    try {
-      await axios.patch(`${API}/estoque/${itemId}`, updates);
-    } catch {}
-    setEditandoId(null);
-    setEditForm({});
-    if (editFileRef.current) editFileRef.current.value = "";
-  };
-
-  const handleEditFoto = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setEditForm(f => ({ ...f, foto: ev.target.result }));
-    reader.readAsDataURL(file);
-  };
-
   // Agrupa itens por categoria
   const itensPorCategoria = (nomeCategoria) => itens.filter(i => i.categoria === nomeCategoria);
 

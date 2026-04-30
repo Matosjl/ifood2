@@ -41,6 +41,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copia código da aplicação
 COPY . .
+RUN chmod +x /app/entrypoint.sh
 
 # Porta exposta pelo Uvicorn
 EXPOSE 8000

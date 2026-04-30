@@ -11,8 +11,7 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from celery_app import celery_app
 from config import MONGO_URL, DB_NAME, OLLAMA_API_URL, OLLAMA_MODEL
-from celery_app import celery_app
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ import { DigitalMenu } from "@/components/DigitalMenu";
 import { NovoPedido } from "@/components/NovoPedido";
 import { Estoque } from "@/components/Estoque";
 import { Financeiro } from "@/components/Financeiro";
+import { Cardapio } from "@/components/Cardapio";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
 
@@ -861,7 +862,17 @@ export function RestaurantePage() {
         <div className="flex-1 min-w-0">
           {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} onReimprimir={printOrder} /></div>}
           {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
-          {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
+          {activeTab === "cardapio" && (
+            <div className="h-full overflow-y-auto flex flex-col gap-0">
+              <Cardapio restauranteId={id} />
+              <div className="border-t border-[#27272A] px-6 pb-2 pt-4">
+                <span className="font-mono text-[10px] text-[#71717A] tracking-widest">PRÉ-VISUALIZAÇÃO</span>
+              </div>
+              <div className="px-6 pb-6">
+                <DigitalMenu items={menuItems} restaurantName={restaurantName} />
+              </div>
+            </div>
+          )}
           {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
           {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
         </div>
