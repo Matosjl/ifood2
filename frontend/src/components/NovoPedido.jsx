@@ -796,10 +796,15 @@ ${form.observacao ? `<p><strong>Obs:</strong> ${form.observacao}</p>` : ''}
           )}
 
           <button type="button" onClick={handleFinalizar}
-            disabled={!form.cliente || carrinho.length === 0}
+            disabled={!form.cliente || carrinho.length === 0 || (form.tipo === "comer_aqui" && !form.mesa)}
             className="w-full py-2.5 bg-[#00E559] text-black font-mono text-xs font-bold hover:bg-[#00c44d] transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1">
             {!form.pago ? "⚠ FINALIZAR (PAGAMENTO PENDENTE)" : "✓ FINALIZAR PEDIDO"}
           </button>
+          {form.tipo === "comer_aqui" && !form.mesa && (
+            <div className="font-mono text-[10px] text-[#FF4444] border border-[#FF4444]/30 bg-[#FF4444]/5 px-2 py-1 mt-1">
+              Selecione a mesa para pedidos “Comer aqui”.
+            </div>
+          )}
         </div>
 
       </div>

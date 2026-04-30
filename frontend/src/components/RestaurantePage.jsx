@@ -18,6 +18,7 @@ const STATUS_COLORS = {
   CANCELADO: "#FF4444",
 };
 const PAYMENT_ICONS = { PIX: "◈", DINHEIRO: "₿", CARTÃO: "▣", "VALE REFEIÇÃO": "◉" };
+const OWNER_TOKEN = process.env.REACT_APP_OWNER_API_TOKEN || "ifood2-token-super-seguro-2026";
 
 const MOCK_ORDERS = [
   { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "FINALIZADO", type: "ENTREGA", payment: "PIX", time: "14:32", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 99999-0001", endereco: { rua: "Rua das Flores", numero: "123", cep: "01310-100", referencia: "Próximo ao mercado" } },
@@ -357,10 +358,10 @@ const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
 };
 
 // ── Views ─────────────────────────────────────────────────────────────────────
-const CardView = ({ orders, onSelect }) => (
+const CardView = ({ orders, onSelect, onReimprimir }) => (
   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
     {orders.map((o) => (
-      <div key={o.id} onClick={() => onSelect(o)}
+      <div key={o.id}
         className="bg-[#0A0A0A] border border-[#27272A] p-4 flex flex-col gap-2 hover:border-[#3F3F46] cursor-pointer transition-colors">
         <div className="flex justify-between items-center">
           <span className="font-mono text-xs text-[#71717A]">{o.id}</span>
@@ -376,17 +377,25 @@ const CardView = ({ orders, onSelect }) => (
           <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[o.payment]} {o.payment}</span>
           <span className="font-mono text-sm text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+          className="mt-2 w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
+          title="Reimprimir"
+          aria-label="Reimprimir"
+        >
+          🖨
+        </button>
       </div>
     ))}
   </div>
 );
 
-const ListView = ({ orders, onSelect }) => (
+const ListView = ({ orders, onSelect, onReimprimir }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[600px]">
       <thead>
         <tr className="border-b border-[#27272A]">
-          {["#", "CLIENTE", "ITENS", "PAGAMENTO", "TIPO", "TOTAL", "STATUS", "TEMPO"].map((h) => (
+          {["#", "CLIENTE", "ITENS", "PAGAMENTO", "TIPO", "TOTAL", "STATUS", "TEMPO", "IMP"].map((h) => (
             <th key={h} className="px-4 py-2 text-left font-mono text-xs text-[#71717A]">{h}</th>
           ))}
         </tr>
@@ -402,6 +411,16 @@ const ListView = ({ orders, onSelect }) => (
             <td className="px-4 py-3 font-mono text-sm text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</td>
             <td className="px-4 py-3 font-mono text-xs" style={{ color: STATUS_COLORS[o.status] || "#71717A" }}>{o.status}</td>
             <td className="px-4 py-3">{o.agendado && o.horarioAgendado ? <Countdown horario={o.horarioAgendado} /> : <span className="font-mono text-xs text-[#3F3F46]">—</span>}</td>
+            <td className="px-4 py-3">
+              <button
+                onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+                className="w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
+                title="Reimprimir"
+                aria-label="Reimprimir"
+              >
+                🖨
+              </button>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -409,7 +428,7 @@ const ListView = ({ orders, onSelect }) => (
   </div>
 );
 
-const KanbanView = ({ orders, onSelect }) => {
+const KanbanView = ({ orders, onSelect, onReimprimir }) => {
   const cols = STATUS_OPTIONS.filter((s) => s !== "TODOS");
   return (
     <div className="flex gap-3 p-4 overflow-x-auto min-h-[300px]">
@@ -435,6 +454,14 @@ const KanbanView = ({ orders, onSelect }) => {
                   <span className="font-mono text-xs text-[#A1A1AA]">{o.type}</span>
                   <span className="font-mono text-xs text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+                  className="mt-1 w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
+                  title="Reimprimir"
+                  aria-label="Reimprimir"
+                >
+                  🖨
+                </button>
               </div>
             ))}
             {colOrders.length === 0 && <div className="font-mono text-xs text-[#3F3F46] text-center py-4">vazio</div>}
@@ -445,7 +472,7 @@ const KanbanView = ({ orders, onSelect }) => {
   );
 };
 
-const CompactView = ({ orders, onSelect }) => (
+const CompactView = ({ orders, onSelect, onReimprimir }) => (
   <div className="flex flex-col divide-y divide-[#27272A]">
     {orders.map((o) => (
       <div key={o.id} onClick={() => onSelect(o)}
@@ -457,13 +484,21 @@ const CompactView = ({ orders, onSelect }) => (
           : <span className="font-mono text-xs text-[#A1A1AA] hidden sm:block">{o.time}</span>}
         <span className="font-mono text-xs text-[#00E559] w-20 text-right">R$ {o.total.toFixed(2).replace(".", ",")}</span>
         <span className="font-mono text-xs w-20 text-right" style={{ color: STATUS_COLORS[o.status] || "#71717A" }}>{o.status}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+          className="w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
+          title="Reimprimir"
+          aria-label="Reimprimir"
+        >
+          🖨
+        </button>
       </div>
     ))}
   </div>
 );
 
 // ── Pedidos Tab ───────────────────────────────────────────────────────────────
-const PedidosTab = ({ orders, onStatusChange, onDespachar }) => {
+const PedidosTab = ({ orders, onStatusChange, onDespachar, onReimprimir }) => {
   const [statusFilter, setStatusFilter] = useState("TODOS");
   const [typeFilter, setTypeFilter] = useState("TODOS");
   const [viewMode, setViewMode] = useState("cards");
@@ -507,7 +542,7 @@ const PedidosTab = ({ orders, onStatusChange, onDespachar }) => {
           </div>
           <div className="w-px bg-[#27272A] hidden sm:block" />
           <div className="flex gap-1">
-            {["TODOS", "ENTREGA", "RETIRADA"].map((t) => (
+            {["TODOS", "ENTREGA", "RETIRADA", "COMER AQUI"].map((t) => (
               <button key={t} onClick={() => setTypeFilter(t)}
                 className="font-mono text-xs px-2 py-1 border transition-colors"
                 style={{ borderColor: typeFilter === t ? "#00BFFF" : "#27272A", color: typeFilter === t ? "#00BFFF" : "#71717A" }}>
@@ -536,10 +571,10 @@ const PedidosTab = ({ orders, onStatusChange, onDespachar }) => {
           <div className="text-center py-16 font-mono text-xs text-[#3F3F46]">NENHUM PEDIDO ENCONTRADO</div>
         ) : (
           <>
-            {viewMode === "cards" && <CardView orders={filtered} onSelect={setSelectedOrder} />}
-            {viewMode === "lista" && <ListView orders={filtered} onSelect={setSelectedOrder} />}
-            {viewMode === "kanban" && <KanbanView orders={filtered} onSelect={setSelectedOrder} />}
-            {viewMode === "compacto" && <CompactView orders={filtered} onSelect={setSelectedOrder} />}
+            {viewMode === "cards" && <CardView orders={filtered} onSelect={setSelectedOrder} onReimprimir={onReimprimir} />}
+            {viewMode === "lista" && <ListView orders={filtered} onSelect={setSelectedOrder} onReimprimir={onReimprimir} />}
+            {viewMode === "kanban" && <KanbanView orders={filtered} onSelect={setSelectedOrder} onReimprimir={onReimprimir} />}
+            {viewMode === "compacto" && <CompactView orders={filtered} onSelect={setSelectedOrder} onReimprimir={onReimprimir} />}
           </>
         )}
       </div>
@@ -570,6 +605,7 @@ const Footer = () => (
 export function RestaurantePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [theme, setTheme] = useState("light");
   const [activeTab, setActiveTab] = useState("pedidos");
   const [menuItems, setMenuItems] = useState([]);
   const [orders, setOrders] = useState(MOCK_ORDERS);
@@ -609,6 +645,47 @@ export function RestaurantePage() {
     }));
   };
 
+  const buildPrintText = (order) => {
+    const lines = [
+      "================================",
+      `PEDIDO ${order.id}`,
+      "================================",
+      `Cliente: ${order.client || "-"}`,
+      `Tipo: ${order.type || "-"}`,
+      `Pagamento: ${order.payment || "-"}`,
+      "--------------------------------",
+      "ITENS:",
+      ...(order.items || []).map((it) => `- ${it}`),
+      "--------------------------------",
+      `TOTAL: R$ ${Number(order.total || 0).toFixed(2).replace(".", ",")}`,
+    ];
+    if (order.observacao) lines.push(`Obs: ${order.observacao}`);
+    lines.push(`Hora: ${new Date().toLocaleString("pt-BR")}`);
+    lines.push("================================");
+    return lines.join("\n");
+  };
+
+  const printOrder = async (order) => {
+    try {
+      const token = OWNER_TOKEN || window.localStorage.getItem("owner_api_token") || "";
+      await axios.post(
+        `${API}/print/direct`,
+        {
+          content: buildPrintText(order),
+          printer_name: impressoras?.[0]?.nome || "HPRT MPT-II",
+        },
+        {
+          headers: {
+            "X-Owner-Token": token,
+          },
+        }
+      );
+    } catch (err) {
+      console.error("Falha impressão direta", err);
+      window.alert("Falha ao imprimir direto. Verifique token, backend e impressora.");
+    }
+  };
+
   const handleNovoPedido = (pedido) => {
     const novo = {
       id: `#${1047 + orders.length}`,
@@ -617,7 +694,7 @@ export function RestaurantePage() {
       itensCompletos: pedido.itens, // guarda itens completos para financeiro
       total: pedido.total,
       status: "PENDENTE",
-      type: pedido.tipo === "entrega" ? "ENTREGA" : "RETIRADA",
+      type: pedido.tipo === "entrega" ? "ENTREGA" : pedido.tipo === "comer_aqui" ? "COMER AQUI" : "RETIRADA",
       payment: pedido.pagamento || "",
       pago: pedido.pago || false,
       time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
@@ -630,6 +707,7 @@ export function RestaurantePage() {
     setOrders((prev) => [novo, ...prev]);
     diminuirEstoque(pedido.itens);
     setActiveTab("pedidos");
+    setTimeout(() => printOrder(novo), 200);
   };
 
   // Ao finalizar (ENTREGUE), envia para financeiro
@@ -681,19 +759,37 @@ export function RestaurantePage() {
     setNovaImpressora("");
   };
 
+  const isDark = theme === "dark";
+  const pageClass = isDark ? "bg-black text-[#EDEDED]" : "bg-[#F8FAFC] text-[#0F172A]";
+  const panelClass = isDark ? "bg-[#0A0A0A] border-[#27272A]" : "bg-white border-[#E2E8F0]";
+  const subtleText = isDark ? "text-[#71717A]" : "text-[#475569]";
+  const borderClass = isDark ? "border-[#27272A]" : "border-[#E2E8F0]";
+
   return (
-    <div className="min-h-screen w-full bg-black text-[#EDEDED] flex flex-col">
-      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#27272A]">
+    <div className={`min-h-screen w-full flex flex-col ${pageClass}`}>
+      <div className={`flex items-center justify-between px-4 sm:px-6 py-3 border-b ${borderClass}`}>
         <div className="flex items-center gap-4">
           <button onClick={() => navigate("/")} className="font-mono text-xs text-[#71717A] hover:text-[#EDEDED] transition-colors">
             ← VOLTAR
           </button>
           <span className="font-mono text-sm text-[#00E559]">{restaurantName.toUpperCase()}</span>
         </div>
-        <span className="font-mono text-xs text-[#71717A] hidden sm:block">PAINEL DO RESTAURANTE</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+            className={`font-mono text-xs px-3 py-1.5 border transition-colors ${
+              isDark
+                ? "border-[#27272A] text-[#EDEDED] hover:border-[#00E559]"
+                : "border-[#CBD5E1] text-[#0F172A] hover:border-[#0EA5E9]"
+            }`}
+          >
+            {isDark ? "☀️ TEMA CLARO" : "🌙 MODERN-DARK"}
+          </button>
+          <span className={`font-mono text-xs hidden sm:block ${subtleText}`}>PAINEL DO RESTAURANTE</span>
+        </div>
       </div>
 
-      <div className="flex border-b border-[#27272A] overflow-x-auto">
+      <div className={`flex border-b overflow-x-auto ${borderClass}`}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           const isHighlight = tab.highlight && !isActive;
@@ -701,10 +797,10 @@ export function RestaurantePage() {
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`px-5 py-2 font-mono text-xs border-b-2 whitespace-nowrap transition-colors ${
                 isActive
-                  ? "border-[#00E559] text-[#00E559]"
+                  ? (isDark ? "border-[#00E559] text-[#00E559]" : "border-[#0EA5E9] text-[#0284C7] bg-[#E0F2FE]")
                   : isHighlight
-                    ? "border-transparent text-[#FFB800] hover:text-[#FFD700] animate-pulse font-bold"
-                    : "border-transparent text-[#71717A] hover:text-[#A1A1AA]"
+                    ? (isDark ? "border-transparent text-[#FFB800] hover:text-[#FFD700] animate-pulse font-bold" : "border-transparent text-[#B45309] hover:text-[#92400E] font-bold")
+                    : (isDark ? "border-transparent text-[#71717A] hover:text-[#A1A1AA]" : "border-transparent text-[#64748B] hover:text-[#334155]")
               }`}>
               {tab.highlight && <span className="mr-1">✨</span>}{tab.label}
             </button>
@@ -714,16 +810,16 @@ export function RestaurantePage() {
 
       <div className="flex-1 overflow-hidden flex">
         <div className="flex-1 min-w-0">
-          {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} /></div>}
+          {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} onReimprimir={printOrder} /></div>}
           {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
           {activeTab === "cardapio" && <div className="h-full overflow-y-auto"><DigitalMenu items={menuItems} restaurantName={restaurantName} /></div>}
           {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
           {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
         </div>
 
-        <aside className="w-[320px] border-l border-[#27272A] bg-[#0A0A0A] p-4 overflow-y-auto flex flex-col gap-4">
-          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">LOJA DE PEDIDOS</span>
+        <aside className={`w-[320px] border-l p-4 overflow-y-auto flex flex-col gap-4 ${panelClass}`}>
+          <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
+            <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>LOJA DE PEDIDOS</span>
             <button
               onClick={() => setLojaAtiva(v => !v)}
               className={`py-2 font-mono text-xs border ${
@@ -736,8 +832,8 @@ export function RestaurantePage() {
             </button>
           </div>
 
-          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">MESAS</span>
+          <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
+            <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>MESAS</span>
             <div className="grid grid-cols-2 gap-2">
               {mesas.map((m) => (
                 <div key={m.id} className={`px-2 py-1 border font-mono text-[10px] ${m.status === "ocupada" ? "border-[#FFB800] text-[#FFB800]" : "border-[#27272A] text-[#A1A1AA]"}`}>
@@ -747,8 +843,8 @@ export function RestaurantePage() {
             </div>
           </div>
 
-          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">INTEGRAÇÃO WHATSAPP (EVOLUTION)</span>
+          <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
+            <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>INTEGRAÇÃO WHATSAPP (EVOLUTION)</span>
             <button
               onClick={() => setShowQrWpp(v => !v)}
               className="py-2 border border-[#00BFFF] text-[#00BFFF] font-mono text-xs hover:bg-[#00BFFF]/10"
@@ -767,8 +863,14 @@ export function RestaurantePage() {
             )}
           </div>
 
-          <div className="border border-[#27272A] p-3 flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">IMPRESSÕES</span>
+          <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
+            <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>IMPRESSÕES</span>
+            <input
+              defaultValue={OWNER_TOKEN}
+              onChange={(e) => window.localStorage.setItem("owner_api_token", e.target.value)}
+              placeholder="Owner token (fallback)"
+              className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-[10px] px-2 py-1.5"
+            />
             <div className="flex gap-2">
               <input
                 value={novaImpressora}
