@@ -4,7 +4,8 @@ from typing import Any, Dict, List, Tuple
 
 import requests
 
-BASE: str = "http://127.0.0.1:8001/api/print/direct"
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
+BASE: str = f"{API_BASE_URL.rstrip('/')}/api/print/direct"
 TOKEN: str = os.environ.get("OWNER_API_TOKEN", "ifood2-token-super-seguro-2026")
 
 CaseType = Tuple[str, Dict[str, str], Dict[str, Any]]

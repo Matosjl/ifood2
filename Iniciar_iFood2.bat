@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 >nul
-title iFood2 - Iniciando Sistema Completo
+title iFood2 - Docker Full Stack Startup
 cls
 
 echo ╔═══════════════════════════════════════════════════════════════╗
-echo ║         🚀  iFOOD2 - SISTEMA COMPLETO                        ║
-echo ║    Backend + Frontend + MongoDB + WebSocket                  ║
+echo ║         🚀  iFOOD2 - FULL DOCKER STACK                        ║
+echo ║    Frontend + API + MongoDB + Redis + Celery                  ║
 echo ╚═══════════════════════════════════════════════════════════════╝
 echo.
 
@@ -15,57 +15,34 @@ cd /d "%PROJECT_DIR%"
 echo 📁 Diretório do projeto: %PROJECT_DIR%
 echo.
 
-:: Verifica se o MongoDB está rodando
-echo 🔍 Verificando MongoDB...
-tasklist | findstr /I "mongod.exe" >nul
-if %errorlevel% == 0 (
-    echo ✅ MongoDB já está rodando!
-) else (
-    echo ⚠️  MongoDB NÃO está rodando. Inicie o MongoDB manualmente ou instale-o.
-    echo    Download: https://www.mongodb.com/try/download/community
-)
-echo.
+echo 🐳 Parando containers antigos (se existirem)...
+docker-compose down
 
-:: ============================================
-:: INICIA O BACKEND (Python/FastAPI)
-:: ============================================
-echo 🐍 Iniciando BACKEND em http://localhost:8000 ...
-start "iFood2 - BACKEND" cmd /k "cd /d "%PROJECT_DIR%backend" && .\venv\Scripts\activate.bat && uvicorn server:app --host 0.0.0.0 --port 8000 --reload"
+echo 🐳 Iniciando full stack com Docker Compose...
+docker-compose up -d --build
 
-timeout /t 3 /nobreak >nul
+echo ⏳ Aguardando serviços iniciarem (30s)...
+timeout /t 30 /nobreak >nul
 
-:: ============================================
-:: INICIA O FRONTEND (React/Node)
-:: ============================================
-echo ⚛️  Iniciando FRONTEND em http://localhost:3000 ...
-start "iFood2 - FRONTEND" cmd /k "cd /d "%PROJECT_DIR%frontend" && yarn start"
-
-timeout /t 3 /nobreak >nul
-
-:: ============================================
-:: ABRE O NAVEGADOR
-:: ============================================
-echo 🌐 Abrindo navegador...
+echo 🌐 Abrindo Frontend: http://localhost:3000
 start http://localhost:3000
 
-cls
+echo 🔌 API: http://localhost:8000
+echo 📚 Docs: http://localhost:8000/docs
+echo 💓 Health: http://localhost:8000/api/health
+echo 🗄️  Mongo: localhost:27017
+echo 🟥 Redis: localhost:6379
+echo.
+
 echo ╔═══════════════════════════════════════════════════════════════╗
-echo ║         ✅  iFOOD2 RODANDO!                                   ║
+echo ║         ✅  iFOOD2 FULL STACK RODANDO!                         ║
 echo ╚═══════════════════════════════════════════════════════════════╝
 echo.
-echo  🌐 Frontend:  http://localhost:3000
-echo  🔌 Backend:   http://localhost:8000
-echo  📚 API Docs:   http://localhost:8000/docs
-echo  💓 Health:     http://localhost:8000/api/health
+echo Para parar tudo: docker-compose down
+echo Para ver logs: docker-compose logs -f
+echo Para status: docker ps
 echo.
-echo  Senha padrão do Owner: troque_esta_senha_agora
+echo Senha Owner padrão: troque_esta_senha_agora
 echo.
-echo  Janelas abertas:
-echo    • iFood2 - BACKEND  (Python/FastAPI)
-echo    • iFood2 - FRONTEND (React/Node.js)
-echo.
-echo  Pressione qualquer tecla para fechar ESTA janela.
-echo  (As outras janelas continuarão rodando!)
-echo.
-pause >nul
+pause
 

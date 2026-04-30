@@ -5,12 +5,9 @@ App Celery para processamento assíncrono de tarefas pesadas (IA, etc.).
 from celery import Celery
 from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
 
-celery_app = Celery(
-    "zapfome",
-    broker=CELERY_BROKER_URL,
-    backend=CELERY_RESULT_BACKEND,
-    include=["tasks"],
-)
+celery_app = Celery("ifood2")
+celery_app.conf.broker_url = CELERY_BROKER_URL
+celery_app.conf.result_backend = CELERY_RESULT_BACKEND
 
 # Configurações otimizadas para VPS barata (evita acúmulo de resultados)
 celery_app.conf.update(

@@ -1,17 +1,38 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZapFome — Docker Compose (Produção / VPS)
-# 4 serviços: API FastAPI | MongoDB | Redis | Celery Worker
+# iFood2 — Docker Compose (Development Full Stack)
+# 5 serviços: Frontend | API FastAPI | MongoDB | Redis | Celery Worker
 # ═══════════════════════════════════════════════════════════════════════════════
 
 version: "3.9"
 
 services:
+  frontend:
+    image: node:20-alpine
+    container_name: ifood2_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    command: sh -c "yarn install && yarn start"
+    stdin_open: true
+    tty: true
+    depends_on:
+      - api
+    networks:
+      - ifood2_net
+
   # ── 1. API FastAPI ──────────────────────────────────────────────────────────
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: zapfome_api
+    container_name: ifood2_api
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -32,7 +53,7 @@ services:
       - db
       - redis
     networks:
-      - zapfome_net
+      - ifood2_net
     deploy:
       resources:
         limits:
@@ -43,7 +64,7 @@ services:
   # ── 2. MongoDB ──────────────────────────────────────────────────────────────
   db:
     image: mongo:7.0-jammy
-    container_name: zapfome_db
+    container_name: ifood2_db
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -53,7 +74,7 @@ services:
     environment:
       - MONGO_INITDB_DATABASE=ifood2
     networks:
-      - zapfome_net
+      - ifood2_net
     deploy:
       resources:
         limits:
@@ -64,7 +85,7 @@ services:
   # ── 3. Redis (Broker Celery + Cache) ────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: zapfome_redis
+    container_name: ifood2_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -72,7 +93,7 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     networks:
-      - zapfome_net
+      - ifood2_net
     deploy:
       resources:
         limits:
@@ -85,7 +106,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: zapfome_worker
+    container_name: ifood2_worker
     restart: unless-stopped
     command: celery -A celery_app worker --loglevel=info --concurrency=1 --pool=prefork
     environment:
@@ -102,7 +123,7 @@ services:
       - db
       - redis
     networks:
-      - zapfome_net
+      - ifood2_net
     deploy:
       resources:
         limits:
@@ -119,6 +140,6 @@ volumes:
 
 # ── Rede isolada ──────────────────────────────────────────────────────────────
 networks:
-  zapfome_net:
+  ifood2_net:
     driver: bridge
 
