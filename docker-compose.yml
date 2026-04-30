@@ -1,0 +1,154 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# iFood2 — Docker Compose (Development Full Stack)
+# 5 serviços: Frontend | API FastAPI | MongoDB | Redis | Celery Worker
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Version removed (obsolete in Docker Compose v2+)
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ifood2_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - HOST=0.0.0.0
+      - REACT_APP_BACKEND_URL=http://api:8000
+    networks:
+      - ifood2_net
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ── 1. API FastAPI ──────────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ifood2_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      - MONGO_URL=mongodb://db:27017
+      - DB_NAME=ifood2
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OWNER_PASSWORD=${OWNER_PASSWORD:-troque_esta_senha_agora}
+      - JWT_SECRET=${JWT_SECRET:-ajax-jwt-secret}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000
+    env_file:
+      - ./backend/.env
+    networks:
+      - ifood2_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ── 2. MongoDB ──────────────────────────────────────────────────────────────
+  db:
+    image: mongo:7.0-jammy
+    container_name: ifood2_db
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    environment:
+      - MONGO_INITDB_DATABASE=ifood2
+    networks:
+      - ifood2_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ── 3. Redis (Broker Celery + Cache) ────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ifood2_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - ifood2_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  # ── 4. Celery Worker (Processamento de IA) ──────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ifood2_worker
+    restart: unless-stopped
+    # Worker Celery não serve HTTP — desabilita o healthcheck herdado do Dockerfile
+    healthcheck:
+      disable: true
+    command: celery -A celery_app worker --loglevel=info --concurrency=1 --pool=prefork
+    environment:
+      - MONGO_URL=mongodb://db:27017
+      - DB_NAME=ifood2
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ifood2_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+# ── Volumes persistentes ──────────────────────────────────────────────────────
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ── Rede isolada ──────────────────────────────────────────────────────────────
+networks:
+  ifood2_net:
+    driver: bridge
+
