@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, UploadFile, File
+import base64
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -625,6 +626,81 @@ async def websocket_endpoint(websocket: WebSocket, restaurante_id: str) -> None:
         if websocket in websocket_connections:
             websocket_connections.remove(websocket)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CARDÁPIO — UPLOAD E CONSULTA
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CARDAPIO_ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+_CARDAPIO_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+@api_router.post("/cardapio/upload")
+async def upload_cardapio(
+    restaurante_id: Annotated[str, Query()],
+    file: UploadFile = File(...),
+) -> Dict[str, str]:
+    if file.content_type not in _CARDAPIO_ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo não permitido: {file.content_type}. Use PDF, JPG ou PNG."
+        )
+    contents = await file.read()
+    if len(contents) > _CARDAPIO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Arquivo excede 10 MB")
+    doc: Dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "restauranteId": restaurante_id,
+        "filename": file.filename or "cardapio",
+        "contentType": file.content_type,
+        "data": base64.b64encode(contents).decode("utf-8"),
+        "tamanhoBytes": len(contents),
+        "uploadedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db.cardapios.replace_one(
+            {"restauranteId": restaurante_id},
+            doc,
+            upsert=True,
+        )
+    except Exception as e:
+        logger.error("Erro salvar cardapio %s: %s", restaurante_id, e)
+        raise HTTPException(status_code=500, detail="Erro ao salvar cardápio")
+    logger.info("Cardapio uploaded: restaurante=%s filename=%s bytes=%s", restaurante_id, doc["filename"], len(contents))
+    return {"id": doc["id"], "filename": doc["filename"], "status": "uploaded"}
+
+@api_router.get("/cardapio/{restaurante_id}")
+async def get_cardapio_meta(restaurante_id: str) -> Dict[str, Any]:
+    """Retorna metadados do cardápio sem o binário."""
+    try:
+        doc: Optional[Dict[str, Any]] = await db.cardapios.find_one(
+            {"restauranteId": restaurante_id}, {"_id": 0, "data": 0}
+        )
+    except Exception as e:
+        logger.error("Erro buscar cardapio %s: %s", restaurante_id, e)
+        raise HTTPException(status_code=500, detail="Erro ao buscar cardápio")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Nenhum cardápio cadastrado")
+    return doc
+
+@api_router.get("/cardapio/{restaurante_id}/arquivo")
+async def get_cardapio_arquivo(restaurante_id: str):
+    """Retorna o arquivo do cardápio para download/visualização."""
+    from fastapi.responses import Response
+    try:
+        doc: Optional[Dict[str, Any]] = await db.cardapios.find_one(
+            {"restauranteId": restaurante_id}, {"_id": 0}
+        )
+    except Exception as e:
+        logger.error("Erro buscar arquivo cardapio %s: %s", restaurante_id, e)
+        raise HTTPException(status_code=500, detail="Erro ao buscar cardápio")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Nenhum cardápio cadastrado")
+    conteudo = base64.b64decode(doc["data"])
+    return Response(
+        content=conteudo,
+        media_type=doc.get("contentType", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{doc["filename"]}"'},
+    )
+
 async def broadcast_pedido_status(restaurante_id: str, pedido_id: str, status: str) -> None:
     message: Dict[str, str] = {
         "type": "pedido_status_update",
@@ -763,6 +839,135 @@ async def listar_lancamentos(
     return lancamentos
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RESTAURANTES — CRUD
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RestauranteCreate(BaseModel):
+    nome: str
+    slug: str                          # identificador de URL, ex: "pizzaria-do-ze"
+    telefone: str = ""
+    endereco: str = ""
+    cidade: str = ""
+    categoria: str = ""               # ex: "Pizza", "Hambúrguer", "Japonês"
+    descricao: str = ""
+    logoUrl: Optional[str] = None
+    taxaEntrega: float = 5.0
+    tempoEstimado: str = "30-45 min"  # texto livre, ex: "30-45 min"
+    ativo: bool = True
+
+class RestauranteUpdate(BaseModel):
+    nome: Optional[str] = None
+    slug: Optional[str] = None
+    telefone: Optional[str] = None
+    endereco: Optional[str] = None
+    cidade: Optional[str] = None
+    categoria: Optional[str] = None
+    descricao: Optional[str] = None
+    logoUrl: Optional[str] = None
+    taxaEntrega: Optional[float] = None
+    tempoEstimado: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+@api_router.get("/restaurantes")
+async def listar_restaurantes() -> List[Dict[str, Any]]:
+    """Lista todos os restaurantes cadastrados."""
+    try:
+        docs = await db.restaurantes.find({}, {"_id": 0}).to_list(length=200)
+        return docs
+    except Exception as exc:
+        logger.error("Erro ao listar restaurantes: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao buscar restaurantes")
+
+
+@api_router.post("/restaurantes", status_code=201)
+async def criar_restaurante(body: RestauranteCreate) -> Dict[str, Any]:
+    """Cria um novo restaurante."""
+    try:
+        slug_existente = await db.restaurantes.find_one({"slug": body.slug}, {"_id": 0})
+        if slug_existente:
+            raise HTTPException(status_code=409, detail=f"Slug '{body.slug}' já está em uso.")
+        doc: Dict[str, Any] = body.model_dump()
+        doc["id"]       = str(uuid.uuid4())
+        doc["criadoEm"] = datetime.now(timezone.utc).isoformat()
+        doc["atualizadoEm"] = doc["criadoEm"]
+        await db.restaurantes.insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Erro ao criar restaurante: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao criar restaurante")
+
+
+@api_router.get("/restaurantes/{restaurante_id}")
+async def buscar_restaurante(restaurante_id: str) -> Dict[str, Any]:
+    """Busca um restaurante por ID ou slug."""
+    try:
+        doc = await db.restaurantes.find_one(
+            {"$or": [{"id": restaurante_id}, {"slug": restaurante_id}]},
+            {"_id": 0}
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="Restaurante não encontrado")
+        return doc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Erro ao buscar restaurante: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao buscar restaurante")
+
+
+@api_router.patch("/restaurantes/{restaurante_id}")
+async def atualizar_restaurante(restaurante_id: str, body: RestauranteUpdate) -> Dict[str, Any]:
+    """Atualiza campos de um restaurante."""
+    campos = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not campos:
+        raise HTTPException(status_code=400, detail="Nenhum campo enviado para atualização")
+    if "slug" in campos:
+        existente = await db.restaurantes.find_one(
+            {"slug": campos["slug"], "id": {"$ne": restaurante_id}}, {"_id": 0}
+        )
+        if existente:
+            raise HTTPException(status_code=409, detail=f"Slug '{campos['slug']}' já está em uso.")
+    campos["atualizadoEm"] = datetime.now(timezone.utc).isoformat()
+    try:
+        result = await db.restaurantes.update_one(
+            {"$or": [{"id": restaurante_id}, {"slug": restaurante_id}]},
+            {"$set": campos}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Restaurante não encontrado")
+        doc = await db.restaurantes.find_one(
+            {"$or": [{"id": restaurante_id}, {"slug": restaurante_id}]},
+            {"_id": 0}
+        )
+        return doc or {}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Erro ao atualizar restaurante: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao atualizar restaurante")
+
+
+@api_router.delete("/restaurantes/{restaurante_id}", status_code=204)
+async def deletar_restaurante(restaurante_id: str) -> None:
+    """Remove um restaurante."""
+    try:
+        result = await db.restaurantes.delete_one(
+            {"$or": [{"id": restaurante_id}, {"slug": restaurante_id}]}
+        )
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Restaurante não encontrado")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Erro ao deletar restaurante: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao deletar restaurante")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # APP SETUP
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -773,7 +978,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_origins=APP_ALLOWED_ORIGINS,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-Owner-Token", "X-Signature"],
+    allow_headers=["Content-Type", "X-Owner-Token", "X-Signature", "Authorization"],
 )
 
 async def _timeout_loop() -> None:
