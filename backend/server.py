@@ -369,6 +369,75 @@ async def print_direct(
             except Exception:
                 logger.warning("print_direct_tempfile_cleanup_failed")
 
+
+@api_router.post("/print/queue")
+async def enqueue_print(body: PrintDirectRequest) -> Dict[str, Any]:
+    """Enfileira um job de impressão para o agente Windows consumir."""
+    content = _sanitize_print_content(body.content or "")
+    if not content:
+        raise HTTPException(status_code=400, detail="Conteúdo de impressão vazio")
+    job: Dict[str, Any] = {
+        "id":           str(uuid.uuid4()),
+        "content":      content,
+        "printer_name": body.printer_name or RECEIPT_PRINTER_NAME,
+        "criadoEm":     datetime.now(timezone.utc).isoformat(),
+        "status":       "pendente",
+    }
+    try:
+        await db.print_queue.insert_one(job)
+    except Exception as exc:
+        logger.error("Erro ao enfileirar job de impressão: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao enfileirar job")
+    job.pop("_id", None)
+    return {"ok": True, "jobId": job["id"]}
+
+
+@api_router.get("/print/queue")
+async def dequeue_print() -> List[Dict[str, Any]]:
+    """Retorna jobs pendentes e os marca como 'processando'. Consumido pelo agente Windows."""
+    try:
+        jobs = await db.print_queue.find({"status": "pendente"}, {"_id": 0}).to_list(length=20)
+        if jobs:
+            ids = [j["id"] for j in jobs]
+            await db.print_queue.update_many(
+                {"id": {"$in": ids}},
+                {"$set": {"status": "processando"}}
+            )
+        return jobs
+    except Exception as exc:
+        logger.error("Erro ao buscar fila de impressão: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao buscar fila")
+
+
+@api_router.patch("/print/queue/{job_id}")
+async def ack_print_job(job_id: str, status: str = "concluido") -> Dict[str, Any]:
+    """Agente Windows chama após imprimir para marcar job como concluído ou falhou."""
+    if status not in ("concluido", "falhou"):
+        raise HTTPException(status_code=400, detail="Status inválido")
+    await db.print_queue.update_one(
+        {"id": job_id},
+        {"$set": {"status": status, "atualizadoEm": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"ok": True}
+
+
+@api_router.get("/print/status")
+async def print_status() -> Dict[str, Any]:
+    """Retorna configuração da impressora e contagem da fila."""
+    try:
+        pendente  = await db.print_queue.count_documents({"status": "pendente"})
+        concluido = await db.print_queue.count_documents({"status": "concluido"})
+        falhou    = await db.print_queue.count_documents({"status": "falhou"})
+    except Exception:
+        pendente = concluido = falhou = -1
+    return {
+        "impressora":   RECEIPT_PRINTER_NAME or "não configurada",
+        "pendente":     pendente,
+        "concluido":    concluido,
+        "falhou":       falhou,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PEDIDOS
 # ─────────────────────────────────────────────────────────────────────────────
