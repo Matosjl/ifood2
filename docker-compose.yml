@@ -34,7 +34,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    entrypoint: ["/app/entrypoint.sh"]
     depends_on:
       db:
         condition: service_started
@@ -115,6 +114,9 @@ services:
       dockerfile: Dockerfile
     container_name: ifood2_worker
     restart: unless-stopped
+    # Worker Celery não serve HTTP — desabilita o healthcheck herdado do Dockerfile
+    healthcheck:
+      disable: true
     command: celery -A celery_app worker --loglevel=info --concurrency=1 --pool=prefork
     environment:
       - MONGO_URL=mongodb://db:27017

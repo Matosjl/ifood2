@@ -58,6 +58,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 
+# entrypoint.sh aguarda MongoDB/Redis e depois executa o CMD
+ENTRYPOINT ["/app/entrypoint.sh"]
+
 # Comando de inicialização: 1 worker Uvicorn (economiza RAM em VPS pequena)
 # Em produção com mais RAM, aumente --workers $(nproc)
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]
