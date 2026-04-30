@@ -1,0 +1,525 @@
+yarn run v1.22.22
+warning ..\..\..\package.json: No license field
+$ craco start
+(node:9328) [DEP0176] DeprecationWarning: fs.F_OK is deprecated, use fs.constants.F_OK instead
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:9328) [DEP_WEBPACK_DEV_SERVER_ON_AFTER_SETUP_MIDDLEWARE] DeprecationWarning: 'onAfterSetupMiddleware' option is deprecated. Please use the 'setupMiddlewares' option.
+(node:9328) [DEP_WEBPACK_DEV_SERVER_ON_BEFORE_SETUP_MIDDLEWARE] DeprecationWarning: 'onBeforeSetupMiddleware' option is deprecated. Please use the 'setupMiddlewares' option.
+Starting the development server...
+
+(node:9328) [DEP_WEBPACK_COMPILATION_ASSETS] DeprecationWarning: Compilation.assets will be frozen in future, all modifications are deprecated.
+BREAKING CHANGE: No more changes should happen to Compilation.assets after sealing the Compilation.
+	Do changes to assets earlier, e. g. in Compilation.hooks.processAssets.
+	Make sure to select an appropriate stage from Compilation.PROCESS_ASSETS_STAGE_*.
+Failed to compile.
+
+[eslint] 
+src\components\HistorySidebar.jsx
+Syntax error: Unexpected token, expected "," (16:14) (16:14)
+[1m[31mERROR[39m[22m in [1m./src/components/HistorySidebar.jsx[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\src\components\HistorySidebar.jsx: Unexpected token, expected "," (16:14)
+
+[0m [90m 14 |[39m   hover[33m:[39m {
+ [90m 15 |[39m     borderLeftColor[33m:[39m [32m"#00E559"[39m[33m,[39m
+[31m[1m>[22m[39m[90m 16 |[39m           data[33m-[39mtestid[33m=[39m[32m"new-chat-btn"[39m
+ [90m    |[39m               [31m[1m^[22m[39m
+ [90m 17 |[39m         [33m>[39m
+ [90m 18 |[39m           [33m+[39m [33mNEW[39m [33mSESSION[39m
+ [90m 19 |[39m         [33m<[39m[33m/[39m[33mbutton[39m[33m>[39m[0m
+    at constructor (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+    at FlowParserMixin.raise (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6599:19)
+    at FlowParserMixin.unexpected (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6619:16)
+    at FlowParserMixin.expect (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6899:12)
+    at FlowParserMixin.parseObjectLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11822:14)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11339:23)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4764:20)
+    at FlowParserMixin.parseExprSubscripts (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11081:23)
+    at FlowParserMixin.parseUpdate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11066:21)
+    at FlowParserMixin.parseMaybeUnary (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11046:23)
+    at FlowParserMixin.parseMaybeUnaryOrPrivate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10899:61)
+    at FlowParserMixin.parseExprOps (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10904:23)
+    at FlowParserMixin.parseMaybeConditional (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10881:23)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10831:21)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3549:18)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:39
+    at FlowParserMixin.allowInAnd (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12426:12)
+    at FlowParserMixin.parseMaybeAssignAllowIn (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:17)
+    at FlowParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12493:17)
+    at FlowParserMixin.parseObjectProperty (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11950:83)
+    at FlowParserMixin.parseObjPropValue (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11978:100)
+    at FlowParserMixin.parseObjPropValue (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3339:26)
+    at FlowParserMixin.parsePropertyDefinition (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11915:17)
+    at FlowParserMixin.parseObjectLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11832:21)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11339:23)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4764:20)
+    at FlowParserMixin.parseExprSubscripts (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11081:23)
+    at FlowParserMixin.parseUpdate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11066:21)
+    at FlowParserMixin.parseMaybeUnary (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11046:23)
+    at FlowParserMixin.parseMaybeUnaryOrPrivate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10899:61)
+    at FlowParserMixin.parseExprOps (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10904:23)
+    at FlowParserMixin.parseMaybeConditional (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10881:23)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10831:21)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3549:18)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:39
+    at FlowParserMixin.allowInAnd (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12421:16)
+    at FlowParserMixin.parseMaybeAssignAllowIn (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:17)
+    at FlowParserMixin.parseVar (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13384:91)
+    at FlowParserMixin.parseVarStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13230:10)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12851:23)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseModuleItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12744:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:36)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseProgram (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12622:10)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12612:25)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3685:28)
+    at FlowParserMixin.parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14488:25)
+    at parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14522:38)
+
+[1m[31mERROR[39m[22m in [1m[eslint] 
+src\components\HistorySidebar.jsx
+  Line 16:14:  Parsing [1m[31merror[39m[22m[1m: [1m[31mUnexpected[39m[22m[1m token, expected "," (16:14)
+
+[39m[22m
+
+webpack compiled with [1m[31m2 errors[39m[22m
+Compiling...
+Failed to compile.
+
+[eslint] 
+src\components\HistorySidebar.jsx
+Syntax error: Unexpected token (9:2) (9:2)
+[1m[31mERROR[39m[22m in [1m./src/components/HistorySidebar.jsx[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\src\components\HistorySidebar.jsx: Unexpected token (9:2)
+
+[0m [90m  7 |[39m       animate[33m=[39m{{ x[33m:[39m [35m0[39m[33m,[39m opacity[33m:[39m [35m1[39m }}
+ [90m  8 |[39m       transition[33m=[39m{{ duration[33m:[39m [35m0.3[39m[33m,[39m delay[33m:[39m [35m0.1[39m }}
+[31m[1m>[22m[39m[90m  9 |[39m   })[33m,[39m
+ [90m    |[39m   [31m[1m^[22m[39m
+ [90m 10 |[39m }[33m;[39m
+ [90m 11 |[39m
+ [90m 12 |[39m [36mconst[39m glowHover [33m=[39m {[0m
+    at constructor (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+    at FlowParserMixin.raise (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6599:19)
+    at FlowParserMixin.unexpected (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6619:16)
+    at FlowParserMixin.jsxParseIdentifier (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4569:12)
+    at FlowParserMixin.jsxParseNamespacedName (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4576:23)
+    at FlowParserMixin.jsxParseAttribute (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4652:22)
+    at FlowParserMixin.jsxParseOpeningElementAfterName (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4667:28)
+    at FlowParserMixin.jsxParseOpeningElementAfterName (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4068:18)
+    at FlowParserMixin.jsxParseOpeningElementAt (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4662:17)
+    at FlowParserMixin.jsxParseElementAt (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4686:33)
+    at FlowParserMixin.jsxParseElement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4749:17)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4759:19)
+    at FlowParserMixin.parseExprSubscripts (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11081:23)
+    at FlowParserMixin.parseUpdate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11066:21)
+    at FlowParserMixin.parseMaybeUnary (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11046:23)
+    at FlowParserMixin.parseMaybeUnaryOrPrivate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10899:61)
+    at FlowParserMixin.parseExprOps (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10904:23)
+    at FlowParserMixin.parseMaybeConditional (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10881:23)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10831:21)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3498:39
+    at FlowParserMixin.tryParse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6907:20)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3498:18)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:39
+    at FlowParserMixin.allowInAnd (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12426:12)
+    at FlowParserMixin.parseMaybeAssignAllowIn (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10800:17)
+    at FlowParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12493:17)
+    at FlowParserMixin.parseParenAndDistinguishExpression (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11675:28)
+    at FlowParserMixin.parseParenAndDistinguishExpression (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3591:18)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11331:23)
+    at FlowParserMixin.parseExprAtom (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:4764:20)
+    at FlowParserMixin.parseExprSubscripts (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11081:23)
+    at FlowParserMixin.parseUpdate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11066:21)
+    at FlowParserMixin.parseMaybeUnary (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:11046:23)
+    at FlowParserMixin.parseMaybeUnaryOrPrivate (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10899:61)
+    at FlowParserMixin.parseExprOps (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10904:23)
+    at FlowParserMixin.parseMaybeConditional (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10881:23)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10831:21)
+    at FlowParserMixin.parseMaybeAssign (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3549:18)
+    at FlowParserMixin.parseExpressionBase (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10784:23)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10780:39
+    at FlowParserMixin.allowInAnd (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12421:16)
+    at FlowParserMixin.parseExpression (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:10780:17)
+    at FlowParserMixin.parseReturnStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13142:28)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12798:21)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseStatementListItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12747:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:61)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseBlock (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13297:10)
+
+[1m[31mERROR[39m[22m in [1m[eslint] 
+src\components\HistorySidebar.jsx
+  Line 9:2:  Parsing [1m[31merror[39m[22m[1m: [1m[31mUnexpected[39m[22m[1m token (9:2)
+
+[39m[22m
+
+webpack compiled with [1m[31m2 errors[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Failed to compile.
+
+[eslint] 
+src\components\RestaurantePage.jsx
+  Line 64:45:  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render  react-hooks/rules-of-hooks
+  Line 65:53:  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render  react-hooks/rules-of-hooks
+  Line 66:45:  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render  react-hooks/rules-of-hooks
+
+Search for the keywords to learn more about each error.
+[1m[31mERROR[39m[22m in [1m[eslint] 
+src\components\RestaurantePage.jsx
+  Line 64:45:  React Hook "useState" is called conditionally. React Hooks [1m[33mmust[39m[22m[1m be called in the exact same order in every component render  react-hooks/rules-of-hooks
+  Line 65:53:  React Hook "useState" is called conditionally. React Hooks [1m[33mmust[39m[22m[1m be called in the exact same order in every component render  react-hooks/rules-of-hooks
+  Line 66:45:  React Hook "useState" is called conditionally. React Hooks [1m[33mmust[39m[22m[1m be called in the exact same order in every component render  react-hooks/rules-of-hooks
+
+Search for the keywords to learn more about each [1m[31merror[39m[22m[1m.[39m[22m
+
+webpack compiled with [1m[31m1 error[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Failed to compile.
+
+[eslint] 
+src\components\NovoPedido.jsx
+Syntax error: Missing semicolon. (109:15) (109:15)
+[1m[31mERROR[39m[22m in [1m./src/components/NovoPedido.jsx[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\src\components\NovoPedido.jsx: Missing semicolon. (109:15)
+
+[0m [90m 107 |[39m   )[33m;[39m
+ [90m 108 |[39m }[33m;[39m
+[31m[1m>[22m[39m[90m 109 |[39m   { id[33m:[39m [35m1[39m[33m,[39m name[33m:[39m [32m"X-Burguer Especial"[39m[33m,[39m description[33m:[39m [32m"Pão brioche, 180g de carne, queijo cheddar"[39m[33m,[39m category[33m:[39m [32m"Lanches"[39m[33m,[39m salePrice[33m:[39m [35m28.9[39m }[33m,[39m
+ [90m     |[39m                [31m[1m^[22m[39m
+ [90m 110 |[39m   { id[33m:[39m [35m2[39m[33m,[39m name[33m:[39m [32m"X-Bacon Duplo"[39m[33m,[39m description[33m:[39m [32m"Dois hambúrgueres, bacon crocante, molho especial"[39m[33m,[39m category[33m:[39m [32m"Lanches"[39m[33m,[39m salePrice[33m:[39m [35m34.9[39m }[33m,[39m
+ [90m 111 |[39m   { id[33m:[39m [35m3[39m[33m,[39m name[33m:[39m [32m"Pizza Margherita"[39m[33m,[39m description[33m:[39m [32m"Molho de tomate, mussarela e manjericão"[39m[33m,[39m category[33m:[39m [32m"Pizzas"[39m[33m,[39m salePrice[33m:[39m [35m49.9[39m }[33m,[39m
+ [90m 112 |[39m   { id[33m:[39m [35m4[39m[33m,[39m name[33m:[39m [32m"Pizza Calabresa"[39m[33m,[39m description[33m:[39m [32m"Calabresa fatiada, cebola e azeitona"[39m[33m,[39m category[33m:[39m [32m"Pizzas"[39m[33m,[39m salePrice[33m:[39m [35m47.9[39m }[33m,[39m[0m
+    at constructor (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+    at FlowParserMixin.raise (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6599:19)
+    at FlowParserMixin.semicolon (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6895:10)
+    at FlowParserMixin.parseExpressionStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13285:10)
+    at FlowParserMixin.parseExpressionStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2940:18)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12899:19)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12760:17)
+    at FlowParserMixin.parseLabeledStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13278:95)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12897:19)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseStatementListItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12747:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:61)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseBlock (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13297:10)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12858:21)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseModuleItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12744:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:36)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseProgram (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12622:10)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12612:25)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3685:28)
+    at FlowParserMixin.parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14488:25)
+    at parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14522:38)
+    at parser (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+    at parser.next (<anonymous>)
+    at normalizeFile (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+    at normalizeFile.next (<anonymous>)
+    at run (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+    at run.next (<anonymous>)
+    at transform (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+    at transform.next (<anonymous>)
+    at step (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:261:32)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:273:13
+    at async.call.result.err.err (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:223:11)
+
+[1m[31mERROR[39m[22m in [1m[eslint] 
+src\components\NovoPedido.jsx
+  Line 109:15:  Parsing [1m[31merror[39m[22m[1m: Missing semicolon. (109:15)
+
+[39m[22m
+
+webpack compiled with [1m[31m2 errors[39m[22m
+Compiling...
+Failed to compile.
+
+[eslint] 
+src\components\NovoPedido.jsx
+Syntax error: Missing semicolon. (109:15) (109:15)
+[1m[31mERROR[39m[22m in [1m./src/components/NovoPedido.jsx[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\src\components\NovoPedido.jsx: Missing semicolon. (109:15)
+
+[0m [90m 107 |[39m   )[33m;[39m
+ [90m 108 |[39m }[33m;[39m
+[31m[1m>[22m[39m[90m 109 |[39m   { id[33m:[39m [35m1[39m[33m,[39m name[33m:[39m [32m"X-Burguer Especial"[39m[33m,[39m description[33m:[39m [32m"Pão brioche, 180g de carne, queijo cheddar"[39m[33m,[39m category[33m:[39m [32m"Lanches"[39m[33m,[39m salePrice[33m:[39m [35m28.9[39m }[33m,[39m
+ [90m     |[39m                [31m[1m^[22m[39m
+ [90m 110 |[39m   { id[33m:[39m [35m2[39m[33m,[39m name[33m:[39m [32m"X-Bacon Duplo"[39m[33m,[39m description[33m:[39m [32m"Dois hambúrgueres, bacon crocante, molho especial"[39m[33m,[39m category[33m:[39m [32m"Lanches"[39m[33m,[39m salePrice[33m:[39m [35m34.9[39m }[33m,[39m
+ [90m 111 |[39m   { id[33m:[39m [35m3[39m[33m,[39m name[33m:[39m [32m"Pizza Margherita"[39m[33m,[39m description[33m:[39m [32m"Molho de tomate, mussarela e manjericão"[39m[33m,[39m category[33m:[39m [32m"Pizzas"[39m[33m,[39m salePrice[33m:[39m [35m49.9[39m }[33m,[39m
+ [90m 112 |[39m   { id[33m:[39m [35m4[39m[33m,[39m name[33m:[39m [32m"Pizza Calabresa"[39m[33m,[39m description[33m:[39m [32m"Calabresa fatiada, cebola e azeitona"[39m[33m,[39m category[33m:[39m [32m"Pizzas"[39m[33m,[39m salePrice[33m:[39m [35m47.9[39m }[33m,[39m[0m
+    at constructor (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+    at FlowParserMixin.raise (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6599:19)
+    at FlowParserMixin.semicolon (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:6895:10)
+    at FlowParserMixin.parseExpressionStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13285:10)
+    at FlowParserMixin.parseExpressionStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2940:18)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12899:19)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12760:17)
+    at FlowParserMixin.parseLabeledStatement (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13278:95)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12897:19)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseStatementListItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12747:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:61)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseBlock (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13297:10)
+    at FlowParserMixin.parseStatementContent (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12858:21)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12767:17)
+    at FlowParserMixin.parseStatementLike (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:2918:24)
+    at FlowParserMixin.parseModuleItem (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12744:17)
+    at FlowParserMixin.parseBlockOrModuleBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13316:36)
+    at FlowParserMixin.parseBlockBody (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:13309:10)
+    at FlowParserMixin.parseProgram (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12622:10)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:12612:25)
+    at FlowParserMixin.parseTopLevel (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:3685:28)
+    at FlowParserMixin.parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14488:25)
+    at parse (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\parser\lib\index.js:14522:38)
+    at parser (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+    at parser.next (<anonymous>)
+    at normalizeFile (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+    at normalizeFile.next (<anonymous>)
+    at run (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+    at run.next (<anonymous>)
+    at transform (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+    at transform.next (<anonymous>)
+    at step (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:261:32)
+    at C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:273:13
+    at async.call.result.err.err (C:\Users\sealo\Desktop\Ifood2\https---github.com-Matosjl-ifood2\frontend\node_modules\gensync\index.js:223:11)
+
+[1m[31mERROR[39m[22m in [1m[eslint] 
+src\components\NovoPedido.jsx
+  Line 109:15:  Parsing [1m[31merror[39m[22m[1m: Missing semicolon. (109:15)
+
+[39m[22m
+
+webpack compiled with [1m[31m2 errors[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
+Compiling...
+Compiled successfully!
+webpack compiled [1m[32msuccessfully[39m[22m
