@@ -11,6 +11,8 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from celery_app import celery_app
 from config import MONGO_URL, DB_NAME, OLLAMA_API_URL, OLLAMA_MODEL
+from celery_app import celery_app
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,39 @@ def _get_sync_db():
         _sync_mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
     return _sync_mongo_client[DB_NAME]
 
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def verificar_timeout_pedidos(self):
+    \"\"\"Task background: cancela pedidos pendentes >10min, confirmados >30min sem progresso\"\"\"
+    
+    db = _get_sync_db()
+    
+    agora = datetime.now(timezone.utc)
+    
+    # Pedidos pendentes >10min → cancelar
+    pendentes_antigos = agora - timedelta(minutes=10)
+    result_pendentes = db.pedidos.update_many(
+        {\"status\": \"pendente\", \"criadoEm\": {\"$lt\": pendentes_antigos.isoformat()}},
+        {\"$set\": {
+            \"status\": \"cancelado\",
+            \"atualizadoEm\": agora.isoformat(),
+            \"motivoCancelamento\": \"Timeout automático\"
+        }}
+    )
+    
+    # Pedidos confirmados >30min → em_preparo
+    confirmados_antigos = agora - timedelta(minutes=30)
+    result_confirmados = db.pedidos.update_many(
+        {\"status\": \"confirmado\", \"criadoEm\": {\"$lt\": confirmados_antigos.isoformat()}},
+        {\"$set\": {\"status\": \"em_preparo\", \"atualizadoEm\": agora.isoformat()}}
+    )
+    
+    logger.info(f\"Timeout task: {result_pendentes.modified_count} pendentes cancelados, {result_confirmados.modified_count} confirmados → preparo\")
+    
+    return {
+        \"pendentes_cancelados\": result_pendentes.modified_count,
+        \"confirmados_preparo\": result_confirmados.modified_count
+    }
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def processar_pedido_ia(self, pedido_id: str, texto_pedido: str) -> dict:

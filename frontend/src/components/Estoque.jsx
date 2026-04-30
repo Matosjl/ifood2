@@ -30,7 +30,7 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
     if (!restauranteId) return;
     try {
       const { data } = await axios.get(`${API}/estoque/${restauranteId}`);
-      setItens(data);
+      setItens(data || []);
       // Reconstrói categorias a partir dos dados salvos
       const cats = [...new Set(data.map(i => i.categoria))];
       setCategorias(prev => {
@@ -39,7 +39,9 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
         return [...prev, ...novas];
       });
       onEstoqueAtualizado?.(data.map(i => ({ ...i, category: i.categoria, name: i.nome, salePrice: i.precoVenda, costPrice: i.precoCusto })));
-    } catch {}
+    } catch (err) {
+      console.error("Erro carregar estoque:", err);
+    }
   }, [restauranteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { carregarItens(); }, [carregarItens]);
@@ -56,9 +58,8 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
   const adicionarItem = async () => {
     if (!form.nome || !form.categoria || !form.quantidade || !form.precoVenda) return;
     setSalvando(true);
-    const fotoLocal = form.foto || null; // foto fica só em memória, não vai pro backend
+    const fotoLocal = form.foto || null;
     const payload = {
-      restauranteId: restauranteId || "local",
       categoria: form.categoria,
       nome: form.nome,
       quantidade: parseFloat(form.quantidade),
@@ -67,14 +68,15 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
       porKg: form.porKg,
     };
     try {
-      const { data: salvo } = await axios.post(`${API}/estoque`, payload, { timeout: 5000 });
+      const { data: salvo } = await axios.post(`${API}/estoque?restaurante_id=${restauranteId}`, payload);
       const itemFinal = { ...salvo, foto: fotoLocal };
       const novosItens = [...itens, itemFinal];
       setItens(novosItens);
       onEstoqueAtualizado?.(novosItens.map(i => ({ ...i, category: i.categoria, name: i.nome, salePrice: i.precoVenda, costPrice: i.precoCusto })));
       onItemAdicionado?.(itemFinal, itemFinal.categoria);
-    } catch {
-      const salvoLocal = { ...payload, id: String(Date.now()), foto: fotoLocal, criadoEm: new Date().toISOString() };
+    } catch (err) {
+      console.error("Erro adicionar item:", err);
+      const salvoLocal = { ...payload, id: String(Date.now()), foto: fotoLocal, restauranteId, criadoEm: new Date().toISOString() };
       const novosItens = [...itens, salvoLocal];
       setItens(novosItens);
       onEstoqueAtualizado?.(novosItens.map(i => ({ ...i, category: i.categoria, name: i.nome, salePrice: i.precoVenda, costPrice: i.precoCusto })));
@@ -93,7 +95,9 @@ export function Estoque({ restauranteId, onEstoqueAtualizado, onItemAdicionado }
     setItens(prev => prev.map(i => i.id === itemId ? { ...i, quantidade: novaQtd } : i));
     try {
       await axios.patch(`${API}/estoque/${itemId}`, { quantidade: novaQtd });
-    } catch {}
+    } catch (err) {
+      console.error("Erro atualizar quantidade:", err);
+    }
   };
 
   const removerItem = async (itemId) => {

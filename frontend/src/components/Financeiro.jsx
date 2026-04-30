@@ -310,6 +310,27 @@ export function Financeiro({ vendas = [], restauranteId }) {
   }, [restauranteId]);
 
   const handleAbrirCaixa = async (fundo) => {
+    const novoCaixa = { restauranteId, fundo };
+    try {
+      const res = await axios.post(`${API}/financeiro/caixa`, novoCaixa);
+      setCaixa(res.data);
+    } catch (err) {
+      console.error("Erro abrir caixa:", err);
+    }
+  };
+
+  const handleFecharCaixa = async (resumo) => {
+    try {
+      await axios.patch(`${API}/financeiro/caixa/${restauranteId}/fechar`, resumo);
+      setCaixa(null);
+      // Limpa pedidos do dia (após fechar caixa)
+      setVendasFinanceiro([]);
+    } catch (err) {
+      console.error("Erro fechar caixa:", err);
+    }
+  };
+
+  const handleAbrirCaixa = async (fundo) => {
     const novoCaixa = { restauranteId, fundo, abertoEm: new Date().toISOString(), status: "aberto" };
     try {
       await axios.post(`${API}/financeiro/caixa`, novoCaixa);

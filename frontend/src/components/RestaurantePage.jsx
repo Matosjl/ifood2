@@ -686,29 +686,78 @@ export function RestaurantePage() {
     }
   };
 
-  const handleNovoPedido = (pedido) => {
-    const novo = {
-      id: `#${1047 + orders.length}`,
-      client: pedido.cliente,
-      items: pedido.itens.map((i) => i.name),
-      itensCompletos: pedido.itens, // guarda itens completos para financeiro
-      total: pedido.total,
-      status: "PENDENTE",
-      type: pedido.tipo === "entrega" ? "ENTREGA" : pedido.tipo === "comer_aqui" ? "COMER AQUI" : "RETIRADA",
-      payment: pedido.pagamento || "",
-      pago: pedido.pago || false,
-      time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-      agendado: pedido.agendado,
-      horarioAgendado: pedido.horarioAgendado || "",
-      observacao: pedido.observacao || "",
-      telefone: pedido.telefone || "",
-      endereco: pedido.endereco,
-    };
-    setOrders((prev) => [novo, ...prev]);
-    diminuirEstoque(pedido.itens);
+  const handleNovoPedido = async (pedido) => {
+    try {
+      const payload = {
+        restauranteId: id || "teste",
+        clienteNome: pedido.cliente,
+        clienteTelefone: pedido.telefone || "",
+        tipo: pedido.tipo,
+        itens: pedido.itens.map(i => ({
+          nome: i.name,
+          qtd: i.qtd,
+          precoUnitario: i.precoUnitario || i.salePrice,
+          observacao: i.observacao || ""
+        })),
+        pagamento: pedido.pagamento || "dinheiro",
+        pago: pedido.pago || true,
+        agendado: pedido.agendado || false,
+        horarioAgendado: pedido.horarioAgendado || null,
+        observacao: pedido.observacao || "",
+        mesa: pedido.mesa || null,
+        endereco: pedido.endereco || null
+      };
+      const res = await axios.post(`${API}/pedidos`, payload);
+      const pedidoId = res.data.id;
+      
+      // Abate estoque
+      await axios.post(`${API}/estoque/deduzir`, {
+        restauranteId: id || "teste",
+        itens: pedido.itens.map(i => ({ itemId: i.id, qtd: i.qtd }))
+      });
+      
+      // Refresh panels
+      fetchPedidos();
+      
+      printOrder({ id: pedidoId, ...payload }); // print com ID real
+    } catch (err) {
+      console.error("Erro salvar pedido:", err);
+      // Fallback local
+      const novo = {
+        id: `#${1047 + orders.length}`,
+        client: pedido.cliente,
+        items: pedido.itens.map((i) => i.name),
+        itensCompletos: pedido.itens,
+        total: pedido.total,
+        status: "PENDENTE",
+        type: pedido.tipo === "entrega" ? "ENTREGA" : pedido.tipo === "comer_aqui" ? "COMER AQUI" : "RETIRADA",
+        payment: pedido.pagamento || "",
+        pago: pedido.pago || false,
+        time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        agendado: pedido.agendado,
+        horarioAgendado: pedido.horarioAgendado || "",
+        observacao: pedido.observacao || "",
+        telefone: pedido.telefone || "",
+        endereco: pedido.endereco,
+      };
+      setOrders((prev) => [novo, ...prev]);
+      diminuirEstoque(pedido.itens);
+    }
     setActiveTab("pedidos");
-    setTimeout(() => printOrder(novo), 200);
   };
+
+  const fetchPedidos = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/pedidos?restaurante_id=${id}`);
+      setOrders(data.pedidos || []);
+    } catch {}
+  }, [id]);
+
+  useEffect(() => {
+    fetchPedidos();
+    const interval = setInterval(fetchPedidos, 10000);
+    return () => clearInterval(interval);
+  }, [fetchPedidos]);
 
   // Ao finalizar (ENTREGUE), envia para financeiro
   const registrarVendaFinanceiro = (order, pagamento) => {
