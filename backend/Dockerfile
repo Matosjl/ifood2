@@ -35,6 +35,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Ferramentas de sistema mínimas para o runtime
+# - netcat-openbsd : nc utilizado pelo entrypoint.sh para health-check TCP
+# - curl           : utilizado pelo healthcheck do Docker Compose
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    netcat-openbsd \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copia apenas o virtualenv do builder (sem compiladores)
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
