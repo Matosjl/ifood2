@@ -1,0 +1,148 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZapFome — Docker Compose PRODUÇÃO
+# Nginx serve o frontend estático + proxy para a API
+# MongoDB e Redis sem portas expostas (apenas rede interna)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Nginx (reverse proxy + frontend estático + SSL) ─────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: zapfome_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - frontend_build:/usr/share/nginx/html:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    depends_on:
+      - api
+    networks:
+      - zapfome_net
+
+  # ── Frontend build (compila e sai — Nginx serve os arquivos estáticos) ───────
+  frontend_builder:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: zapfome_frontend_build
+    volumes:
+      - frontend_build:/app/build
+    environment:
+      - REACT_APP_BACKEND_URL=${APP_URL:-https://seudominio.com}
+      - REACT_APP_OWNER_API_TOKEN=${OWNER_API_TOKEN}
+    restart: "no"
+
+  # ── API FastAPI ──────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zapfome_api
+    restart: unless-stopped
+    expose:
+      - "8000"        # apenas na rede interna — Nginx faz o proxy
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      - MONGO_URL=mongodb://db:27017
+      - DB_NAME=${DB_NAME:-ifood2}
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - CORS_ORIGINS=${APP_URL:-https://seudominio.com},http://localhost:3000
+    env_file:
+      - ./backend/.env
+    networks:
+      - zapfome_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
+  db:
+    image: mongo:7.0-jammy
+    container_name: zapfome_db
+    restart: unless-stopped
+    expose:
+      - "27017"       # sem porta pública — apenas interno
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    environment:
+      - MONGO_INITDB_DATABASE=${DB_NAME:-ifood2}
+    networks:
+      - zapfome_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: zapfome_redis
+    restart: unless-stopped
+    expose:
+      - "6379"        # sem porta pública
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - zapfome_net
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  # ── Certbot (SSL Let's Encrypt — renova automaticamente) ─────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: zapfome_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done'"
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  frontend_build:
+    driver: local
+  certbot_www:
+    driver: local
+  certbot_certs:
+    driver: local
+
+networks:
+  zapfome_net:
+    driver: bridge

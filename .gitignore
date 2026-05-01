@@ -30,7 +30,13 @@ next-env.d.ts
 dist/
 dist
 
-# Environment files (comprehensive coverage)
+# Environment files — NUNCA subir segredos
+.env
+.env.local
+.env.production
+.env.*.local
+backend/.env
+!backend/.env.example
 
 *token.json*
 *credentials.json*

@@ -14,6 +14,22 @@ import { IntegrationsPanel } from "@/components/IntegrationsPanel";
 import { PainelPedidosRestaurante } from "@/components/PainelPedidosRestaurante";
 import { AcompanhamentoPedido } from "@/components/AcompanhamentoPedido";
 import { CheckoutPage } from "@/components/CheckoutPage";
+import { RestaurantesLista } from "@/components/RestaurantesLista";
+import { RestauranteCadastro } from "@/components/RestauranteCadastro";
+import { MenuPublico } from "@/components/MenuPublico";
+import { CardapioPublico } from "@/components/CardapioPublico";
+
+// ── App Cliente (delivery) ────────────────────────────────────────────────────
+import { CartProvider } from "@/context/CartContext";
+import { ToastProvider } from "@/hooks/useToast";
+import ClienteLayout from "@/pages/ClienteLayout";
+import ClienteHome from "@/pages/ClienteHome";
+import CardapioCliente from "@/pages/CardapioCliente";
+import CartPage from "@/pages/CartPage";
+import PedidoAcompanhamento from "@/pages/PedidoAcompanhamento";
+import ChatIA from "@/pages/ChatIA";
+import BuscarPage from "@/pages/BuscarPage";
+import MeusPedidos from "@/pages/MeusPedidos";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 const API = `${BACKEND_URL}/api`;
@@ -229,18 +245,46 @@ const AjaxAgent = () => {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<AjaxAgent />} />
-        <Route path="/restaurante/:id" element={<RestaurantePage />} />
-        <Route path="/entregador/:id" element={<EntregadorApp />} />
-        <Route path="/owner/login" element={<OwnerLogin />} />
-        <Route path="/owner" element={<ProtectedRoute><OwnerDashboard /></ProtectedRoute>} />
-        <Route path="/restaurante/pedidos" element={<PainelPedidosRestaurante />} />
-        <Route path="/pedido/:pedidoId" element={<AcompanhamentoPedido />} />
-        <Route path="/checkout" element={<CheckoutPage />} />
-      </Routes>
-    </BrowserRouter>
+    <ToastProvider>
+      <CartProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<AjaxAgent />} />
+            {/* Restaurantes — listagem e cadastro */}
+            <Route path="/restaurantes" element={<RestaurantesLista />} />
+            <Route path="/restaurantes/novo" element={<RestauranteCadastro />} />
+            <Route path="/restaurantes/:id/editar" element={<RestauranteCadastro />} />
+
+            {/* Cardápio digital — visão do cliente */}
+            <Route path="/menu/:id" element={<MenuPublico />} />
+            {/* Cardápio público OxyFood — rota amigável para clientes */}
+            <Route path="/cardapio/:id" element={<CardapioPublico />} />
+
+            {/* Painel operacional de um restaurante */}
+            <Route path="/restaurante/:id" element={<RestaurantePage />} />
+            <Route path="/restaurante/pedidos" element={<PainelPedidosRestaurante />} />
+
+            <Route path="/entregador/:id" element={<EntregadorApp />} />
+            <Route path="/owner/login" element={<OwnerLogin />} />
+            <Route path="/owner" element={<ProtectedRoute><OwnerDashboard /></ProtectedRoute>} />
+            <Route path="/pedido/:pedidoId" element={<AcompanhamentoPedido />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
+
+            {/* ── App Cliente (delivery) ── */}
+            <Route path="/app" element={<ClienteLayout />}>
+              <Route index element={<ClienteHome />} />
+              <Route path="restaurante/:id" element={<CardapioCliente />} />
+              <Route path="carrinho" element={<CartPage />} />
+              <Route path="pedido/:pedidoId" element={<PedidoAcompanhamento />} />
+              <Route path="meus-pedidos" element={<MeusPedidos />} />
+              <Route path="ia" element={<ChatIA />} />
+              <Route path="buscar" element={<BuscarPage />} />
+              <Route path="perfil" element={<ClienteHome />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </CartProvider>
+    </ToastProvider>
   );
 }
 

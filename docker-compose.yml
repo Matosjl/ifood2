@@ -11,6 +11,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: ifood2_frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -18,6 +19,7 @@ services:
       - WATCHPACK_POLLING=true
       - HOST=0.0.0.0
       - REACT_APP_BACKEND_URL=http://api:8000
+      - REACT_APP_OWNER_API_TOKEN=rBtsv5DTrAPVgtGs6idkhRTy7xVDglnaOpAroXOuBE
     networks:
       - ifood2_net
     depends_on:
@@ -34,24 +36,25 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    entrypoint: ["/app/entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
     environment:
       - MONGO_URL=mongodb://db:27017
       - DB_NAME=ifood2
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - OWNER_PASSWORD=${OWNER_PASSWORD:-troque_esta_senha_agora}
-      - JWT_SECRET=${JWT_SECRET:-ajax-jwt-secret}
-      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000
     env_file:
       - ./backend/.env
     networks:
       - ifood2_net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -110,6 +113,9 @@ services:
       dockerfile: Dockerfile
     container_name: ifood2_worker
     restart: unless-stopped
+    # Worker Celery não serve HTTP — desabilita o healthcheck herdado do Dockerfile
+    healthcheck:
+      disable: true
     command: celery -A celery_app worker --loglevel=info --concurrency=1 --pool=prefork
     environment:
       - MONGO_URL=mongodb://db:27017
@@ -117,8 +123,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
     env_file:
       - ./backend/.env
     depends_on:

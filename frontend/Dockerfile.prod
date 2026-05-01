@@ -1,0 +1,21 @@
+# Frontend — build de produção (apenas compila, Nginx serve os arquivos)
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json yarn.lock ./
+RUN corepack enable && yarn install --frozen-lockfile --network-timeout 600000
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ARG REACT_APP_BACKEND_URL
+ARG REACT_APP_OWNER_API_TOKEN
+ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+ENV REACT_APP_OWNER_API_TOKEN=$REACT_APP_OWNER_API_TOKEN
+RUN corepack enable && yarn build
+
+# Copia build para volume compartilhado com Nginx
+FROM alpine:3.19
+WORKDIR /app
+COPY --from=builder /app/build /app/build
+CMD ["sh", "-c", "cp -r /app/build/. /app/out/ && echo 'Build copiado para volume.'"]
