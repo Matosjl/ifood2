@@ -789,6 +789,186 @@ const PedidosTab = ({ orders, onStatusChange, onDespachar, onReimprimir }) => {
   );
 };
 
+// ── WhatsApp Panel (Evolution API) ───────────────────────────────────────────
+const WhatsAppPanel = ({ restauranteId, authAxios, API, isDark, borderClass, subtleText }) => {
+  const [status, setStatus]   = useState(null);   // null | "open" | "close" | "connecting"
+  const [qr, setQr]           = useState(null);   // base64 PNG ou null
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg]         = useState("");
+  const [showQr, setShowQr]   = useState(false);
+
+  const checkStatus = async () => {
+    try {
+      const { data } = await authAxios.get(`${API}/whatsapp/status`);
+      setStatus(data.connected ? "open" : (data.state || "close"));
+      if (data.connected) { setQr(null); setShowQr(false); }
+    } catch (e) {
+      // Evolution não configurada — mostra aviso suave
+      setStatus("not_configured");
+    }
+  };
+
+  const loadQr = async () => {
+    setLoading(true);
+    setMsg("");
+    try {
+      const { data } = await authAxios.get(`${API}/whatsapp/qr`);
+      const b64 = data?.base64 || data?.qrcode?.base64 || data?.qr;
+      if (b64) { setQr(b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`); setShowQr(true); }
+      else { setMsg("QR indisponível. Aguarde e tente novamente."); }
+    } catch {
+      setMsg("Erro ao buscar QR code.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setupInstance = async () => {
+    setLoading(true); setMsg("");
+    try {
+      const { data } = await authAxios.post(`${API}/whatsapp/setup`, { restaurante_id: restauranteId });
+      setMsg(`✅ Instância criada! Webhook: ${data.webhook_url}`);
+      await loadQr();
+    } catch (e) {
+      setMsg(e?.response?.data?.detail || "Erro ao criar instância.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setLoading(true);
+    try {
+      await authAxios.post(`${API}/whatsapp/disconnect`);
+      setStatus("close"); setQr(null); setShowQr(false);
+      setMsg("Desconectado com sucesso.");
+    } catch { setMsg("Erro ao desconectar."); }
+    finally { setLoading(false); }
+  };
+
+  // Verifica status ao montar e a cada 15s enquanto não conectado
+  useEffect(() => {
+    checkStatus();
+    const t = setInterval(() => {
+      if (status !== "open") checkStatus();
+    }, 15000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  const isOpen = status === "open";
+  const isNotConfigured = status === "not_configured";
+
+  return (
+    <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>WHATSAPP (EVOLUTION API)</span>
+        <button onClick={checkStatus} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">↻</button>
+      </div>
+
+      {/* Status badge */}
+      <div className={`flex items-center gap-2 py-1.5 px-3 rounded-lg border ${
+        isOpen
+          ? "border-emerald-500/30 bg-emerald-500/8"
+          : isNotConfigured
+            ? "border-yellow-500/30 bg-yellow-500/5"
+            : "border-red-500/30 bg-red-500/8"
+      }`}>
+        <div className={`w-2 h-2 rounded-full ${
+          isOpen ? "bg-emerald-500 animate-pulse" :
+          status === "connecting" ? "bg-yellow-500 animate-pulse" :
+          isNotConfigured ? "bg-yellow-500" :
+          "bg-red-500"
+        }`} />
+        <span className={`font-mono text-[10px] flex-1 ${
+          isOpen ? "text-emerald-400" :
+          isNotConfigured ? "text-yellow-400" :
+          "text-red-400"
+        }`}>
+          {isOpen ? "CONECTADO"
+            : status === "connecting" ? "CONECTANDO…"
+            : isNotConfigured ? "NÃO CONFIGURADO"
+            : "DESCONECTADO"}
+        </span>
+      </div>
+
+      {/* Não configurado — guia rápido */}
+      {isNotConfigured && (
+        <div className="text-[10px] text-zinc-600 leading-relaxed bg-white/3 rounded-lg p-2">
+          Adicione no <span className="text-zinc-400">.env</span>:<br />
+          <span className="text-yellow-400">EVOLUTION_API_URL</span>,{" "}
+          <span className="text-yellow-400">EVOLUTION_API_KEY</span>,{" "}
+          <span className="text-yellow-400">EVOLUTION_INSTANCE</span>
+        </div>
+      )}
+
+      {/* Ações */}
+      {!isNotConfigured && (
+        <div className="flex flex-col gap-1.5">
+          {!isOpen && (
+            <>
+              <button
+                onClick={loadQr}
+                disabled={loading}
+                className="py-1.5 border border-[#00BFFF] text-[#00BFFF] font-mono text-[10px] hover:bg-[#00BFFF]/10 transition-colors disabled:opacity-40"
+              >
+                {loading ? "AGUARDE…" : showQr ? "ATUALIZAR QR" : "📱 ESCANEAR QR CODE"}
+              </button>
+              <button
+                onClick={setupInstance}
+                disabled={loading}
+                className="py-1.5 border border-white/15 text-zinc-500 font-mono text-[10px] hover:border-white/30 hover:text-zinc-300 transition-colors disabled:opacity-40"
+              >
+                {loading ? "…" : "⚙ CRIAR INSTÂNCIA"}
+              </button>
+            </>
+          )}
+          {isOpen && (
+            <button
+              onClick={disconnect}
+              disabled={loading}
+              className="py-1.5 border border-red-500/30 text-red-400 font-mono text-[10px] hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            >
+              DESCONECTAR
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* QR Code */}
+      {showQr && qr && (
+        <div className="border border-[#27272A] p-3 text-center flex flex-col items-center gap-2">
+          <img src={qr} alt="QR Code WhatsApp" className="w-40 h-40 rounded-lg" />
+          <span className="font-mono text-[10px] text-[#71717A]">
+            Abra o WhatsApp → Aparelhos conectados → Conectar aparelho
+          </span>
+          <button
+            onClick={loadQr}
+            className="text-[10px] text-zinc-600 hover:text-zinc-400 underline transition-colors"
+          >
+            Atualizar QR
+          </button>
+        </div>
+      )}
+
+      {/* Webhook URL (quando conectado) */}
+      {isOpen && (
+        <div className="text-[10px] text-zinc-600 bg-white/3 rounded-lg p-2 break-all leading-relaxed">
+          Webhook ativo. Clientes podem conversar via WhatsApp e a IA responde automaticamente com o cardápio e status dos pedidos. 🤖
+        </div>
+      )}
+
+      {/* Mensagem de feedback */}
+      {msg && (
+        <p className={`text-[10px] leading-relaxed ${msg.startsWith("✅") ? "text-emerald-400" : "text-red-400"}`}>
+          {msg}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ── Footer ────────────────────────────────────────────────────────────────────
 const Footer = () => (
   <footer className="border-t border-[#27272A] bg-[#0A0A0A] px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-[#71717A] font-mono text-xs">
@@ -1296,25 +1476,7 @@ export function RestaurantePage() {
             </div>
           </div>
 
-          <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
-            <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>INTEGRAÇÃO WHATSAPP (EVOLUTION)</span>
-            <button
-              onClick={() => setShowQrWpp(v => !v)}
-              className="py-2 border border-[#00BFFF] text-[#00BFFF] font-mono text-xs hover:bg-[#00BFFF]/10"
-            >
-              {showQrWpp ? "OCULTAR QR CODE" : "ABRIR QR CODE"}
-            </button>
-            {showQrWpp && (
-              <div className="border border-[#27272A] p-3 text-center">
-                <div className="w-40 h-40 mx-auto bg-white text-black flex items-center justify-center font-mono text-xs">
-                  QR CODE
-                </div>
-                <span className="font-mono text-[10px] text-[#71717A] block mt-2">
-                  Escaneie no WhatsApp (mock Evolution API)
-                </span>
-              </div>
-            )}
-          </div>
+          <WhatsAppPanel restauranteId={id} authAxios={authAxios} API={API} isDark={isDark} borderClass={borderClass} subtleText={subtleText} />
 
           <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
             <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>IMPRESSÕES</span>

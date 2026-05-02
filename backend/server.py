@@ -51,6 +51,12 @@ api_router = APIRouter(prefix="/api")
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
 
+# ── Evolution API (WhatsApp) ─────────────────────────────────────────────────
+EVOLUTION_API_URL:  str = os.environ.get("EVOLUTION_API_URL",  "").strip()
+EVOLUTION_API_KEY:  str = os.environ.get("EVOLUTION_API_KEY",  "").strip()
+EVOLUTION_INSTANCE: str = os.environ.get("EVOLUTION_INSTANCE", "zapfome").strip()
+APP_URL: str = os.environ.get("APP_URL", "http://localhost:8000").strip()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
@@ -881,6 +887,32 @@ async def atualizar_status(
             )
 
     await broadcast_pedido_status(restaurante_id, pedido_id, update.status)
+
+    # ── Notificação WhatsApp automática ───────────────────────────────────────
+    phone = pedido.get("clienteTelefone", "")
+    if phone:
+        evo = _evo_client()
+        if evo:
+            # Busca nome do restaurante para a mensagem
+            rest_nome = "ZapFome"
+            try:
+                rest_doc = await db.restaurantes.find_one(
+                    {"id": restaurante_id}, {"_id": 0, "nome": 1}
+                )
+                if rest_doc:
+                    rest_nome = rest_doc.get("nome", rest_nome)
+            except Exception:
+                pass
+            asyncio.create_task(
+                evo.send_order_update(
+                    phone=phone,
+                    status=update.status,
+                    pedido_id=pedido_id,
+                    total=total,
+                    restaurante_nome=rest_nome,
+                )
+            )
+
     return {"status": "atualizado"}
 
 
@@ -1433,6 +1465,217 @@ async def crm_clientes(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# WHATSAPP — Evolution API (gerenciamento de instância + webhook)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from evolution import get_client as _evo_client, init_evolution  # noqa: E402
+
+
+def _evo() -> Any:
+    """Retorna o cliente Evolution ou lança 503 se não configurado."""
+    c = _evo_client()
+    if c is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Evolution API não configurada. Adicione EVOLUTION_API_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE no .env",
+        )
+    return c
+
+
+@api_router.get("/whatsapp/status")
+async def whatsapp_status(
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """Retorna o estado da conexão WhatsApp da instância."""
+    _require_owner_token(x_owner_token)
+    c = _evo()
+    data = await c.get_status()
+    state = data.get("instance", {}).get("state", "close")
+    return {
+        "connected": state == "open",
+        "state":     state,
+        "instance":  EVOLUTION_INSTANCE,
+        "raw":       data,
+    }
+
+
+@api_router.get("/whatsapp/qr")
+async def whatsapp_qr(
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """Retorna o QR Code base64 para conectar o WhatsApp."""
+    _require_owner_token(x_owner_token)
+    c = _evo()
+    return await c.get_qr()
+
+
+@api_router.post("/whatsapp/setup")
+async def whatsapp_setup(
+    restaurante_id: str = Body(..., embed=True),
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """
+    Cria/recria a instância Evolution e configura o webhook automaticamente.
+    O webhook URL aponta para /api/webhook/whatsapp/{restaurante_id}.
+    Chame apenas uma vez na primeira configuração.
+    """
+    _require_owner_token(x_owner_token)
+    c = _evo()
+    webhook_url = f"{APP_URL}/api/webhook/whatsapp/{restaurante_id}"
+    result = await c.create_instance(webhook_url)
+    # Tenta atualizar webhook se instância já existia
+    if result.get("error"):
+        result = await c.set_webhook(webhook_url)
+    return {
+        "webhook_url": webhook_url,
+        "instance":    EVOLUTION_INSTANCE,
+        "result":      result,
+    }
+
+
+@api_router.post("/whatsapp/disconnect")
+async def whatsapp_disconnect(
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """Desconecta o WhatsApp (logout) sem remover a instância."""
+    _require_owner_token(x_owner_token)
+    c = _evo()
+    return await c.logout()
+
+
+@api_router.post("/whatsapp/send")
+async def whatsapp_send_manual(
+    phone:   str = Body(..., embed=True),
+    message: str = Body(..., embed=True),
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """Envia mensagem manual de texto via WhatsApp (uso interno / testes)."""
+    _require_owner_token(x_owner_token)
+    c = _evo()
+    return await c.send_text(phone, message)
+
+
+# ── Webhook receptor (chamado pela Evolution API) ─────────────────────────────
+
+@api_router.post("/webhook/whatsapp/{restaurante_id}")
+@limiter.limit("120/minute")
+async def webhook_whatsapp(
+    request: Request,
+    restaurante_id: str,
+) -> Dict[str, Any]:
+    """
+    Recebe eventos da Evolution API:
+      • MESSAGES_UPSERT  — mensagem recebida → LangGraph responde
+      • CONNECTION_UPDATE — mudança de estado da conexão (log only)
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payload inválido")
+
+    event = payload.get("event", "").upper()
+    logger.info("webhook_whatsapp restaurante=%s event=%s", restaurante_id, event)
+
+    # ── Atualização de conexão (sem resposta necessária) ──
+    if event == "CONNECTION_UPDATE":
+        state = payload.get("data", {}).get("state", "unknown")
+        logger.info("WhatsApp connection_update | instance=%s | state=%s", EVOLUTION_INSTANCE, state)
+        return {"ok": True, "event": "connection_update", "state": state}
+
+    # ── Nova mensagem recebida ──
+    if event in ("MESSAGES_UPSERT", "MESSAGE_UPSERT", "MESSAGES.UPSERT"):
+        data    = payload.get("data", {})
+        key     = data.get("key", {})
+        from_me = key.get("fromMe", False)
+
+        # Ignora mensagens enviadas por nós
+        if from_me:
+            return {"ok": True, "skipped": "fromMe"}
+
+        remote_jid = key.get("remoteJid", "")
+        # Ignora grupos
+        if "@g.us" in remote_jid:
+            return {"ok": True, "skipped": "group"}
+
+        # Extrai telefone (remove @s.whatsapp.net e código do país se duplicado)
+        phone = remote_jid.replace("@s.whatsapp.net", "").replace("@c.us", "")
+
+        # Extrai texto da mensagem (tenta vários campos)
+        msg_obj  = data.get("message", {})
+        msg_text = (
+            msg_obj.get("conversation")
+            or msg_obj.get("extendedTextMessage", {}).get("text")
+            or msg_obj.get("imageMessage", {}).get("caption")
+            or ""
+        ).strip()
+
+        if not msg_text:
+            return {"ok": True, "skipped": "no_text"}
+
+        logger.info("WhatsApp msg from %s: %s", phone, msg_text[:80])
+
+        # Busca histórico da conversa (últimas 8 mensagens armazenadas)
+        try:
+            hist_docs = await db.whatsapp_history.find(
+                {"restauranteId": restaurante_id, "phone": phone},
+                {"_id": 0, "role": 1, "content": 1},
+            ).sort("ts", -1).limit(8).to_list(8)
+            historico = list(reversed(hist_docs))
+        except Exception:
+            historico = []
+
+        # Salva mensagem do cliente
+        try:
+            await db.whatsapp_history.insert_one({
+                "restauranteId": restaurante_id,
+                "phone":         phone,
+                "role":          "user",
+                "content":       msg_text[:400],
+                "ts":            datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+
+        # Chama o agente LangGraph
+        resposta = "Olá! No momento não consigo processar sua mensagem. Tente novamente."
+        if OPENAI_API_KEY:
+            try:
+                from ai_agent import run_agent
+                resposta = await run_agent(
+                    mensagem=msg_text,
+                    historico=historico,
+                    restaurante_id=restaurante_id,
+                    modo="cliente",
+                    openai_api_key=OPENAI_API_KEY,
+                    openai_model=OPENAI_MODEL,
+                )
+            except Exception as exc:
+                logger.error("webhook_whatsapp run_agent: %s", exc)
+
+        # Salva resposta no histórico
+        try:
+            await db.whatsapp_history.insert_one({
+                "restauranteId": restaurante_id,
+                "phone":         phone,
+                "role":          "assistant",
+                "content":       resposta[:400],
+                "ts":            datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+
+        # Envia resposta via Evolution API
+        c = _evo_client()
+        if c:
+            await c.send_text(phone, resposta)
+
+        return {"ok": True, "replied": True}
+
+    # Evento desconhecido — ignora silenciosamente
+    return {"ok": True, "event": event, "skipped": "unknown_event"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ENTREGADOR
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1511,11 +1754,20 @@ async def _create_indexes() -> None:
 @app.on_event("startup")
 async def startup_event() -> None:
     await _create_indexes()
+
     # Injeta banco no agente LangGraph
     from ai_agent import init_agent
     init_agent(db)
-    logger.info("ZapFome API v2.0 iniciada | LangGraph+OpenAI model: %s | CORS: %s",
-                OPENAI_MODEL, APP_ALLOWED_ORIGINS)
+
+    # Inicializa cliente Evolution API (WhatsApp)
+    init_evolution(EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE)
+
+    logger.info(
+        "ZapFome API v2.0 iniciada | LangGraph+OpenAI model: %s | CORS: %s | WhatsApp: %s",
+        OPENAI_MODEL,
+        APP_ALLOWED_ORIGINS,
+        "configurado" if EVOLUTION_API_URL else "não configurado",
+    )
 
 
 @app.on_event("shutdown")
