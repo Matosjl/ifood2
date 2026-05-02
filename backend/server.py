@@ -1347,6 +1347,92 @@ async def deletar_restaurante(restaurante_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CRM — Gestão de Clientes e Funil de Vendas
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_router.get("/crm/{restaurante_id}")
+async def crm_clientes(
+    restaurante_id: str,
+    x_owner_token: Optional[str] = Header(default=None, alias="X-Owner-Token"),
+) -> Dict[str, Any]:
+    """
+    Retorna clientes agrupados por nome+telefone, com métricas de CLV e
+    classificação no funil: Novo(1) → Recorrente(2-4) → Fiel(5-9) → VIP(10+).
+    """
+    _require_owner_token(x_owner_token)
+    try:
+        pipeline = [
+            {"$match": {"restauranteId": restaurante_id}},
+            {"$group": {
+                "_id": {"nome": "$clienteNome", "tel": "$clienteTelefone"},
+                "total_pedidos":      {"$sum": 1},
+                "total_gasto":        {"$sum": "$total"},
+                "ultimo_pedido":      {"$max": "$criadoEm"},
+                "primeiro_pedido":    {"$min": "$criadoEm"},
+                "pedidos_entregues":  {"$sum": {"$cond": [{"$eq": ["$status", "entregue"]}, 1, 0]}},
+                "pedidos_cancelados": {"$sum": {"$cond": [{"$eq": ["$status", "cancelado"]}, 1, 0]}},
+            }},
+            {"$sort": {"total_gasto": -1}},
+            {"$limit": 300},
+        ]
+        raw = await db.pedidos.aggregate(pipeline).to_list(300)
+
+        clientes = []
+        funil: Dict[str, int] = {"novo": 0, "recorrente": 0, "fiel": 0, "vip": 0}
+
+        for c in raw:
+            nome  = (c["_id"].get("nome") or "Cliente Balcão").strip()
+            tel   = (c["_id"].get("tel")  or "").strip()
+            n     = int(c["total_pedidos"])
+            gasto = float(c.get("total_gasto") or 0)
+
+            if n >= 10:
+                stage = "vip"
+            elif n >= 5:
+                stage = "fiel"
+            elif n >= 2:
+                stage = "recorrente"
+            else:
+                stage = "novo"
+
+            funil[stage] += 1
+            clientes.append({
+                "nome":               nome,
+                "telefone":           tel,
+                "total_pedidos":      n,
+                "pedidos_entregues":  int(c.get("pedidos_entregues")  or 0),
+                "pedidos_cancelados": int(c.get("pedidos_cancelados") or 0),
+                "total_gasto":        round(gasto, 2),
+                "ticket_medio":       round(gasto / n, 2) if n > 0 else 0,
+                "ultimo_pedido":      c.get("ultimo_pedido"),
+                "primeiro_pedido":    c.get("primeiro_pedido"),
+                "stage":              stage,
+            })
+
+        total = len(clientes)
+        fat   = sum(c["total_gasto"] for c in clientes)
+
+        return {
+            "clientes": clientes,
+            "funil": funil,
+            "resumo": {
+                "total_clientes":    total,
+                "total_faturado":    round(fat, 2),
+                "ticket_medio_geral": round(fat / total, 2) if total > 0 else 0,
+                "vips":              funil["vip"],
+                "novos_hoje":        sum(
+                    1 for c in clientes
+                    if c.get("primeiro_pedido", "") >= datetime.now(timezone.utc)
+                        .replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+                ),
+            },
+        }
+    except Exception as exc:
+        logger.error("crm_clientes: %s", exc)
+        raise HTTPException(status_code=500, detail="Erro ao carregar CRM")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ENTREGADOR
 # ─────────────────────────────────────────────────────────────────────────────
 

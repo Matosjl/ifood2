@@ -30,6 +30,7 @@ import PedidoAcompanhamento from "@/pages/PedidoAcompanhamento";
 import ChatIA from "@/pages/ChatIA";
 import BuscarPage from "@/pages/BuscarPage";
 import MeusPedidos from "@/pages/MeusPedidos";
+import LandingPage from "@/pages/LandingPage";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 const API = `${BACKEND_URL}/api`;
@@ -251,6 +252,8 @@ function App() {
           <Routes>
             <Route path="/" element={<AjaxAgent />} />
             {/* Restaurantes — listagem e cadastro */}
+            {/* Landing page de vendas para donos de restaurante */}
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/restaurantes" element={<RestaurantesLista />} />
             <Route path="/restaurantes/novo" element={<RestauranteCadastro />} />
             <Route path="/restaurantes/:id/editar" element={<RestauranteCadastro />} />

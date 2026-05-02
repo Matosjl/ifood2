@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { DigitalMenu } from "@/components/DigitalMenu";
@@ -6,20 +6,27 @@ import { NovoPedido } from "@/components/NovoPedido";
 import { Estoque } from "@/components/Estoque";
 import { Financeiro } from "@/components/Financeiro";
 import { Cardapio } from "@/components/Cardapio";
+import { CRM } from "@/components/CRM";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
+const OWNER_TOKEN = process.env.REACT_APP_OWNER_API_TOKEN || "";
+
+// Instância axios com token de autenticação para rotas protegidas
+const authAxios = axios.create({
+  headers: { "X-Owner-Token": OWNER_TOKEN },
+});
 
 const STATUS_OPTIONS = ["TODOS", "PENDENTE", "ACEITO", "EM PREPARO", "SAIU PARA ENTREGA", "FINALIZADO", "CANCELADO"];
 const STATUS_COLORS = {
-  PENDENTE: "#FFB800",
-  ACEITO: "#00BFFF",
-  "EM PREPARO": "#FF8C00",
-  "SAIU PARA ENTREGA": "#A855F7",
-  FINALIZADO: "#00E559",
-  CANCELADO: "#FF4444",
+  PENDENTE:           "#FFB800",
+  ACEITO:             "#00BFFF",
+  "EM PREPARO":       "#FF8C00",
+  PRONTO:             "#3B82F6",
+  "SAIU PARA ENTREGA":"#A855F7",
+  FINALIZADO:         "#00E559",
+  CANCELADO:          "#FF4444",
 };
 const PAYMENT_ICONS = { PIX: "◈", DINHEIRO: "₿", CARTÃO: "▣", "VALE REFEIÇÃO": "◉" };
-const OWNER_TOKEN = process.env.REACT_APP_OWNER_API_TOKEN || "ifood2-token-super-seguro-2026";
 
 const MOCK_ORDERS = [
   { id: "#1042", client: "João S.", items: ["X-Burguer", "Coca-Cola"], total: 89.7, status: "FINALIZADO", type: "ENTREGA", payment: "PIX", time: "14:32", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 99999-0001", endereco: { rua: "Rua das Flores", numero: "123", cep: "01310-100", referencia: "Próximo ao mercado" } },
@@ -29,12 +36,248 @@ const MOCK_ORDERS = [
   { id: "#1046", client: "Pedro R.", items: ["X-Burguer Especial"], total: 28.9, status: "CANCELADO", type: "RETIRADA", payment: "CARTÃO", time: "15:00", agendado: false, horarioAgendado: "", observacao: "", telefone: "(11) 95555-0005", endereco: null },
 ];
 
+// ── Normalização API → UI ──────────────────────────────────────────────────────
+const STATUS_API_TO_UI = {
+  pendente: "PENDENTE", confirmado: "ACEITO", em_preparo: "EM PREPARO",
+  pronto: "PRONTO", em_entrega: "SAIU PARA ENTREGA",
+  entregue: "FINALIZADO", cancelado: "CANCELADO",
+};
+const STATUS_UI_TO_API = {
+  ACEITO: "confirmado", "EM PREPARO": "em_preparo", PRONTO: "pronto",
+  "SAIU PARA ENTREGA": "em_entrega", FINALIZADO: "entregue", CANCELADO: "cancelado",
+};
+const TIPO_API_TO_UI = { retirada: "RETIRADA", entrega: "ENTREGA", comer_aqui: "COMER AQUI" };
+
+const normalizeApiOrder = (o) => ({
+  id: o.id || String(Math.random()),
+  client: o.clienteNome || o.client || "-",
+  items: Array.isArray(o.itens)
+    ? o.itens.map(i => `${i.qtd}x ${i.nome || i.name}`)
+    : (o.items || []),
+  itensCompletos: o.itens || [],
+  total: Number(o.total || 0),
+  status: STATUS_API_TO_UI[o.status] || "PENDENTE",
+  type: TIPO_API_TO_UI[o.tipo] || "RETIRADA",
+  payment: (o.pagamento || "NÃO REGISTRADO").toUpperCase(),
+  time: new Date(o.criadoEm || Date.now()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+  agendado: o.agendado || false,
+  horarioAgendado: o.horarioAgendado || "",
+  observacao: o.observacao || "",
+  telefone: o.clienteTelefone || o.telefone || "",
+  endereco: o.endereco || null,
+  mesa: o.mesa || null,
+  pagamentosDetalhados: o.pagamentosDetalhados || o.pagamentos || null,
+});
+
+// ── Helpers de formatação (cupom) ─────────────────────────────────────────────
+const fmtMoney = (n) => `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
+
+// ── HTML do cupom térmico 58mm ────────────────────────────────────────────────
+const buildReceiptHTML = (order, restInfo = {}) => {
+  const dataHora = new Date().toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+  const oid = String(order.id || "").replace(/-/g, "").slice(-6).toUpperCase() || "??????";
+
+  // ── Itens ──────────────────────────────────────────────────────────────────
+  const itemRows = (order.itensCompletos && order.itensCompletos.length > 0
+    ? order.itensCompletos.map(i => {
+        const preco = Number(i.precoUnitario || i.salePrice || 0);
+        return `
+          <tr>
+            <td class="qtd">${i.qtd}x</td>
+            <td class="nome">${i.nome || i.name || ""}</td>
+            <td class="val">${fmtMoney(preco * i.qtd)}</td>
+          </tr>
+          ${i.observacao ? `<tr><td></td><td colspan="2" class="obs-item">↳ ${i.observacao}</td></tr>` : ""}`;
+      }).join("")
+    : (order.items || []).map(it => `<tr><td colspan="3" class="nome" style="padding:2px 0">${it}</td></tr>`).join("")
+  );
+
+  // ── Pagamentos ─────────────────────────────────────────────────────────────
+  const pgtoRows = (Array.isArray(order.pagamentosDetalhados) && order.pagamentosDetalhados.length > 0)
+    ? order.pagamentosDetalhados.map(p => `
+        <tr>
+          <td class="pgto-met">${p.metodo}</td>
+          <td class="pgto-val">${fmtMoney(p.valor)}</td>
+        </tr>
+        ${Number(p.troco) > 0 ? `<tr><td class="pgto-troco">↳ Troco</td><td class="pgto-troco" style="text-align:right">${fmtMoney(p.troco)}</td></tr>` : ""}`
+      ).join("")
+    : `<tr><td class="pgto-met">${order.payment || "—"}</td><td class="pgto-val">${fmtMoney(order.total)}</td></tr>`;
+
+  // ── Agendamento ────────────────────────────────────────────────────────────
+  const agendamentoBloco = (order.agendado && order.horarioAgendado) ? (() => {
+    try {
+      const dt = new Date(order.horarioAgendado);
+      return `
+        <div class="agend-box">
+          <div class="agend-label">AGENDADO PARA</div>
+          <div class="agend-hora">${dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</div>
+          <div class="agend-data">${dt.toLocaleDateString("pt-BR")}</div>
+        </div>
+        <div class="sep-dash"></div>`;
+    } catch { return ""; }
+  })() : "";
+
+  // ── Endereço ───────────────────────────────────────────────────────────────
+  const endBloco = order.endereco ? `
+    <div class="sep-dash"></div>
+    <div class="section-title">ENDEREÇO</div>
+    <div class="info-line">${order.endereco.rua || ""}, ${order.endereco.numero || ""}</div>
+    ${order.endereco.bairro ? `<div class="info-sub">${order.endereco.bairro}</div>` : ""}
+    ${order.endereco.referencia ? `<div class="info-sub">Ref: ${order.endereco.referencia}</div>` : ""}` : "";
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;color:#000!important;
+    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+  @page{margin:0;size:58mm auto;}
+  body{
+    font-family:'Courier New',Courier,monospace;
+    font-size:10px;line-height:1.45;
+    background:#fff!important;
+    width:58mm;
+    padding:3mm 3mm 0 3mm;
+  }
+
+  /* ── utilidades ── */
+  .c{text-align:center;}
+  .b{font-weight:bold;}
+  .sep-solid{border-top:2px solid #000;margin:5px 0;}
+  .sep-dash {border-top:1px dashed #000;margin:4px 0;}
+
+  /* ── cabeçalho ── */
+  .rest-nome{font-size:13px;font-weight:bold;text-align:center;letter-spacing:.5px;margin-bottom:1px;}
+  .rest-sub  {font-size:7.5px;text-align:center;color:#222;}
+  .data-hora {font-size:8px;text-align:center;margin-top:2px;}
+  .pedido-num{font-size:16px;font-weight:bold;text-align:center;letter-spacing:2px;margin:3px 0 1px;}
+
+  /* ── tipo badge ── */
+  .tipo-badge{
+    display:inline-block;font-size:7.5px;font-weight:bold;
+    border:1px solid #000;padding:1px 5px;margin:2px auto 0;
+    letter-spacing:.8px;
+  }
+  .tipo-wrap{text-align:center;}
+
+  /* ── agendamento ── */
+  .agend-box{border:2px solid #000;padding:5px 4px;margin:5px 0;text-align:center;}
+  .agend-label{font-size:7px;font-weight:bold;letter-spacing:1px;margin-bottom:2px;}
+  .agend-hora{font-size:22px;font-weight:bold;letter-spacing:3px;line-height:1.1;}
+  .agend-data{font-size:8px;margin-top:1px;}
+
+  /* ── info cliente ── */
+  .info-grid{width:100%;border-collapse:collapse;margin:3px 0;}
+  .info-grid td{padding:1.5px 0;font-size:9px;vertical-align:top;}
+  .info-grid .lbl{font-weight:bold;width:40px;color:#333;}
+  .info-line{font-size:9px;margin:1px 0;}
+  .info-sub {font-size:7.5px;color:#444;margin:1px 0;}
+  .section-title{font-size:7.5px;font-weight:bold;letter-spacing:.8px;margin-bottom:2px;}
+
+  /* ── itens ── */
+  .itens-tbl{width:100%;border-collapse:collapse;}
+  .itens-tbl th{font-size:8px;font-weight:bold;padding:1px 0 2px;border-bottom:1px dashed #000;}
+  .itens-tbl td{vertical-align:top;padding:2px 0;}
+  .qtd{width:22px;font-size:9px;}
+  .nome{font-size:9px;}
+  .val{text-align:right;white-space:nowrap;font-size:9px;width:38px;}
+  .obs-item{font-size:7.5px;color:#555;padding-left:4px;}
+
+  /* ── total ── */
+  .total-row{width:100%;border-collapse:collapse;margin:2px 0;}
+  .total-row td{font-size:14px;font-weight:bold;padding:2px 0;}
+  .total-row .tval{text-align:right;}
+
+  /* ── pagamento ── */
+  .pgto-tbl{width:100%;border-collapse:collapse;}
+  .pgto-tbl td{padding:1.5px 0;font-size:9px;}
+  .pgto-met{} .pgto-val{text-align:right;}
+  .pgto-troco{font-size:7.5px;color:#444;}
+
+  /* ── rodapé ── */
+  .footer-txt{font-size:7.5px;text-align:center;margin-top:2px;}
+  .cut-space{height:20mm;}
+</style></head><body>
+
+  <!-- CABEÇALHO -->
+  <div class="rest-nome">${restInfo.nome || "ZapFome"}</div>
+  ${restInfo.cnpj    ? `<div class="rest-sub">CNPJ: ${restInfo.cnpj}</div>` : ""}
+  ${restInfo.endereco? `<div class="rest-sub">${restInfo.endereco}</div>`  : ""}
+  ${restInfo.telefone? `<div class="rest-sub">Tel: ${restInfo.telefone}</div>` : ""}
+
+  <div class="sep-dash"></div>
+  <div class="data-hora">${dataHora}</div>
+  <div class="pedido-num">#${oid}</div>
+  <div class="tipo-wrap">
+    <span class="tipo-badge">${order.type || "—"}</span>
+  </div>
+
+  <div class="sep-solid"></div>
+
+  <!-- AGENDAMENTO (condicional) -->
+  ${agendamentoBloco}
+
+  <!-- CLIENTE -->
+  <table class="info-grid">
+    <tr><td class="lbl">Cliente</td><td>${order.client || "—"}</td></tr>
+    ${order.telefone ? `<tr><td class="lbl">Tel</td><td>${order.telefone}</td></tr>` : ""}
+    ${order.mesa     ? `<tr><td class="lbl">Mesa</td><td><b>${order.mesa}</b></td></tr>` : ""}
+  </table>
+
+  <!-- ENDEREÇO (condicional) -->
+  ${endBloco}
+
+  <!-- ITENS -->
+  <div class="sep-dash"></div>
+  <div class="section-title c">ITENS DO PEDIDO</div>
+  <table class="itens-tbl">
+    <thead>
+      <tr>
+        <th class="qtd">Qtd</th>
+        <th style="text-align:left">Produto</th>
+        <th style="text-align:right">Vlr</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+
+  <!-- TOTAL -->
+  <div class="sep-solid"></div>
+  <table class="total-row">
+    <tr>
+      <td>TOTAL</td>
+      <td class="tval">${fmtMoney(order.total)}</td>
+    </tr>
+  </table>
+  <div class="sep-solid"></div>
+
+  <!-- PAGAMENTO -->
+  <div class="section-title" style="margin-top:4px;">PAGAMENTO</div>
+  <table class="pgto-tbl">${pgtoRows}</table>
+
+  <!-- OBSERVAÇÃO -->
+  ${order.observacao ? `
+  <div class="sep-dash"></div>
+  <div class="section-title">OBSERVAÇÕES</div>
+  <div class="info-line">${order.observacao}</div>` : ""}
+
+  <!-- RODAPÉ -->
+  <div class="sep-dash" style="margin-top:6px;"></div>
+  <div class="footer-txt">Obrigado pela preferência!</div>
+  <div class="footer-txt" style="font-size:7px;color:#666;">ZapFome · Sistema de Delivery</div>
+  <div class="cut-space"></div>
+</body></html>`;
+};
+
 const TABS = [
-  { id: "pedidos", label: "PEDIDOS" },
-  { id: "novo-pedido", label: "NOVO PEDIDO", highlight: true },
-  { id: "cardapio", label: "CARDÁPIO DIGITAL" },
-  { id: "estoque", label: "ESTOQUE" },
+  { id: "pedidos",    label: "PEDIDOS" },
+  { id: "novo-pedido",label: "NOVO PEDIDO", highlight: true },
+  { id: "cardapio",   label: "CARDÁPIO DIGITAL" },
+  { id: "estoque",    label: "ESTOQUE" },
   { id: "financeiro", label: "💰 FINANCEIRO" },
+  { id: "crm",        label: "📊 CRM" },
 ];
 
 // ── Countdown ─────────────────────────────────────────────────────────────────
@@ -62,296 +305,193 @@ const Countdown = ({ horario }) => {
   );
 };
 
+// ── Fluxo de status ────────────────────────────────────────────────────────────
+// Pendente → Aceito → Em Preparo → Pronto → Finalizado
+const STATUS_FLOW = {
+  PENDENTE:    { next: "ACEITO",     label: "Aceitar Pedido",     cls: "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600" },
+  ACEITO:      { next: "EM PREPARO", label: "Iniciar Preparo",    cls: "bg-amber-500   hover:bg-amber-400   active:bg-amber-600"   },
+  "EM PREPARO":{ next: "PRONTO",     label: "Marcar como Pronto", cls: "bg-blue-500    hover:bg-blue-400    active:bg-blue-600"    },
+  PRONTO:      { next: "FINALIZADO", label: "Finalizar Pedido",   cls: "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600" },
+  FINALIZADO:  { next: null,         label: null,                 cls: null },
+  CANCELADO:   { next: null,         label: null,                 cls: null },
+};
+
+// Stepper visual do progresso
+const STATUS_STEPS = ["PENDENTE", "ACEITO", "EM PREPARO", "PRONTO", "FINALIZADO"];
+
 // ── Modal de Detalhes ─────────────────────────────────────────────────────────
-const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
-  const [erroPagamento, setErroPagamento] = useState(false);
-  const [showPaymentSelect, setShowPaymentSelect] = useState(false);
-  const [pagamentoTemp, setPagamentoTemp] = useState("");
-  const [despachando, setDespachando] = useState(false);
-  const [entregadorId, setEntregadorId] = useState("");
-  const [entregadoresOnline, setEntregadoresOnline] = useState([]);
-  const [showDespachar, setShowDespachar] = useState(false);
-  const [erroDespacho, setErroDespacho] = useState("");
+const OrderModal = ({ order, onClose, onStatusChange }) => {
+  const [loading, setLoading] = useState(false);
 
-  // Poll entregadores online enquanto modal de despacho está aberto
-  // ← DEVE ficar ANTES de qualquer early return (regra de hooks do React)
-  useEffect(() => {
-    if (!showDespachar) return;
-    const fetchOnline = async () => {
-      try {
-        const r = await axios.get(`${API}/entregador/online`);
-        setEntregadoresOnline(r.data?.online || []);
-      } catch { setEntregadoresOnline([]); }
-    };
-    fetchOnline();
-    const interval = setInterval(fetchOnline, 2000);
-    return () => clearInterval(interval);
-  }, [showDespachar]);
-
-  // ← hooks ANTES do early return
   if (!order) return null;
 
-  const confirmarDespacho = async () => {
-    if (!entregadorId.trim()) return;
-    setDespachando(true);
-    setErroDespacho("");
-    try {
-      await onDespachar(order, entregadorId.trim());
-    } catch {
-      // falha na API do entregador não bloqueia o avanço do status
-    }
-    setShowDespachar(false);
-    setEntregadorId("");
-    onStatusChange(order.id, "SAIU PARA ENTREGA");
-    setDespachando(false);
+  const flow   = STATUS_FLOW[order.status] || {};
+  const stepIdx = STATUS_STEPS.indexOf(order.status);
+
+  const handleAvancar = async () => {
+    if (!flow.next || loading) return;
+    setLoading(true);
+    await onStatusChange(order.id, flow.next); // persiste via API dentro de handleStatusChange
+    setLoading(false);
+    if (flow.next === "FINALIZADO") onClose();
   };
 
-  const PAYMENT_METHODS = ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Vale Refeição"];
-
-  const nextStatus = {
-    PENDENTE: "ACEITO",
-    ACEITO: "EM PREPARO",
-  };
-
-  const handleAvancar = (id, novoStatus) => {
-    setErroPagamento(false);
-    onStatusChange(id, novoStatus);
-  };
-
-  const handleFinalizar = () => {
-    const pg = (order.payment || "").trim();
-    const semPagamento = !pg || pg === "NÃO REGISTRADO" || pg === "NAO REGISTRADO";
-    if (semPagamento) {
-      setErroPagamento(true);
-      setShowPaymentSelect(true);
-      return;
-    }
-    onStatusChange(order.id, "FINALIZADO");
-  };
-
-  const handleEnviarParaEntrega = async () => {
-    setErroDespacho("");
-    try {
-      const r = await axios.get(`${API}/entregador/online`);
-      setEntregadoresOnline(r.data?.online || []);
-    } catch { setEntregadoresOnline([]); }
-    setShowDespachar(true);
-  };
-
-  const confirmarPagamentoEFinalizar = () => {
-    if (!pagamentoTemp) return;
-    onStatusChange(order.id, "FINALIZADO", pagamentoTemp);
-    setShowPaymentSelect(false);
-    setErroPagamento(false);
+  const handleCancelar = async () => {
+    setLoading(true);
+    await onStatusChange(order.id, "CANCELADO");
+    setLoading(false);
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+      onClick={onClose}>
       <div
-        className="bg-[#0A0A0A] border border-[#27272A] w-full max-w-lg flex flex-col gap-0 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className="bg-[#111] border border-white/10 w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+        onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#27272A]"
-          style={{ borderLeftWidth: 3, borderLeftColor: STATUS_COLORS[order.status] || "#27272A" }}>
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
           <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-[#EDEDED] font-bold">{order.id}</span>
-            <span className="font-mono text-xs px-2 py-0.5 border"
-              style={{ color: STATUS_COLORS[order.status], borderColor: STATUS_COLORS[order.status] }}>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[11px] text-zinc-500 uppercase tracking-widest">Pedido</span>
+              <span className="text-base font-bold text-white font-mono">{order.id?.slice(0, 8)}…</span>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full font-semibold"
+              style={{ backgroundColor: (STATUS_COLORS[order.status] || "#3f3f46") + "22", color: STATUS_COLORS[order.status] || "#a1a1aa" }}>
               {order.status}
             </span>
-            <span className="font-mono text-xs text-[#71717A]">{order.type}</span>
           </div>
-          <button onClick={onClose} className="font-mono text-xs text-[#71717A] hover:text-[#EDEDED]">✕</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/8 hover:bg-white/15 text-zinc-400 transition-colors">
+            ✕
+          </button>
         </div>
 
-        <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[70vh]">
-          {/* Agendamento countdown */}
+        {/* ── Stepper de progresso ── */}
+        {order.status !== "CANCELADO" && (
+          <div className="flex items-center px-5 py-3 border-b border-white/8 gap-0">
+            {STATUS_STEPS.map((s, i) => {
+              const done    = i < stepIdx;
+              const current = i === stepIdx;
+              const last    = i === STATUS_STEPS.length - 1;
+              return (
+                <div key={s} className="flex items-center flex-1">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 transition-colors ${
+                    done    ? "bg-emerald-500 text-black" :
+                    current ? "bg-white text-black" :
+                              "bg-white/10 text-zinc-600"
+                  }`}>
+                    {done ? "✓" : i + 1}
+                  </div>
+                  {!last && (
+                    <div className={`flex-1 h-px mx-1 transition-colors ${done ? "bg-emerald-500" : "bg-white/10"}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Corpo ── */}
+        <div className="p-5 flex flex-col gap-4 overflow-y-auto max-h-[55vh]">
+          {/* Agendamento */}
           {order.agendado && order.horarioAgendado && (
-            <div className="bg-[#111] border border-[#27272A] px-3 py-2 flex items-center justify-between">
-              <span className="font-mono text-xs text-[#71717A]">AGENDADO PARA {new Date(order.horarioAgendado).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+            <div className="flex items-center justify-between bg-amber-500/8 border border-amber-500/20 rounded-xl px-4 py-2.5">
+              <span className="text-xs text-zinc-400">
+                Agendado {new Date(order.horarioAgendado).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              </span>
               <Countdown horario={order.horarioAgendado} />
             </div>
           )}
 
-          {/* Cliente */}
-          <div className="flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">CLIENTE</span>
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-sm text-[#EDEDED]">{order.client}</span>
-              {order.telefone && (
-                <span className="font-mono text-xs text-[#A1A1AA]">📞 {order.telefone}</span>
-              )}
+          {/* Cliente + tipo */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-base font-semibold text-white">{order.client}</p>
+              {order.telefone && <p className="text-xs text-zinc-500">📞 {order.telefone}</p>}
             </div>
+            <span className="text-xs px-3 py-1 bg-white/8 rounded-full text-zinc-300">{order.type}</span>
           </div>
 
           {/* Itens */}
-          <div className="flex flex-col gap-2">
-            <span className="font-mono text-[10px] text-[#71717A] tracking-widest">ITENS</span>
-            <div className="flex flex-col gap-1">
-              {order.items.map((item, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-[#00E559] font-mono text-xs">›</span>
-                  <span className="font-mono text-xs text-[#EDEDED]">{item}</span>
-                </div>
-              ))}
-            </div>
+          <div className="bg-white/4 rounded-xl p-3 flex flex-col gap-1.5">
+            <p className="text-[11px] text-zinc-500 uppercase tracking-widest mb-1">Itens</p>
+            {(order.items || []).map((item, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-emerald-500 text-xs">›</span>
+                <span className="text-sm text-zinc-200">{item}</span>
+              </div>
+            ))}
           </div>
 
           {/* Endereço */}
           {order.endereco && (
-            <div className="flex flex-col gap-2">
-              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">ENDEREÇO DE ENTREGA</span>
-              <div className="bg-[#111] border border-[#27272A] p-3 flex flex-col gap-1">
-                <span className="font-mono text-xs text-[#EDEDED]">{order.endereco.rua}, {order.endereco.numero}</span>
-                {order.endereco.cep && <span className="font-mono text-xs text-[#71717A]">CEP: {order.endereco.cep}</span>}
-                {order.endereco.referencia && <span className="font-mono text-xs text-[#A1A1AA]">Ref: {order.endereco.referencia}</span>}
-              </div>
+            <div className="bg-white/4 rounded-xl p-3 flex flex-col gap-1">
+              <p className="text-[11px] text-zinc-500 uppercase tracking-widest mb-1">Entrega</p>
+              <p className="text-sm text-zinc-200">{order.endereco.rua}, {order.endereco.numero}</p>
+              {order.endereco.bairro && <p className="text-xs text-zinc-500">{order.endereco.bairro}</p>}
+              {order.endereco.referencia && <p className="text-xs text-zinc-500">Ref: {order.endereco.referencia}</p>}
             </div>
           )}
 
           {/* Observação */}
           {order.observacao && (
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">OBSERVAÇÃO</span>
-              <span className="font-mono text-xs text-[#FFB800] bg-[#FFB800]/5 border border-[#FFB800]/20 px-3 py-2">{order.observacao}</span>
+            <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl px-4 py-2.5">
+              <p className="text-[11px] text-zinc-500 uppercase tracking-widest mb-1">Obs</p>
+              <p className="text-sm text-amber-300">{order.observacao}</p>
             </div>
           )}
 
-          {/* Pagamento + Total */}
-          <div className="flex items-center justify-between border-t border-[#27272A] pt-3">
-            <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[order.payment]} {order.payment}</span>
-            <span className="font-mono text-lg text-[#00E559] font-bold">R$ {order.total.toFixed(2).replace(".", ",")}</span>
+          {/* Total */}
+          <div className="flex items-center justify-between border-t border-white/8 pt-3">
+            <span className="text-sm text-zinc-400">{order.payment || "Pagamento não registrado"}</span>
+            <span className="text-xl font-bold text-emerald-400">
+              R$ {Number(order.total || 0).toFixed(2).replace(".", ",")}
+            </span>
           </div>
+        </div>
 
-          {/* Erro de pagamento */}
-          {erroPagamento && (
-            <div className="bg-[#FF4444]/10 border border-[#FF4444] px-3 py-2 font-mono text-xs text-[#FF4444]">
-              ⚠ Pedido sem pagamento registrado. Selecione a forma de pagamento para finalizar.
+        {/* ── Botões de ação ── */}
+        <div className="p-5 border-t border-white/8 flex flex-col gap-3">
+          {/* Botão principal — avança o status */}
+          {flow.next && (
+            <button
+              onClick={handleAvancar}
+              disabled={loading}
+              className={`w-full py-4 rounded-xl text-base font-bold text-black transition-all disabled:opacity-40 active:scale-[0.98] ${flow.cls}`}
+            >
+              {loading ? "Salvando…" : flow.label}
+            </button>
+          )}
+
+          {/* Finalizado — desabilitado */}
+          {order.status === "FINALIZADO" && (
+            <div className="w-full py-4 rounded-xl text-center text-sm font-semibold text-zinc-600 bg-white/4">
+              ✓ Pedido Finalizado
             </div>
           )}
 
-          {/* Seleção de pagamento ao finalizar */}
-          {showPaymentSelect && (
-            <div className="flex flex-col gap-2">
-              <span className="font-mono text-[10px] text-[#71717A] tracking-widest">FORMA DE PAGAMENTO</span>
-              <div className="grid grid-cols-2 gap-2">
-                {PAYMENT_METHODS.map(m => (
-                  <button key={m} onClick={() => setPagamentoTemp(m)}
-                    className={`py-2 border font-mono text-xs transition-colors ${
-                      pagamentoTemp === m ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10" : "border-[#27272A] text-[#71717A] hover:border-[#00E559] hover:text-[#00E559]"
-                    }`}>
-                    {m}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={confirmarPagamentoEFinalizar}
-                disabled={!pagamentoTemp}
-                className="w-full py-2 bg-[#00E559] text-black font-mono text-xs font-bold disabled:opacity-40 hover:bg-[#00c44d] transition-colors"
-              >
-                ✓ CONFIRMAR E FINALIZAR
-              </button>
+          {/* Cancelado */}
+          {order.status === "CANCELADO" && (
+            <div className="w-full py-4 rounded-xl text-center text-sm font-semibold text-red-400 bg-red-500/8">
+              ✕ Pedido Cancelado
             </div>
           )}
 
-          {/* Painel de despacho */}
-          {showDespachar && (
-            <div className="flex flex-col gap-2">
-              <span className="font-mono text-[10px] text-[#00BFFF] tracking-widest">SELECIONAR ENTREGADOR</span>
-              {entregadoresOnline.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {entregadoresOnline.map(eid => (
-                    <button key={eid} onClick={() => setEntregadorId(eid)}
-                      className={`font-mono text-xs px-2 py-1 border transition-colors ${
-                        entregadorId === eid ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10" : "border-[#27272A] text-[#71717A] hover:border-[#00BFFF]"
-                      }`}>
-                      🟢 {eid}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {entregadoresOnline.length === 0 && (
-                <span className="font-mono text-[10px] text-[#FF4444]">Nenhum entregador online. Digite o ID manualmente (atualizando a cada 2s...):</span>
-              )}
-              <input
-                value={entregadorId}
-                onChange={e => setEntregadorId(e.target.value)}
-                placeholder="Ex: carlos, moto01, joao..."
-                className="bg-black border border-[#27272A] text-[#EDEDED] font-mono text-xs px-3 py-2 focus:outline-none focus:border-[#00BFFF]"
-              />
-              {erroDespacho && (
-                <div className="font-mono text-xs text-[#FF4444] bg-[#FF4444]/10 border border-[#FF4444]/30 px-3 py-2">
-                  ⚠ {erroDespacho}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { setShowDespachar(false); setEntregadorId(""); setErroDespacho(""); }}
-                  className="py-2 border border-[#27272A] text-[#71717A] font-mono text-xs hover:border-[#FF4444] hover:text-[#FF4444] transition-colors">
-                  CANCELAR
-                </button>
-                <button onClick={confirmarDespacho} disabled={despachando || !entregadorId.trim()}
-                  className="py-2 bg-[#00BFFF] text-black font-mono text-xs font-bold disabled:opacity-40 hover:bg-[#00a8e0] transition-colors">
-                  {despachando ? "ENVIANDO..." : "🛵 DESPACHAR"}
-                </button>
-              </div>
-            </div>
+          {/* Cancelar — apenas para pedidos não finais */}
+          {order.status === "PENDENTE" && (
+            <button
+              onClick={handleCancelar}
+              disabled={loading}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/8 transition-colors disabled:opacity-40"
+            >
+              Cancelar pedido
+            </button>
           )}
 
-          {/* Botão principal de ação por status */}
-          {!showPaymentSelect && !showDespachar && (
-            <>
-              {/* PENDENTE / ACEITO: avança normalmente */}
-              {nextStatus[order.status] && (
-                <button
-                  onClick={() => handleAvancar(order.id, nextStatus[order.status])}
-                  className="w-full py-2 font-mono text-xs font-bold text-black transition-colors"
-                  style={{ backgroundColor: STATUS_COLORS[nextStatus[order.status]] }}
-                >
-                  AVANÇAR → {nextStatus[order.status]}
-                </button>
-              )}
-
-              {/* EM PREPARO + ENTREGA: despachar para entregador */}
-              {order.status === "EM PREPARO" && order.type === "ENTREGA" && (
-                <button
-                  onClick={handleEnviarParaEntrega}
-                  className="w-full py-2 font-mono text-xs font-bold border-2 border-[#A855F7] text-[#A855F7] hover:bg-[#A855F7]/10 transition-colors"
-                >
-                  🛵 DESPACHAR PARA ENTREGA
-                </button>
-              )}
-
-              {/* EM PREPARO + RETIRADA: finalizar direto */}
-              {order.status === "EM PREPARO" && order.type === "RETIRADA" && (
-                <button
-                  onClick={handleFinalizar}
-                  className="w-full py-2 font-mono text-xs font-bold text-black bg-[#00E559] hover:bg-[#00c44d] transition-colors"
-                >
-                  ✓ FINALIZAR
-                </button>
-              )}
-
-              {/* SAIU PARA ENTREGA: finalizar */}
-              {order.status === "SAIU PARA ENTREGA" && (
-                <button
-                  onClick={handleFinalizar}
-                  className="w-full py-2 font-mono text-xs font-bold text-black bg-[#00E559] hover:bg-[#00c44d] transition-colors"
-                >
-                  ✓ FINALIZAR
-                </button>
-              )}
-
-              {order.status === "PENDENTE" && (
-                <button
-                  onClick={() => onStatusChange(order.id, "CANCELADO")}
-                  className="w-full py-2 font-mono text-xs font-bold border border-[#FF4444] text-[#FF4444] hover:bg-[#FF4444]/10 transition-colors"
-                >
-                  CANCELAR PEDIDO
-                </button>
-              )}
-            </>
-          )}
+          <button onClick={onClose} className="w-full py-2 text-sm text-zinc-600 hover:text-zinc-400 transition-colors">
+            Fechar
+          </button>
         </div>
       </div>
     </div>
@@ -360,34 +500,68 @@ const OrderModal = ({ order, onClose, onStatusChange, onDespachar }) => {
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 const CardView = ({ orders, onSelect, onReimprimir }) => (
-  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-    {orders.map((o) => (
-      <div key={o.id}
-        className="bg-[#0A0A0A] border border-[#27272A] p-4 flex flex-col gap-2 hover:border-[#3F3F46] cursor-pointer transition-colors">
-        <div className="flex justify-between items-center">
-          <span className="font-mono text-xs text-[#71717A]">{o.id}</span>
-          <span className="font-mono text-xs px-2 py-0.5 border"
-            style={{ color: STATUS_COLORS[o.status] || "#71717A", borderColor: STATUS_COLORS[o.status] || "#27272A" }}>
-            {o.status}
-          </span>
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+    {orders.map((o) => {
+      const cor = STATUS_COLORS[o.status] || "#3f3f46";
+      return (
+        <div key={o.id}
+          onClick={() => onSelect(o)}
+          className="relative bg-[#111] rounded-2xl overflow-hidden cursor-pointer transition-all hover:scale-[1.01] hover:shadow-xl active:scale-[0.99]"
+          style={{ border: `1px solid ${cor}33` }}>
+          {/* borda-status lateral */}
+          <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl" style={{ background: cor }} />
+
+          <div className="pl-4 pr-3 pt-3 pb-3 flex flex-col gap-2">
+            {/* topo: id + status badge */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[10px] text-zinc-600">#{String(o.id).slice(-6).toUpperCase()}</span>
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: `${cor}22`, color: cor }}>
+                {o.status}
+              </span>
+            </div>
+
+            {/* cliente */}
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-white/8 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                {(o.client || "?")[0].toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate leading-tight">{o.client}</p>
+                <p className="text-[10px] text-zinc-500 leading-tight">{o.type}{o.mesa ? ` · Mesa ${o.mesa}` : ""}</p>
+              </div>
+            </div>
+
+            {/* itens */}
+            <p className="text-[11px] text-zinc-400 leading-snug line-clamp-2">
+              {o.items.join(" · ")}
+            </p>
+
+            {/* countdown se agendado */}
+            {o.agendado && o.horarioAgendado && (
+              <div className="flex items-center gap-1.5 bg-amber-500/8 rounded-xl px-2.5 py-1.5 border border-amber-500/20">
+                <Countdown horario={o.horarioAgendado} />
+              </div>
+            )}
+
+            {/* rodapé: pagamento + total + reimprimir */}
+            <div className="flex items-center justify-between pt-2 mt-0.5 border-t border-white/6">
+              <span className="text-[10px] text-zinc-500">{o.payment}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-emerald-400">
+                  R$ {Number(o.total).toFixed(2).replace(".", ",")}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/6 hover:bg-emerald-500/20 text-zinc-400 hover:text-emerald-400 transition-colors text-sm"
+                  title="Reimprimir comanda"
+                >🖨</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <span className="font-mono text-sm text-[#EDEDED]">{o.client}</span>
-        <div className="font-mono text-xs text-[#71717A]">{o.items.join(", ")}</div>
-        {o.agendado && o.horarioAgendado && <Countdown horario={o.horarioAgendado} />}
-        <div className="flex justify-between items-center border-t border-[#27272A] pt-2 mt-1">
-          <span className="font-mono text-xs text-[#A1A1AA]">{PAYMENT_ICONS[o.payment]} {o.payment}</span>
-          <span className="font-mono text-sm text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
-        </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
-          className="mt-2 w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
-          title="Reimprimir"
-          aria-label="Reimprimir"
-        >
-          🖨
-        </button>
-      </div>
-    ))}
+      );
+    })}
   </div>
 );
 
@@ -432,40 +606,48 @@ const ListView = ({ orders, onSelect, onReimprimir }) => (
 const KanbanView = ({ orders, onSelect, onReimprimir }) => {
   const cols = STATUS_OPTIONS.filter((s) => s !== "TODOS");
   return (
-    <div className="flex gap-3 p-4 overflow-x-auto min-h-[300px]">
+    <div className="flex gap-3 p-4 overflow-x-auto min-h-[300px] pb-6">
       {cols.map((col) => {
+        const cor = STATUS_COLORS[col] || "#3f3f46";
         const colOrders = orders.filter((o) => o.status === col);
         return (
-          <div key={col} className="min-w-[200px] flex flex-col gap-2">
-            <div className="font-mono text-xs px-2 py-1 border-b"
-              style={{ color: STATUS_COLORS[col], borderColor: STATUS_COLORS[col] }}>
-              {col} <span className="text-[#71717A]">({colOrders.length})</span>
+          <div key={col} className="min-w-[190px] flex flex-col gap-2">
+            {/* header coluna */}
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-xl mb-0.5"
+              style={{ background: `${cor}14`, border: `1px solid ${cor}30` }}>
+              <span className="text-[10px] font-bold" style={{ color: cor }}>{col}</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${cor}25`, color: cor }}>
+                {colOrders.length}
+              </span>
             </div>
+
             {colOrders.map((o) => (
               <div key={o.id} onClick={() => onSelect(o)}
-                className="bg-[#0A0A0A] border border-[#27272A] p-3 flex flex-col gap-1 cursor-pointer hover:border-[#3F3F46] transition-colors">
-                <div className="flex justify-between">
-                  <span className="font-mono text-xs text-[#71717A]">{o.id}</span>
-                  <span className="font-mono text-xs text-[#A1A1AA]">{o.time}</span>
+                className="bg-[#111] rounded-xl p-3 flex flex-col gap-1.5 cursor-pointer hover:bg-white/4 transition-all active:scale-[0.98]"
+                style={{ border: `1px solid ${cor}22` }}>
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] text-zinc-600 font-mono">#{String(o.id).slice(-4).toUpperCase()}</span>
+                  <span className="text-[9px] text-zinc-500">{o.time}</span>
                 </div>
-                <span className="font-mono text-sm text-[#EDEDED]">{o.client}</span>
-                <span className="font-mono text-xs text-[#71717A]">{o.items[0]}{o.items.length > 1 ? ` +${o.items.length - 1}` : ""}</span>
+                <span className="text-sm font-semibold text-white leading-tight">{o.client}</span>
+                <span className="text-[10px] text-zinc-500 leading-tight">{o.items[0]}{o.items.length > 1 ? ` +${o.items.length - 1}` : ""}</span>
                 {o.agendado && o.horarioAgendado && <Countdown horario={o.horarioAgendado} />}
-                <div className="flex justify-between items-center mt-1">
-                  <span className="font-mono text-xs text-[#A1A1AA]">{o.type}</span>
-                  <span className="font-mono text-xs text-[#00E559]">R$ {o.total.toFixed(2).replace(".", ",")}</span>
+                <div className="flex justify-between items-center mt-0.5 pt-1.5 border-t border-white/5">
+                  <span className="text-[10px] text-zinc-600">{o.type}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-emerald-400">R$ {Number(o.total).toFixed(2).replace(".", ",")}</span>
+                    <button onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+                      className="w-6 h-6 flex items-center justify-center rounded-lg bg-white/6 hover:bg-emerald-500/20 text-[11px] transition-colors"
+                      title="Reimprimir">🖨</button>
+                  </div>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
-                  className="mt-1 w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
-                  title="Reimprimir"
-                  aria-label="Reimprimir"
-                >
-                  🖨
-                </button>
               </div>
             ))}
-            {colOrders.length === 0 && <div className="font-mono text-xs text-[#3F3F46] text-center py-4">vazio</div>}
+            {colOrders.length === 0 && (
+              <div className="flex items-center justify-center py-8 rounded-xl border border-dashed border-white/6">
+                <span className="text-[10px] text-zinc-700">vazio</span>
+              </div>
+            )}
           </div>
         );
       })}
@@ -474,27 +656,41 @@ const KanbanView = ({ orders, onSelect, onReimprimir }) => {
 };
 
 const CompactView = ({ orders, onSelect, onReimprimir }) => (
-  <div className="flex flex-col divide-y divide-[#27272A]">
-    {orders.map((o) => (
-      <div key={o.id} onClick={() => onSelect(o)}
-        className="flex items-center gap-3 px-4 py-2 hover:bg-[#111] cursor-pointer">
-        <span className="font-mono text-xs text-[#71717A] w-14">{o.id}</span>
-        <span className="font-mono text-sm text-[#EDEDED] flex-1 truncate">{o.client}</span>
-        {o.agendado && o.horarioAgendado
-          ? <Countdown horario={o.horarioAgendado} />
-          : <span className="font-mono text-xs text-[#A1A1AA] hidden sm:block">{o.time}</span>}
-        <span className="font-mono text-xs text-[#00E559] w-20 text-right">R$ {o.total.toFixed(2).replace(".", ",")}</span>
-        <span className="font-mono text-xs w-20 text-right" style={{ color: STATUS_COLORS[o.status] || "#71717A" }}>{o.status}</span>
-        <button
-          onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
-          className="w-7 h-7 inline-flex items-center justify-center rounded border border-[#00E559] text-[#EDEDED] bg-[#00E559]/12 hover:bg-[#00E559]/24 transition-colors"
-          title="Reimprimir"
-          aria-label="Reimprimir"
-        >
-          🖨
-        </button>
-      </div>
-    ))}
+  <div className="flex flex-col">
+    {orders.map((o) => {
+      const cor = STATUS_COLORS[o.status] || "#3f3f46";
+      return (
+        <div key={o.id} onClick={() => onSelect(o)}
+          className="flex items-center gap-3 px-4 py-3 hover:bg-white/3 cursor-pointer border-b border-white/5 transition-colors">
+          {/* dot status */}
+          <div className="w-2 h-2 rounded-full shrink-0" style={{ background: cor }} />
+          {/* id */}
+          <span className="font-mono text-[10px] text-zinc-600 w-12 shrink-0">#{String(o.id).slice(-4).toUpperCase()}</span>
+          {/* cliente */}
+          <span className="text-sm text-white font-medium flex-1 truncate">{o.client}</span>
+          {/* tipo */}
+          <span className="text-[10px] text-zinc-500 hidden sm:block w-20 shrink-0">{o.type}</span>
+          {/* countdown ou hora */}
+          <div className="w-20 shrink-0 flex justify-end">
+            {o.agendado && o.horarioAgendado
+              ? <Countdown horario={o.horarioAgendado} />
+              : <span className="text-[10px] text-zinc-600">{o.time}</span>}
+          </div>
+          {/* total */}
+          <span className="text-sm font-bold text-emerald-400 w-20 text-right shrink-0">
+            R$ {Number(o.total).toFixed(2).replace(".", ",")}
+          </span>
+          {/* status */}
+          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full w-24 text-center shrink-0"
+            style={{ background: `${cor}20`, color: cor }}>{o.status}</span>
+          {/* reimprimir */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onReimprimir(o); }}
+            className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/6 hover:bg-emerald-500/20 text-zinc-400 hover:text-emerald-400 transition-colors text-sm shrink-0"
+            title="Reimprimir">🖨</button>
+        </div>
+      );
+    })}
   </div>
 );
 
@@ -583,8 +779,11 @@ const PedidosTab = ({ orders, onStatusChange, onDespachar, onReimprimir }) => {
       <OrderModal
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
-        onStatusChange={handleStatusChange}
-        onDespachar={onDespachar}
+        onStatusChange={async (id, status) => {
+          await handleStatusChange(id, status);
+          // Atualiza o pedido selecionado localmente para o stepper re-renderizar
+          setSelectedOrder(prev => prev ? { ...prev, status } : null);
+        }}
       />
     </>
   );
@@ -609,14 +808,56 @@ export function RestaurantePage() {
   const [theme, setTheme] = useState("light");
   const [activeTab, setActiveTab] = useState("pedidos");
   const [menuItems, setMenuItems] = useState([]);
-  const [orders, setOrders] = useState(MOCK_ORDERS);
+  // ── Integração 1: Inicializa do localStorage para sobreviver offline ──────────
+  const [orders, setOrders] = useState(() => {
+    try {
+      const cached = localStorage.getItem(`zapfome_orders_${id}`);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return []; // array vazio em produção — API carrega os pedidos reais
+  });
   const [estoqueItens, setEstoqueItens] = useState([]);
   const [vendasFinanceiro, setVendasFinanceiro] = useState([]);
   const [lojaAtiva, setLojaAtiva] = useState(true);
   const [mesas] = useState(Array.from({ length: 20 }, (_, i) => ({ id: `Mesa ${i + 1}`, status: i % 3 === 0 ? "ocupada" : "livre" })));
-  const [impressoras, setImpressoras] = useState([{ nome: "EPSON-TM-T20", ativa: true }]);
+  const [impressoras, setImpressoras] = useState([{ nome: "Knup KP-IM607", ativa: true }]);
   const [novaImpressora, setNovaImpressora] = useState("");
   const [showQrWpp, setShowQrWpp] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const knownPendentRef  = useRef(new Set());
+  const [restauranteInfo, setRestauranteInfo] = useState({});
+
+  // Carrega dados do restaurante (CNPJ, endereço) para o cupom
+  useEffect(() => {
+    if (!id) return;
+    axios.get(`${API}/restaurantes/${id}`)
+      .then(({ data }) => setRestauranteInfo(data || {}))
+      .catch(() => {});
+  }, [id]);
+
+  // ── Integração 1: Persiste pedidos no localStorage sempre que mudam ──────────
+  useEffect(() => {
+    localStorage.setItem(`zapfome_orders_${id}`, JSON.stringify(orders));
+  }, [orders, id]);
+
+  // ── Auto-load estoque ao montar (NovoPedido já tem dados desde o início) ─────
+  useEffect(() => {
+    if (!id) return;
+    axios.get(`${API}/estoque/${id}`)
+      .then(({ data }) => {
+        const arr = Array.isArray(data) ? data : (data.itens || []);
+        const normalized = arr.map(i => ({
+          ...i,
+          id: i.id || i._id,
+          category: i.categoria,
+          name: i.nome,
+          salePrice: i.precoVenda,
+          costPrice: i.precoCusto,
+        }));
+        setEstoqueItens(normalized);
+      })
+      .catch(() => {/* silencioso — Estoque tab vai tentar novamente */});
+  }, [id]);
 
   const restaurantName = `Restaurante ${id || ""}`;
 
@@ -646,117 +887,194 @@ export function RestaurantePage() {
     }));
   };
 
-  const buildPrintText = (order) => {
-    const lines = [
-      "================================",
-      `PEDIDO ${order.id}`,
-      "================================",
-      `Cliente: ${order.client || "-"}`,
-      `Tipo: ${order.type || "-"}`,
-      `Pagamento: ${order.payment || "-"}`,
-      "--------------------------------",
-      "ITENS:",
-      ...(order.items || []).map((it) => `- ${it}`),
-      "--------------------------------",
-      `TOTAL: R$ ${Number(order.total || 0).toFixed(2).replace(".", ",")}`,
-    ];
-    if (order.observacao) lines.push(`Obs: ${order.observacao}`);
-    lines.push(`Hora: ${new Date().toLocaleString("pt-BR")}`);
-    lines.push("================================");
-    return lines.join("\n");
-  };
+  // ── Técnica iframe: impressão USB silenciosa sem folha em branco ─────────────
+  // Injeta HTML completo num iframe invisível → chama iframe.contentWindow.print()
+  // após 800ms (garante renderização CSS antes do print dialog)
+  const printViaIframe = useCallback((order) => {
+    const old = document.getElementById("zapfome-thermal-iframe");
+    if (old) old.remove();
 
-  const printOrder = async (order) => {
-    try {
-      const token = OWNER_TOKEN || window.localStorage.getItem("owner_api_token") || "";
-      await axios.post(
-        `${API}/print/direct`,
-        {
-          content: buildPrintText(order),
-          printer_name: impressoras?.[0]?.nome || "HPRT MPT-II",
-        },
-        {
-          headers: {
-            "X-Owner-Token": token,
-          },
-        }
-      );
-    } catch (err) {
-      console.error("Falha impressão direta", err);
-      window.alert("Falha ao imprimir direto. Verifique token, backend e impressora.");
-    }
-  };
+    const html = buildReceiptHTML(order, restauranteInfo);
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "zapfome-thermal-iframe";
+    // NÃO usar visibility:hidden — impede renderização antes do print
+    // Posiciona fora da tela sem ocultar do motor de renderização
+    iframe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:58mm;height:1px;border:0;pointer-events:none;";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // 800ms: garante que CSS e layout renderizem antes do diálogo de impressão
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();           // --kiosk-printing → impressão silenciosa
+      } catch { /* fallback ignorado — kiosk já imprime direto */ }
+      setTimeout(() => { try { iframe.remove(); } catch {} }, 4000);
+    }, 800);
+  }, [restauranteInfo]);
+
+  // ── Impressão: backend GDI (silenciosa) → fallback iframe ───────────────────
+  const imprimirComprovante = useCallback((order) => {
+    const printer = impressoras?.[0]?.nome || "Knup KP-IM607";
+
+    // Tenta backend GDI — sem diálogo, sem nova janela
+    authAxios.post(`${API}/print/receipt`, {
+      impressora: printer,
+      pedido: {
+        id:                   order.id,
+        client:               order.client,
+        clienteNome:          order.client,
+        type:                 order.type,
+        tipo:                 order.type,
+        telefone:             order.telefone,
+        mesa:                 order.mesa,
+        total:                order.total,
+        payment:              order.payment,
+        pagamento:            order.payment,
+        pagamentosDetalhados: order.pagamentosDetalhados,
+        itensCompletos:       order.itensCompletos,
+        items:                order.items,
+        observacao:           order.observacao,
+        endereco:             order.endereco,
+        agendado:             order.agendado,
+        horarioAgendado:      order.horarioAgendado,
+      },
+      restaurante: restauranteInfo || {},
+    }).catch(() => {
+      // Fallback: iframe (--kiosk-printing no Chrome evita diálogo)
+      printViaIframe(order);
+    });
+  }, [impressoras, restauranteInfo, printViaIframe]);
+
+  const printOrder = imprimirComprovante;
 
   const handleNovoPedido = async (pedido) => {
+    // Normaliza pagamento: array de métodos → string separada por "+"
+    const pagamentoStr = Array.isArray(pedido.pagamentos) && pedido.pagamentos.length > 0
+      ? pedido.pagamentos.map(p => p.metodo).join("+").toLowerCase()
+      : (pedido.pagamento || "dinheiro").toLowerCase();
+
+    const payload = {
+      restauranteId: id || "teste",
+      clienteNome: pedido.cliente || "Cliente",
+      clienteTelefone: pedido.telefone || "",
+      tipo: pedido.tipo || "retirada",
+      itens: (pedido.itens || []).map(i => ({
+        nome: i.name || i.nome || "",
+        qtd: i.qtd || 1,
+        precoUnitario: i.precoUnitario || i.salePrice || 0,
+        observacao: i.observacao || "",
+      })),
+      pagamento: pagamentoStr,
+      pago: pedido.pago ?? true,
+      agendado: pedido.agendado || false,
+      horarioAgendado: pedido.horarioAgendado || null,
+      observacao: pedido.observacao || "",
+      mesa: pedido.mesa || null,
+      endereco: pedido.endereco || null,
+    };
+
     try {
-      const payload = {
-        restauranteId: id || "teste",
-        clienteNome: pedido.cliente,
-        clienteTelefone: pedido.telefone || "",
-        tipo: pedido.tipo,
-        itens: pedido.itens.map(i => ({
-          nome: i.name,
-          qtd: i.qtd,
-          precoUnitario: i.precoUnitario || i.salePrice,
-          observacao: i.observacao || ""
-        })),
-        pagamento: pedido.pagamento || "dinheiro",
-        pago: pedido.pago || true,
-        agendado: pedido.agendado || false,
-        horarioAgendado: pedido.horarioAgendado || null,
-        observacao: pedido.observacao || "",
-        mesa: pedido.mesa || null,
-        endereco: pedido.endereco || null
-      };
+      // ① Salva no banco ANTES de qualquer outra ação
       const res = await axios.post(`${API}/pedidos`, payload);
       const pedidoId = res.data.id;
-      
-      // Abate estoque
-      await axios.post(`${API}/estoque/deduzir`, {
-        restauranteId: id || "teste",
-        itens: pedido.itens.map(i => ({ itemId: i.id, qtd: i.qtd }))
+
+      // ② Cria objeto normalizado para o estado local (aparece instantaneamente)
+      const novoOrder = normalizeApiOrder({
+        ...payload,
+        id: pedidoId,
+        status: "pendente",
+        total: pedido.total || 0,
+        criadoEm: new Date().toISOString(),
+        pagamentosDetalhados: pedido.pagamentos || [],   // array completo {metodo, valor, troco}
       });
-      
-      // Refresh panels
-      fetchPedidos();
-      
-      printOrder({ id: pedidoId, ...payload }); // print com ID real
+      setOrders(prev => [novoOrder, ...prev.filter(o => o.id !== pedidoId)]);
+      knownPendentRef.current.add(pedidoId); // evita auto-print duplo no próximo poll
+
+      // ③ Imprime comprovante automaticamente
+      imprimirComprovante(novoOrder);
+
+      // ④ Sincroniza lista no background
+      setTimeout(fetchPedidos, 1500);
     } catch (err) {
-      console.error("Erro salvar pedido:", err);
-      // Fallback local
-      const novo = {
-        id: `#${1047 + orders.length}`,
+      console.error("Erro ao salvar pedido na API:", err);
+      // Fallback local se API falhar
+      const fallback = {
+        id: `#${Date.now()}`,
         client: pedido.cliente,
-        items: pedido.itens.map((i) => i.name),
-        itensCompletos: pedido.itens,
-        total: pedido.total,
+        items: (pedido.itens || []).map(i => `${i.qtd}x ${i.name}`),
+        itensCompletos: pedido.itens || [],
+        total: pedido.total || 0,
         status: "PENDENTE",
-        type: pedido.tipo === "entrega" ? "ENTREGA" : pedido.tipo === "comer_aqui" ? "COMER AQUI" : "RETIRADA",
-        payment: pedido.pagamento || "",
-        pago: pedido.pago || false,
+        type: TIPO_API_TO_UI[pedido.tipo] || "RETIRADA",
+        payment: pagamentoStr.toUpperCase(),
         time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-        agendado: pedido.agendado,
+        agendado: pedido.agendado || false,
         horarioAgendado: pedido.horarioAgendado || "",
         observacao: pedido.observacao || "",
         telefone: pedido.telefone || "",
-        endereco: pedido.endereco,
+        endereco: pedido.endereco || null,
       };
-      setOrders((prev) => [novo, ...prev]);
-      diminuirEstoque(pedido.itens);
+      setOrders(prev => [fallback, ...prev]);
     }
     setActiveTab("pedidos");
   };
 
   const fetchPedidos = useCallback(async () => {
     try {
-      const { data } = await axios.get(`${API}/pedidos?restaurante_id=${id}`);
-      setOrders(data.pedidos || []);
-    } catch {}
+      const { data } = await authAxios.get(`${API}/pedidos?restaurante_id=${id}`);
+      const normalized = (data.pedidos || []).map(normalizeApiOrder);
+      setOrders(normalized);
+
+      // Detecta novos pedidos PENDENTES
+      const novos = normalized.filter(
+        o => o.status === "PENDENTE" && !knownPendentRef.current.has(o.id)
+      );
+
+      novos.forEach(o => {
+        knownPendentRef.current.add(o.id);
+
+        // 🔔 Alerta sonoro via Web Audio API (sem arquivo externo)
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          [0, 0.18, 0.36].forEach(delay => {
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 880; osc.type = "sine";
+            gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
+            osc.start(ctx.currentTime + delay);
+            osc.stop(ctx.currentTime + delay + 0.15);
+          });
+        } catch { /* navegador bloqueou AudioContext antes de interação */ }
+
+        // 🖨 A impressão acontece quando o operador aceitar o pedido (status ACEITO)
+      });
+
+      // Notificação do browser para novos pedidos
+      if (novos.length > 0 && "Notification" in window && Notification.permission === "granted") {
+        new Notification(`🍔 ${novos.length} novo(s) pedido(s)!`, {
+          body: novos.map(o => o.client).join(", "),
+          icon: "/favicon.ico",
+        });
+      }
+    } catch { /* API offline — mantém estado atual */ }
   }, [id]);
 
   useEffect(() => {
+    // Solicita permissão para notificações do browser
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
     fetchPedidos();
-    const interval = setInterval(fetchPedidos, 10000);
+    const interval = setInterval(fetchPedidos, 15000); // polling a cada 15s
     return () => clearInterval(interval);
   }, [fetchPedidos]);
 
@@ -774,17 +1092,61 @@ export function RestaurantePage() {
     };
     setVendasFinanceiro(prev => [...prev, venda]);
     // Persiste no backend
-    axios.post(`${API}/financeiro/venda`, venda).catch(() => {});
+    authAxios.post(`${API}/financeiro/venda`, venda).catch(() => {});
   };
 
-  const handleStatusChange = (orderId, newStatus, novoPagamento) => {
+  // Avança status de um pedido (UI + API)
+  const avancarStatus = useCallback(async (pedidoId, novoStatusUI) => {
+    const apiStatus = STATUS_UI_TO_API[novoStatusUI];
+    if (!apiStatus) return;
+    try {
+      await authAxios.patch(`${API}/pedidos/${pedidoId}/status`, { status: apiStatus });
+    } catch (err) {
+      console.error("Erro ao atualizar status na API:", err);
+    }
+  }, []);
+
+  // Retorna Promise para o modal poder await e mostrar loading
+  const handleStatusChange = async (orderId, newStatus, novoPagamento) => {
+    // ① Persiste primeiro (AJAX)
+    await avancarStatus(orderId, newStatus);
+
+    // ② Captura pedido atualizado para side-effects (closure com orders atual)
+    const currentOrder = orders.find(o => o.id === orderId);
+    const updatedOrder = currentOrder
+      ? { ...currentOrder, status: newStatus, ...(novoPagamento ? { payment: novoPagamento } : {}) }
+      : null;
+
+    // ③ Atualiza estado local
     setOrders((prev) => prev.map((o) => {
       if (o.id !== orderId) return o;
       const updated = { ...o, status: newStatus };
       if (novoPagamento) updated.payment = novoPagamento;
-      if (newStatus === "FINALIZADO") registrarVendaFinanceiro(updated, novoPagamento);
       return updated;
     }));
+
+    // ④ Integração 3: Impressão automática ao aceitar pedido
+    if (newStatus === "ACEITO" && updatedOrder) {
+      imprimirComprovante(updatedOrder);
+    }
+
+    // ⑤ Integrações 3+4: Ao finalizar — imprime comprovante + debita estoque
+    if (newStatus === "FINALIZADO" && updatedOrder) {
+      registrarVendaFinanceiro(updatedOrder, novoPagamento);
+      imprimirComprovante(updatedOrder);
+
+      // Integração 4: Deducão de estoque via API
+      const itensParaDebitar = (updatedOrder.itensCompletos || [])
+        .filter(i => i.id || i.nome)
+        .map(i => ({ itemId: i.id || i.nome, qtd: i.qtd || 1 }));
+
+      if (itensParaDebitar.length > 0) {
+        authAxios.post(`${API}/estoque/deduzir`, {
+          restauranteId: id,
+          itens: itensParaDebitar,
+        }).catch(err => console.warn("Falha ao debitar estoque:", err?.response?.data || err.message));
+      }
+    }
   };
 
   const handleDespachar = async (order, entregadorId) => {
@@ -799,7 +1161,11 @@ export function RestaurantePage() {
       observacao: order.observacao || "",
       taxaEntrega: 5.0,
     };
-    await axios.post(`${API}/entregador/despachar`, payload);
+    try {
+      await authAxios.post(`${API}/entregador/despachar`, payload);
+    } catch (err) {
+      console.error("Erro ao despachar entregador:", err?.response?.data || err.message);
+    }
   };
 
   const addImpressora = () => {
@@ -826,6 +1192,17 @@ export function RestaurantePage() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className={`font-mono text-xs px-3 py-1.5 border transition-colors ${
+              sidebarOpen
+                ? "border-[#00E559] text-[#00E559] bg-[#00E559]/10"
+                : isDark ? "border-[#27272A] text-[#71717A] hover:border-[#00E559]" : "border-[#CBD5E1] text-[#64748B]"
+            }`}
+            title="Painel lateral (mesas, impressoras)"
+          >
+            ⊟ LATERAL
+          </button>
+          <button
             onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
             className={`font-mono text-xs px-3 py-1.5 border transition-colors ${
               isDark
@@ -833,9 +1210,9 @@ export function RestaurantePage() {
                 : "border-[#CBD5E1] text-[#0F172A] hover:border-[#0EA5E9]"
             }`}
           >
-            {isDark ? "☀️ TEMA CLARO" : "🌙 MODERN-DARK"}
+            {isDark ? "☀️ CLARO" : "🌙 DARK"}
           </button>
-          <span className={`font-mono text-xs hidden sm:block ${subtleText}`}>PAINEL DO RESTAURANTE</span>
+          <span className={`font-mono text-xs hidden sm:block ${subtleText}`}>PAINEL</span>
         </div>
       </div>
 
@@ -861,7 +1238,22 @@ export function RestaurantePage() {
       <div className="flex-1 overflow-hidden flex">
         <div className="flex-1 min-w-0">
           {activeTab === "pedidos" && <div className="h-full overflow-y-auto"><PedidosTab orders={orders} onStatusChange={handleStatusChange} onDespachar={handleDespachar} onReimprimir={printOrder} /></div>}
-          {activeTab === "novo-pedido" && <div className="h-full"><NovoPedido onPedidoCriado={handleNovoPedido} itensEstoque={estoqueItens} /></div>}
+          {activeTab === "novo-pedido" && (() => {
+            // Mesas com pedidos ativos (não finalizados) — para validação de ocupação
+            const mesasOcupadas = orders
+              .filter(o => !["FINALIZADO", "CANCELADO"].includes(o.status) && o.mesa)
+              .map(o => o.mesa);
+            return (
+              <div className="h-full">
+                <NovoPedido
+                  onPedidoCriado={handleNovoPedido}
+                  itensEstoque={estoqueItens}
+                  restauranteId={id}
+                  mesasOcupadas={mesasOcupadas}
+                />
+              </div>
+            );
+          })()}
           {activeTab === "cardapio" && (
             <div className="h-full overflow-y-auto flex flex-col gap-0">
               <Cardapio restauranteId={id} />
@@ -875,9 +1267,10 @@ export function RestaurantePage() {
           )}
           {activeTab === "estoque" && <div className="h-full overflow-y-auto"><Estoque restauranteId={id} onEstoqueAtualizado={setEstoqueItens} onItemAdicionado={handleItemAdicionado} /></div>}
           {activeTab === "financeiro" && <div className="h-full overflow-y-auto"><Financeiro vendas={vendasFinanceiro} restauranteId={id} /></div>}
+          {activeTab === "crm" && <div className="h-full overflow-y-auto bg-[#0A0A0A]"><CRM restauranteId={id} /></div>}
         </div>
 
-        <aside className={`w-[320px] border-l p-4 overflow-y-auto flex flex-col gap-4 ${panelClass}`}>
+        {sidebarOpen && <aside className={`w-[300px] border-l p-4 overflow-y-auto flex flex-col gap-4 shrink-0 ${panelClass}`}>
           <div className={`border p-3 flex flex-col gap-2 ${borderClass}`}>
             <span className={`font-mono text-[10px] tracking-widest ${subtleText}`}>LOJA DE PEDIDOS</span>
             <button
@@ -953,10 +1346,12 @@ export function RestaurantePage() {
               ))}
             </div>
           </div>
-        </aside>
+        </aside>}
       </div>
 
       <Footer />
+
+      {/* iframe de impressão é criado/removido dinamicamente por printViaIframe() */}
     </div>
   );
 }
