@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSummary } from '../api/financeiro';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  getSummary, getExpenses, createExpense, updateExpense,
+  payExpense, deleteExpense, getReminders, getResult,
+} from '../api/financeiro';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -9,15 +12,22 @@ const fmtBRL = (n) =>
 const fmtNum = (n) =>
   new Intl.NumberFormat('pt-BR').format(n ?? 0);
 
-// ── Period config ─────────────────────────────────────────────
+const fmtDate = (d) => {
+  if (!d) return '—';
+  const dt = new Date(d + 'T12:00:00');
+  return dt.toLocaleDateString('pt-BR');
+};
+
+const todayISO  = () => new Date().toISOString().slice(0, 10);
+const monthISO  = () => new Date().toISOString().slice(0, 7);
+
+// ── Constants ─────────────────────────────────────────────────
 
 const PERIODS = [
   { id: 'today', label: 'Hoje' },
   { id: 'week',  label: '7 Dias' },
   { id: 'month', label: 'Este Mês' },
 ];
-
-// ── Channel display ───────────────────────────────────────────
 
 const CHANNEL_DISPLAY = {
   ifood:    { label: 'iFood',    emoji: '🛵', color: '#ef4444' },
@@ -26,30 +36,55 @@ const CHANNEL_DISPLAY = {
   balcao:   { label: 'Balcão',   emoji: '🏪', color: '#a855f7' },
   telefone: { label: 'Telefone', emoji: '📞', color: '#f59e0b' },
   manual:   { label: 'Manual',   emoji: '✏️', color: '#6b7280' },
+  online:   { label: 'Online',   emoji: '🌐', color: '#06b6d4' },
 };
 const getChannel = (ch) =>
   CHANNEL_DISPLAY[ch?.toLowerCase?.()] ?? { label: ch ?? '—', emoji: '📦', color: '#6b7280' };
 
-// ── Bar chart (pure CSS) ──────────────────────────────────────
+const CATEGORIES = [
+  { id: 'rent',          label: 'Aluguel',            emoji: '🏠' },
+  { id: 'utilities',     label: 'Água / Luz / Internet', emoji: '💡' },
+  { id: 'food_supplier', label: 'Fornecedor de Alimentos', emoji: '🥩' },
+  { id: 'staff',         label: 'Funcionários',        emoji: '👷' },
+  { id: 'marketing',     label: 'Marketing',           emoji: '📣' },
+  { id: 'tax',           label: 'Impostos / Taxas',    emoji: '📋' },
+  { id: 'maintenance',   label: 'Manutenção',          emoji: '🔧' },
+  { id: 'other',         label: 'Outro',               emoji: '📦' },
+];
+
+const PAYMENT_METHODS = [
+  { id: 'pix',      label: 'Pix' },
+  { id: 'cash',     label: 'Dinheiro' },
+  { id: 'credit',   label: 'Cartão de Crédito' },
+  { id: 'debit',    label: 'Cartão de Débito' },
+  { id: 'boleto',   label: 'Boleto' },
+  { id: 'transfer', label: 'Transferência' },
+];
+
+const getCat  = (id) => CATEGORIES.find((c) => c.id === id) ?? { label: id, emoji: '📦' };
+const getPM   = (id) => PAYMENT_METHODS.find((p) => p.id === id)?.label ?? id;
+
+const STATUS_COLOR = {
+  pending:  'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  paid:     'bg-green-500/15  text-green-400  border-green-500/30',
+  overdue:  'bg-red-500/15    text-red-400    border-red-500/30',
+};
+const STATUS_LABEL = { pending: 'Pendente', paid: 'Pago', overdue: 'Vencido' };
+
+// ── Bar chart ─────────────────────────────────────────────────
 
 function BarChart({ data, formatX, formatTooltip, color = '#3b82f6' }) {
   const max = Math.max(...data.map((d) => d.value), 1);
-
   return (
     <div className="flex items-end gap-[3px] h-32 w-full">
       {data.map((d, i) => {
         const pct = Math.max((d.value / max) * 100, d.value > 0 ? 3 : 0);
         return (
-          <div
-            key={i}
-            className="flex flex-col items-center gap-0.5 flex-1 min-w-0 h-full justify-end group"
-          >
+          <div key={i} className="flex flex-col items-center gap-0.5 flex-1 min-w-0 h-full justify-end group">
             <div
               className="w-full rounded-t-sm transition-all duration-500 relative cursor-default"
               style={{ height: `${pct}%`, backgroundColor: color + 'aa' }}
-              title={formatTooltip ? formatTooltip(d) : String(d.value)}
             >
-              {/* Hover tooltip */}
               {d.value > 0 && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 bg-gray-900 border border-white/10 rounded text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                   {formatTooltip ? formatTooltip(d) : d.value}
@@ -70,12 +105,14 @@ function BarChart({ data, formatX, formatTooltip, color = '#3b82f6' }) {
 
 function MetricCard({ label, value, sub, icon, color = 'blue' }) {
   const colors = {
-    blue:   'bg-blue-500/10 border-blue-500/25 text-blue-400',
+    blue:   'bg-blue-500/10  border-blue-500/25  text-blue-400',
     green:  'bg-green-500/10 border-green-500/25 text-green-400',
     orange: 'bg-orange-500/10 border-orange-500/25 text-orange-400',
+    red:    'bg-red-500/10   border-red-500/25   text-red-400',
+    purple: 'bg-purple-500/10 border-purple-500/25 text-purple-400',
   };
   return (
-    <div className={`rounded-2xl border p-4 ${colors[color]}`}>
+    <div className={`rounded-2xl border p-4 ${colors[color] ?? colors.blue}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
@@ -88,17 +125,238 @@ function MetricCard({ label, value, sub, icon, color = 'blue' }) {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────
+// ── Expense modal ─────────────────────────────────────────────
 
-export default function FinanceiroPage() {
+const EMPTY_FORM = {
+  name: '', supplier: '', category: 'other',
+  amount: '', paymentMethod: 'pix',
+  isInstallment: false, installmentTotal: 2,
+  dueDate: todayISO(), notes: '', recurrence: '',
+};
+
+function ExpenseModal({ expense, onClose, onSaved }) {
+  const [form, setForm]     = useState(expense ? {
+    name:             expense.name,
+    supplier:         expense.supplier ?? '',
+    category:         expense.category,
+    amount:           expense.amount,
+    paymentMethod:    expense.payment_method,
+    isInstallment:    expense.is_installment,
+    installmentTotal: expense.installment_total ?? 2,
+    dueDate:          expense.due_date?.slice(0, 10) ?? todayISO(),
+    notes:            expense.notes ?? '',
+    recurrence:       expense.recurrence ?? '',
+  } : { ...EMPTY_FORM });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]       = useState('');
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setErr('');
+    try {
+      if (expense) {
+        await updateExpense(expense.id, form);
+      } else {
+        await createExpense(form);
+      }
+      onSaved();
+    } catch (ex) {
+      setErr(ex?.response?.data?.message ?? 'Erro ao salvar.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-gray-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h2 className="text-base font-bold text-white">
+            {expense ? 'Editar Gasto' : 'Novo Gasto'}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors p-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto max-h-[70vh]">
+          {err && <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</p>}
+
+          {/* Nome */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Nome do Gasto *</label>
+            <input
+              className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Ex: Aluguel do salão"
+              value={form.name}
+              onChange={(e) => set('name', e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Fornecedor */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Fornecedor / Empresa</label>
+            <input
+              className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Ex: Imobiliária, Sabesp, Fornecedor XYZ"
+              value={form.supplier}
+              onChange={(e) => set('supplier', e.target.value)}
+            />
+          </div>
+
+          {/* Categoria + Valor */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Categoria</label>
+              <select
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={form.category}
+                onChange={(e) => set('category', e.target.value)}
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.emoji} {c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Valor (R$) *</label>
+              <input
+                type="number" step="0.01" min="0"
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0,00"
+                value={form.amount}
+                onChange={(e) => set('amount', e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Pagamento + Data */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Forma de Pagamento</label>
+              <select
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={form.paymentMethod}
+                onChange={(e) => set('paymentMethod', e.target.value)}
+              >
+                {PAYMENT_METHODS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Data de Vencimento *</label>
+              <input
+                type="date"
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={form.dueDate}
+                onChange={(e) => set('dueDate', e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Parcelado */}
+          {!expense && (
+            <div className="bg-gray-800/50 border border-white/[0.06] rounded-xl p-3 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-blue-500"
+                  checked={form.isInstallment}
+                  onChange={(e) => set('isInstallment', e.target.checked)}
+                />
+                <span className="text-sm text-white font-medium">Parcelado</span>
+              </label>
+
+              {form.isInstallment && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">
+                    Número de Parcelas
+                  </label>
+                  <input
+                    type="number" min="2" max="60"
+                    className="w-full bg-gray-700 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.installmentTotal}
+                    onChange={(e) => set('installmentTotal', parseInt(e.target.value, 10))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Serão criadas {form.installmentTotal} parcelas de{' '}
+                    <strong className="text-gray-300">{fmtBRL(form.amount / form.installmentTotal || 0)}</strong>{' '}
+                    mensais a partir de {fmtDate(form.dueDate)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recorrência */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Recorrência</label>
+            <select
+              className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={form.recurrence}
+              onChange={(e) => set('recurrence', e.target.value)}
+            >
+              <option value="">Sem recorrência</option>
+              <option value="monthly">Mensal</option>
+              <option value="yearly">Anual</option>
+            </select>
+          </div>
+
+          {/* Observações */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Observações</label>
+            <textarea
+              rows={2}
+              className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              placeholder="Detalhes adicionais..."
+              value={form.notes}
+              onChange={(e) => set('notes', e.target.value)}
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-bold text-white transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Salvando…' : expense ? 'Salvar' : 'Adicionar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Tab: Receitas (existing) ──────────────────────────────────
+
+function TabReceitas() {
   const [period,  setPeriod]  = useState('today');
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const { data: res } = await getSummary(period);
       setData(res.data);
@@ -111,132 +369,87 @@ export default function FinanceiroPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Chart data ──────────────────────────────────────────────
-
   const chartData = (() => {
     if (!data?.timeSeries) return [];
     if (period === 'today') {
       return data.timeSeries.map((r) => ({
         label: `${String(r.hour).padStart(2, '0')}h`,
-        value: r.revenue,
-        count: r.count,
+        value: r.revenue, count: r.count,
       }));
     }
     return data.timeSeries.map((r) => {
       const d = new Date(r.date + 'T12:00:00');
       return {
         label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-        value: r.revenue,
-        count: r.count,
+        value: r.revenue, count: r.count,
       };
     });
   })();
 
-  // Max channel revenue for relative bar
   const maxChRevenue = Math.max(...(data?.byChannel ?? []).map((c) => c.revenue), 1);
 
   return (
-    <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
-
-      {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-3 px-5 py-3.5 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
-        <h1 className="text-lg font-black text-white">💰 Financeiro</h1>
-
-        {/* Period selector */}
+    <div className="flex flex-col h-full">
+      {/* Period selector */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-900/60 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-1 bg-gray-800/70 rounded-xl p-1">
           {PERIODS.map(({ id, label }) => (
             <button
               key={id}
               onClick={() => setPeriod(id)}
               className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                period === id
-                  ? 'bg-gray-700 text-white shadow-sm'
-                  : 'text-gray-500 hover:text-gray-300'
+                period === id ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'
               }`}
             >
               {label}
             </button>
           ))}
         </div>
-
         <button
           onClick={load}
-          title="Atualizar"
           className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         </button>
       </div>
 
-      {/* ── Content ──────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto p-5 space-y-6">
-
-        {error && (
-          <div className="text-center py-12 text-red-400 text-sm">{error}</div>
-        )}
-
+      <div className="flex-1 overflow-auto p-5 space-y-5">
+        {error && <div className="text-center py-12 text-red-400 text-sm">{error}</div>}
         {loading ? (
           <div className="flex items-center justify-center h-48">
             <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : data && (
           <>
-            {/* ── Metric cards ───────────────────────────────── */}
             <div className="grid grid-cols-3 gap-4">
-              <MetricCard
-                icon="💵"
-                label="Receita"
-                value={fmtBRL(data.revenue)}
-                sub={`${fmtNum(data.order_count)} pedido${data.order_count !== 1 ? 's' : ''} concluído${data.order_count !== 1 ? 's' : ''}`}
-                color="green"
-              />
-              <MetricCard
-                icon="🧾"
-                label="Pedidos Concluídos"
-                value={fmtNum(data.order_count)}
-                sub={period === 'today' ? 'hoje' : period === 'week' ? 'nos últimos 7 dias' : 'neste mês'}
-                color="blue"
-              />
-              <MetricCard
-                icon="🎯"
-                label="Ticket Médio"
-                value={fmtBRL(data.avg_ticket)}
-                sub="por pedido"
-                color="orange"
-              />
+              <MetricCard icon="💵" label="Receita"    value={fmtBRL(data.revenue)}
+                sub={`${fmtNum(data.order_count)} pedido${data.order_count !== 1 ? 's' : ''}`} color="green" />
+              <MetricCard icon="🧾" label="Concluídos" value={fmtNum(data.order_count)}
+                sub={period === 'today' ? 'hoje' : period === 'week' ? 'últimos 7 dias' : 'neste mês'} color="blue" />
+              <MetricCard icon="🎯" label="Ticket Médio" value={fmtBRL(data.avg_ticket)} sub="por pedido" color="orange" />
             </div>
 
-            {/* ── Revenue chart ───────────────────────────────── */}
             <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-bold text-gray-300">
                   {period === 'today' ? 'Receita por Hora' : 'Receita por Dia'}
                 </h2>
-                <span className="text-xs text-gray-500">
-                  Total: {fmtBRL(data.revenue)}
-                </span>
+                <span className="text-xs text-gray-500">Total: {fmtBRL(data.revenue)}</span>
               </div>
-
               {chartData.every((d) => d.value === 0) ? (
                 <div className="h-32 flex items-center justify-center text-gray-600 text-sm italic">
                   Nenhuma venda neste período
                 </div>
               ) : (
-                <BarChart
-                  data={chartData}
-                  color="#3b82f6"
-                  formatTooltip={(d) => `${d.label}: ${fmtBRL(d.value)} (${d.count} ped.)`}
-                />
+                <BarChart data={chartData} color="#3b82f6"
+                  formatTooltip={(d) => `${d.label}: ${fmtBRL(d.value)} (${d.count} ped.)`} />
               )}
             </div>
 
-            {/* ── Bottom grid: channel + top products ─────────── */}
             <div className="grid grid-cols-2 gap-4">
-
-              {/* By channel */}
               <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
                 <h2 className="text-sm font-bold text-gray-300 mb-3">Por Canal</h2>
                 {data.byChannel.length === 0 ? (
@@ -254,15 +467,11 @@ export default function FinanceiroPage() {
                               <span className="text-sm text-gray-300 font-medium">{info.label}</span>
                               <span className="text-xs text-gray-500">({ch.count})</span>
                             </div>
-                            <span className="text-sm font-semibold text-gray-200 tabular-nums">
-                              {fmtBRL(ch.revenue)}
-                            </span>
+                            <span className="text-sm font-semibold text-gray-200 tabular-nums">{fmtBRL(ch.revenue)}</span>
                           </div>
                           <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-700"
-                              style={{ width: `${pct}%`, backgroundColor: info.color }}
-                            />
+                            <div className="h-full rounded-full transition-all duration-700"
+                              style={{ width: `${pct}%`, backgroundColor: info.color }} />
                           </div>
                         </div>
                       );
@@ -271,7 +480,6 @@ export default function FinanceiroPage() {
                 )}
               </div>
 
-              {/* Top products */}
               <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
                 <h2 className="text-sm font-bold text-gray-300 mb-3">Top Produtos</h2>
                 {data.topProducts.length === 0 ? (
@@ -283,23 +491,15 @@ export default function FinanceiroPage() {
                       const pct    = (p.revenue / maxRev) * 100;
                       return (
                         <div key={p.product_name} className="flex items-center gap-3">
-                          <span className="text-xs font-black text-gray-600 w-4 shrink-0 tabular-nums">
-                            {i + 1}
-                          </span>
+                          <span className="text-xs font-black text-gray-600 w-4 shrink-0 tabular-nums">{i + 1}</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2 mb-0.5">
-                              <span className="text-xs text-gray-300 truncate font-medium">
-                                {p.product_name}
-                              </span>
-                              <span className="text-xs text-gray-400 tabular-nums shrink-0">
-                                {fmtBRL(p.revenue)}
-                              </span>
+                              <span className="text-xs text-gray-300 truncate font-medium">{p.product_name}</span>
+                              <span className="text-xs text-gray-400 tabular-nums shrink-0">{fmtBRL(p.revenue)}</span>
                             </div>
                             <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-orange-500/70 transition-all duration-700"
-                                style={{ width: `${pct}%` }}
-                              />
+                              <div className="h-full rounded-full bg-orange-500/70 transition-all duration-700"
+                                style={{ width: `${pct}%` }} />
                             </div>
                           </div>
                         </div>
@@ -311,6 +511,426 @@ export default function FinanceiroPage() {
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tab: Gastos ───────────────────────────────────────────────
+
+function TabGastos() {
+  const [month,      setMonth]      = useState(monthISO());
+  const [expenses,   setExpenses]   = useState([]);
+  const [reminders,  setReminders]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [modal,      setModal]      = useState(null); // null | 'new' | expense obj
+  const [deleting,   setDeleting]   = useState(null);
+  const [paying,     setPaying]     = useState(null);
+  const [filterCat,  setFilterCat]  = useState('all');
+  const [filterSt,   setFilterSt]   = useState('all');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [expRes, remRes] = await Promise.all([
+        getExpenses(month),
+        getReminders(),
+      ]);
+      // Compute overdue client-side
+      const today = todayISO();
+      const rows = (expRes.data.data ?? []).map((e) => ({
+        ...e,
+        status: e.status === 'pending' && e.due_date < today ? 'overdue' : e.status,
+      }));
+      setExpenses(rows);
+      setReminders(remRes.data.data ?? []);
+    } catch {
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handlePay = async (id) => {
+    setPaying(id);
+    try { await payExpense(id); await load(); } finally { setPaying(null); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Excluir este gasto?')) return;
+    setDeleting(id);
+    try { await deleteExpense(id); await load(); } finally { setDeleting(null); }
+  };
+
+  // Filtered list
+  const filtered = expenses.filter((e) => {
+    if (filterCat !== 'all' && e.category !== filterCat) return false;
+    if (filterSt  !== 'all' && e.status   !== filterSt)  return false;
+    return true;
+  });
+
+  // Summary
+  const total   = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const paid    = expenses.filter((e) => e.status === 'paid').reduce((s, e) => s + Number(e.amount), 0);
+  const pending = expenses.filter((e) => e.status !== 'paid').reduce((s, e) => s + Number(e.amount), 0);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Sub-header */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-900/60 border-b border-white/[0.06] shrink-0">
+        <input
+          type="month"
+          className="bg-gray-800 border border-white/10 rounded-xl px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+        />
+        <button
+          onClick={() => setModal('new')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-bold text-white transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+          </svg>
+          Novo Gasto
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto p-5 space-y-4">
+        {/* Reminders */}
+        {reminders.length > 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg">🔔</span>
+              <span className="text-sm font-bold text-yellow-400">
+                {reminders.length} gasto{reminders.length > 1 ? 's vencem' : ' vence'} em breve
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {reminders.map((r) => (
+                <div key={r.id} className="flex items-center justify-between text-xs">
+                  <span className="text-yellow-200 font-medium">{r.name}</span>
+                  <span className="text-yellow-400/70">{fmtDate(r.due_date)} · {fmtBRL(r.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-3 gap-3">
+          <MetricCard icon="💸" label="Total do mês"  value={fmtBRL(total)}   color="red" />
+          <MetricCard icon="✅" label="Já pago"        value={fmtBRL(paid)}    color="green" />
+          <MetricCard icon="⏳" label="A pagar"        value={fmtBRL(pending)} color="orange" />
+        </div>
+
+        {/* Filters */}
+        <div className="flex gap-2 flex-wrap">
+          <select
+            className="bg-gray-800 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-gray-300 focus:outline-none"
+            value={filterCat}
+            onChange={(e) => setFilterCat(e.target.value)}
+          >
+            <option value="all">Todas categorias</option>
+            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.label}</option>)}
+          </select>
+          <select
+            className="bg-gray-800 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-gray-300 focus:outline-none"
+            value={filterSt}
+            onChange={(e) => setFilterSt(e.target.value)}
+          >
+            <option value="all">Todos os status</option>
+            <option value="pending">Pendente</option>
+            <option value="paid">Pago</option>
+            <option value="overdue">Vencido</option>
+          </select>
+        </div>
+
+        {/* List */}
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12 text-gray-600">
+            <div className="text-4xl mb-3">💸</div>
+            <p className="text-sm">Nenhum gasto registrado neste mês</p>
+            <button
+              onClick={() => setModal('new')}
+              className="mt-4 px-4 py-2 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 text-sm font-medium hover:bg-blue-600/30 transition-colors"
+            >
+              + Adicionar primeiro gasto
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {filtered.map((e) => {
+              const cat = getCat(e.category);
+              return (
+                <div
+                  key={e.id}
+                  className={`bg-gray-900/60 border rounded-2xl p-4 transition-all ${
+                    e.status === 'overdue' ? 'border-red-500/30' : 'border-white/[0.06]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    {/* Left */}
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="text-xl mt-0.5 shrink-0">{cat.emoji}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-white truncate">{e.name}</span>
+                          {e.is_installment && (
+                            <span className="text-[10px] bg-blue-500/20 border border-blue-500/30 text-blue-300 px-1.5 py-0.5 rounded-full font-semibold">
+                              {e.installment_current}/{e.installment_total}x
+                            </span>
+                          )}
+                          {e.recurrence && (
+                            <span className="text-[10px] bg-purple-500/20 border border-purple-500/30 text-purple-300 px-1.5 py-0.5 rounded-full font-semibold">
+                              {e.recurrence === 'monthly' ? '🔄 Mensal' : '🔄 Anual'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className="text-xs text-gray-500">{cat.label}</span>
+                          {e.supplier && <span className="text-xs text-gray-500">· {e.supplier}</span>}
+                          <span className="text-xs text-gray-500">· {getPM(e.payment_method)}</span>
+                          <span className="text-xs text-gray-500">· Vence {fmtDate(e.due_date)}</span>
+                        </div>
+                        {e.notes && <p className="text-xs text-gray-600 mt-1 italic">{e.notes}</p>}
+                      </div>
+                    </div>
+
+                    {/* Right */}
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <span className="text-base font-black text-white tabular-nums">{fmtBRL(e.amount)}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${STATUS_COLOR[e.status]}`}>
+                        {STATUS_LABEL[e.status]}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/[0.06]">
+                    {e.status !== 'paid' && (
+                      <button
+                        onClick={() => handlePay(e.id)}
+                        disabled={paying === e.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-600/20 border border-green-500/30 text-green-400 text-xs font-bold hover:bg-green-600/30 transition-colors disabled:opacity-50"
+                      >
+                        {paying === e.id ? (
+                          <div className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin" />
+                        ) : '✓'} Marcar como Pago
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setModal(e)}
+                      className="px-3 py-1.5 rounded-xl bg-gray-800 border border-white/10 text-gray-400 text-xs font-medium hover:text-white hover:bg-gray-700 transition-colors"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(e.id)}
+                      disabled={deleting === e.id}
+                      className="ml-auto px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                    >
+                      {deleting === e.id ? '…' : 'Excluir'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal */}
+      {modal && (
+        <ExpenseModal
+          expense={modal === 'new' ? null : modal}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Tab: Resultado ────────────────────────────────────────────
+
+function TabResultado() {
+  const [month,   setMonth]   = useState(monthISO());
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: res } = await getResult(month);
+      setData(res.data);
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const profitPct = data?.revenue > 0
+    ? ((data.profit / data.revenue) * 100).toFixed(1)
+    : 0;
+  const isProfit  = (data?.profit ?? 0) >= 0;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Sub-header */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-900/60 border-b border-white/[0.06] shrink-0">
+        <h2 className="text-sm font-bold text-gray-300">Resultado do Mês</h2>
+        <input
+          type="month"
+          className="bg-gray-800 border border-white/10 rounded-xl px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+        />
+      </div>
+
+      <div className="flex-1 overflow-auto p-5 space-y-5">
+        {loading ? (
+          <div className="flex items-center justify-center h-48">
+            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : data && (
+          <>
+            {/* Big result card */}
+            <div className={`rounded-2xl border p-6 text-center ${
+              isProfit
+                ? 'bg-green-500/10 border-green-500/25'
+                : 'bg-red-500/10 border-red-500/25'
+            }`}>
+              <p className="text-sm text-gray-400 font-semibold uppercase tracking-wide mb-1">
+                {isProfit ? '✅ Lucro Estimado' : '⚠️ Prejuízo Estimado'}
+              </p>
+              <p className={`text-5xl font-black ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                {fmtBRL(Math.abs(data.profit))}
+              </p>
+              {data.revenue > 0 && (
+                <p className="text-sm text-gray-500 mt-2">
+                  {isProfit ? '+' : '-'}{Math.abs(profitPct)}% da receita
+                </p>
+              )}
+            </div>
+
+            {/* Breakdown */}
+            <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl p-4 space-y-4">
+              <h3 className="text-sm font-bold text-gray-300">Composição</h3>
+
+              {/* Revenue bar */}
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-400 font-medium">💵 Receita Total</span>
+                  <span className="text-green-400 font-bold tabular-nums">{fmtBRL(data.revenue)}</span>
+                </div>
+                <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-500/70 rounded-full" style={{ width: '100%' }} />
+                </div>
+              </div>
+
+              {/* Expenses bar */}
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-400 font-medium">💸 Gastos Totais</span>
+                  <span className="text-red-400 font-bold tabular-nums">{fmtBRL(data.total_expenses)}</span>
+                </div>
+                <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-500/70 rounded-full transition-all duration-700"
+                    style={{ width: data.revenue > 0 ? `${Math.min((data.total_expenses / data.revenue) * 100, 100)}%` : '0%' }} />
+                </div>
+                <div className="flex gap-4 mt-2">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
+                    <span className="text-[10px] text-gray-500">Pago: <strong className="text-gray-300">{fmtBRL(data.paid_expenses)}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                    <span className="text-[10px] text-gray-500">Pendente: <strong className="text-gray-300">{fmtBRL(data.pending_expenses)}</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary rows */}
+            <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl divide-y divide-white/[0.06]">
+              {[
+                { label: 'Receita bruta',      value: data.revenue,          color: 'text-green-400', sign: '+' },
+                { label: 'Gastos pagos',        value: data.paid_expenses,    color: 'text-red-400',   sign: '-' },
+                { label: 'Gastos pendentes',    value: data.pending_expenses, color: 'text-yellow-400',sign: '-' },
+                { label: isProfit ? '= Lucro' : '= Prejuízo',
+                  value: Math.abs(data.profit), color: isProfit ? 'text-green-400' : 'text-red-400',
+                  sign: isProfit ? '+' : '-', bold: true },
+              ].map(({ label, value, color, sign, bold }) => (
+                <div key={label} className={`flex items-center justify-between px-4 py-3 ${bold ? 'bg-white/[0.03]' : ''}`}>
+                  <span className={`text-sm ${bold ? 'font-black text-white' : 'text-gray-400'}`}>{label}</span>
+                  <span className={`text-sm font-bold tabular-nums ${color}`}>
+                    {sign}{fmtBRL(value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {data.total_expenses === 0 && (
+              <p className="text-center text-xs text-gray-600 italic">
+                Nenhum gasto registrado neste mês ainda. Vá para a aba Gastos e adicione seus custos.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────
+
+const TABS = [
+  { id: 'receitas',  label: '📈 Receitas'  },
+  { id: 'gastos',    label: '💸 Gastos'    },
+  { id: 'resultado', label: '📊 Resultado' },
+];
+
+export default function FinanceiroPage() {
+  const [tab, setTab] = useState('receitas');
+
+  return (
+    <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-3.5 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
+        <h1 className="text-lg font-black text-white">💰 Financeiro</h1>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex border-b border-white/[0.06] bg-gray-900/40 shrink-0 px-4 gap-1 pt-1">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
+              tab === id
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden">
+        {tab === 'receitas'  && <TabReceitas />}
+        {tab === 'gastos'    && <TabGastos />}
+        {tab === 'resultado' && <TabResultado />}
       </div>
     </div>
   );
