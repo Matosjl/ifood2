@@ -3,6 +3,7 @@ const { body }                    = require('express-validator');
 const rateLimit                   = require('express-rate-limit');
 const { authenticate }            = require('../../middleware/auth.middleware');
 const { register, login, refresh, logout, me, updateProfile } = require('./auth.controller');
+const env                         = require('../../config/env');
 
 const router = Router();
 
@@ -32,7 +33,12 @@ const loginRules = [
 
 // ── Rotas ─────────────────────────────────────────────────────
 
-router.post('/register', authLimiter, registerRules, register);
+router.post('/register', authLimiter, (req, res, next) => {
+  const key = req.headers['x-admin-key'];
+  if (!key || key !== env.SUPER_ADMIN_KEY)
+    return res.status(403).json({ success: false, message: 'Acesso negado. X-Admin-Key inválida.' });
+  next();
+}, registerRules, register);
 router.post('/login',    authLimiter, loginRules,    login);
 router.post('/refresh',  authLimiter, refresh);
 router.post('/logout',   authenticate, logout);
