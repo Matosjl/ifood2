@@ -14,6 +14,7 @@ const orderRoutes    = require('./modules/orders/orders.routes');
 const tenantRoutes      = require('./modules/tenant/tenant.routes');
 const financeiroRoutes  = require('./modules/financeiro/financeiro.routes');
 const usersRoutes       = require('./modules/users/users.routes');
+const adminRoutes    = require('./modules/admin/admin.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -45,6 +46,12 @@ app.use(rateLimit({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ── Static files (uploads) ────────────────────────────────────
+const path = require('path');
+app.use('/uploads', require('express').static(
+  process.env.UPLOAD_DIR || path.join(__dirname, '../uploads')
+));
+
 // ── Logging ───────────────────────────────────────────────────
 app.use(morgan(env.isDev() ? 'dev' : 'combined'));
 
@@ -60,6 +67,7 @@ app.use('/api/orders',     orderRoutes);
 app.use('/api/tenant',     tenantRoutes);
 app.use('/api/financeiro', financeiroRoutes);
 app.use('/api/users',      usersRoutes);
+app.use('/api/admin',      adminRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   listProducts, createProduct, updateProduct, deleteProduct,
   listCategories, createCategory, deleteCategory,
 } from '../api/products';
+import { uploadProductImage } from '../api/products_upload';
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtPct = (n) => (n != null && n !== '' ? `${parseFloat(n).toFixed(1)}%` : '—');
@@ -25,8 +26,11 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     description:    product?.description    ?? '',
     active:         product?.active         ?? true,
   });
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState(null);
+  const [saving,     setSaving]     = useState(false);
+  const [error,      setError]      = useState(null);
+  const [imgFile,    setImgFile]    = useState(null);
+  const [imgPreview, setImgPreview] = useState(product?.image_url ?? null);
+  const fileInputRef = useRef(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -61,7 +65,19 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         ? await updateProduct(product.id, payload)
         : await createProduct(payload);
 
-      onSaved(data.data, isEdit);
+      let savedProduct = data.data;
+
+      // Upload image if one was selected
+      if (imgFile) {
+        try {
+          const { data: imgData } = await uploadProductImage(savedProduct.id, imgFile);
+          savedProduct = { ...savedProduct, image_url: imgData.data?.image_url ?? imgData.image_url };
+        } catch {
+          // image upload failure is non-fatal
+        }
+      }
+
+      onSaved(savedProduct, isEdit);
       onClose();
     } catch (err) {
       setError(err.response?.data?.message ?? 'Erro ao salvar produto.');
@@ -198,6 +214,59 @@ function ProductModal({ product, categories, onClose, onSaved }) {
               onChange={(e) => set('description', e.target.value)}
               className="input w-full h-16 resize-none"
               placeholder="Breve descrição do produto..."
+            />
+          </div>
+
+          {/* Imagem do produto */}
+          <div>
+            <label className="text-xs text-gray-400 font-semibold mb-2 block">Foto do Produto (opcional)</label>
+            <div className="flex items-center gap-3">
+              {/* Preview */}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-600 hover:border-blue-500 overflow-hidden bg-gray-800 flex items-center justify-center cursor-pointer transition-colors shrink-0"
+              >
+                {imgPreview ? (
+                  <img src={imgPreview} alt="preview" className="w-full h-full object-cover" />
+                ) : (
+                  <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors"
+                >
+                  {imgPreview ? 'Trocar imagem' : 'Escolher imagem'}
+                </button>
+                {imgPreview && (
+                  <button
+                    type="button"
+                    onClick={() => { setImgFile(null); setImgPreview(null); }}
+                    className="ml-3 text-xs text-red-400 hover:text-red-300 font-semibold transition-colors"
+                  >
+                    Remover
+                  </button>
+                )}
+                <p className="text-[11px] text-gray-600 mt-0.5">JPG, PNG ou WebP · máx 3MB</p>
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setImgFile(file);
+                const reader = new FileReader();
+                reader.onload = (ev) => setImgPreview(ev.target.result);
+                reader.readAsDataURL(file);
+              }}
             />
           </div>
 
@@ -517,10 +586,24 @@ export default function ProductsPage() {
 
                   {/* Nome */}
                   <td className="py-2.5 pr-4">
-                    <p className="font-semibold text-gray-200 leading-tight">{p.name}</p>
-                    {p.description && (
-                      <p className="text-xs text-gray-500 truncate max-w-[200px] mt-0.5">{p.description}</p>
-                    )}
+                    <div className="flex items-center gap-2.5">
+                      {p.image_url ? (
+                        <img src={p.image_url} alt={p.name}
+                          className="w-9 h-9 rounded-lg object-cover shrink-0 bg-gray-800" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 shrink-0">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-semibold text-gray-200 leading-tight">{p.name}</p>
+                        {p.description && (
+                          <p className="text-xs text-gray-500 truncate max-w-[180px] mt-0.5">{p.description}</p>
+                        )}
+                      </div>
+                    </div>
                   </td>
 
                   {/* Categoria */}

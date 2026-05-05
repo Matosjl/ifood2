@@ -29,6 +29,9 @@ module.exports = {
   // CORS
   CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim()),
 
+  // Super Admin
+  SUPER_ADMIN_KEY: process.env.SUPER_ADMIN_KEY || 'change-me-super-secret-key',
+
   isDev:  () => process.env.NODE_ENV !== 'production',
   isProd: () => process.env.NODE_ENV === 'production',
 };

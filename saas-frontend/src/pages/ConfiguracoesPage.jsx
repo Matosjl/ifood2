@@ -49,6 +49,109 @@ function Toast({ msg, type = 'success', onDone }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Tab 0 — QR Code do Cardápio
+// ─────────────────────────────────────────────────────────────
+
+function QrCodeTab({ currentUser }) {
+  const slug    = currentUser?.tenant?.slug ?? '';
+  const menuUrl = slug ? `${window.location.origin}/menu/${slug}` : '';
+  const qrSrc   = menuUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&color=000000&bgcolor=ffffff&data=${encodeURIComponent(menuUrl)}`
+    : null;
+
+  const [copied, setCopied] = useState(false);
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(menuUrl).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadQr = () => {
+    const link = document.createElement('a');
+    link.href = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(menuUrl)}&format=png`;
+    link.download = `cardapio-${slug}.png`;
+    link.target = '_blank';
+    link.click();
+  };
+
+  if (!slug) {
+    return (
+      <p className="text-gray-500 text-sm italic py-6 text-center">
+        Slug do restaurante não encontrado. Faça login novamente.
+      </p>
+    );
+  }
+
+  return (
+    <div className="max-w-sm space-y-6">
+      {/* QR code preview */}
+      <div className="flex flex-col items-center gap-4 p-6 bg-gray-800/60 rounded-2xl border border-white/[0.06]">
+        {qrSrc ? (
+          <img
+            src={qrSrc}
+            alt="QR Code do cardápio"
+            className="w-48 h-48 rounded-xl shadow-lg bg-white p-2"
+          />
+        ) : (
+          <div className="w-48 h-48 rounded-xl bg-gray-700 flex items-center justify-center text-gray-500 text-xs">
+            Gerando…
+          </div>
+        )}
+        <p className="text-xs text-gray-500 text-center">
+          Imprima ou exiba este QR Code para seus clientes acessarem o cardápio digital.
+        </p>
+      </div>
+
+      {/* Link do cardápio */}
+      <div>
+        <label className="text-xs text-gray-400 font-semibold mb-1 block">Link do Cardápio</label>
+        <div className="flex gap-2">
+          <input
+            readOnly
+            value={menuUrl}
+            className="input flex-1 text-xs text-gray-300 bg-gray-800/80 cursor-text select-all"
+            onClick={(e) => e.target.select()}
+          />
+          <button
+            onClick={copyLink}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 ${
+              copied ? 'bg-green-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+            }`}
+          >
+            {copied ? '✓ Copiado' : 'Copiar'}
+          </button>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-3">
+        <a
+          href={menuUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors text-center"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          Abrir Cardápio
+        </a>
+        <button
+          onClick={downloadQr}
+          className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm font-semibold transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Baixar QR
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Tab 1 — Restaurante
 // ─────────────────────────────────────────────────────────────
 
@@ -431,12 +534,15 @@ export default function ConfiguracoesPage() {
       {/* Header */}
       <div className="px-5 py-3.5 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
         <h1 className="text-lg font-black text-white mb-3">⚙️ Configurações</h1>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           <Tab active={tab === 'conta'}       onClick={() => setTab('conta')}>Minha Conta</Tab>
           {isOwner && (
             <Tab active={tab === 'restaurante'} onClick={() => setTab('restaurante')}>Restaurante</Tab>
           )}
           <Tab active={tab === 'equipe'}      onClick={() => setTab('equipe')}>Equipe</Tab>
+          {isOwner && (
+            <Tab active={tab === 'qrcode'} onClick={() => setTab('qrcode')}>📱 QR Code</Tab>
+          )}
         </div>
       </div>
 
@@ -445,6 +551,7 @@ export default function ConfiguracoesPage() {
         {tab === 'conta'       && <ContaTab       currentUser={currentUser} onToast={showToast} />}
         {tab === 'restaurante' && <RestauranteTab currentUser={currentUser} onToast={showToast} />}
         {tab === 'equipe'      && <EquipeTab      currentUser={currentUser} onToast={showToast} />}
+        {tab === 'qrcode'      && <QrCodeTab      currentUser={currentUser} />}
       </div>
 
       {toast && (

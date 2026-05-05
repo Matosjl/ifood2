@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { body }   = require('express-validator');
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const ctrl = require('./products.controller');
+const upload = require('../../middleware/upload.middleware');
 
 const router = Router();
 
@@ -40,5 +41,9 @@ router.delete('/:id',        authorize('owner', 'manager'), ctrl.remove);
 
 router.post('/:id/replenish',   authorize('owner', 'manager'), replenishRules, ctrl.replenish);
 router.get('/:id/movements',    ctrl.movements);
+
+// ── Imagem ────────────────────────────────────────────────────
+
+router.post('/:id/image', authenticate, upload.single('image'), ctrl.uploadImage);
 
 module.exports = router;

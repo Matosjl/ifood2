@@ -127,6 +127,14 @@ export default function useOrders() {
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
     if (soundRef.current) { playAlert(); }
     if (autoPrintRef.current) { printOrder(o); }
+    // Browser notification (works even if tab is in background)
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(`🍽️ Pedido #${o.orderNumber}`, {
+        body: `${o.channel !== 'manual' ? o.channel.toUpperCase() + ' · ' : ''}${o.items?.length ?? 0} item(s) · R$ ${o.total.toFixed(2)}`,
+        tag: `order-${o.id}`,
+        renotify: true,
+      });
+    }
     unackRef.current.add(o.id);
     startAlert();
   }, [startAlert]);

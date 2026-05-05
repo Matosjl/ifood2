@@ -105,8 +105,22 @@ const deleteCat = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Categoria removida.' });
 });
 
+/** POST /api/products/:id/image */
+const uploadImage = asyncHandler(async (req, res) => {
+  if (!req.file) throw new AppError('Nenhuma imagem enviada.', 400);
+  const imageUrl = `/uploads/${req.file.filename}`;
+  const { rows: [product] } = await require('../../config/database').query(
+    `UPDATE products SET image_url = $1, updated_at = NOW()
+     WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+    [imageUrl, req.params.id, req.user.tenantId]
+  );
+  if (!product) throw new AppError('Produto não encontrado.', 404);
+  res.json({ success: true, data: { image_url: imageUrl } });
+});
+
 module.exports = {
   list, getOne, create, update, remove,
   replenish, movements, allMovements,
   listCats, createCat, deleteCat,
+  uploadImage,
 };
