@@ -33,9 +33,13 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [products,  setProducts]  = useState([]);
   const [search,    setSearch]    = useState('');
   const [cart,      setCart]      = useState(emptyCart());
-  const [name,      setName]      = useState('');
-  const [phone,     setPhone]     = useState('');
-  const [notes,     setNotes]     = useState('');
+  const [name,         setName]         = useState('');
+  const [phone,        setPhone]        = useState('');
+  const [notes,        setNotes]        = useState('');
+  const [deliveryType,   setDeliveryType]   = useState('pickup');
+  const [address,        setAddress]        = useState('');
+  const [channel,        setChannel]        = useState('manual');
+  const [paymentMethod,  setPaymentMethod]  = useState('cash');
   const [loading,   setLoading]   = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error,     setError]     = useState(null);
@@ -70,6 +74,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
 
   const handleSubmit = async () => {
     if (cartEntries.length === 0) return setError('Adicione pelo menos 1 item.');
+    if (deliveryType === 'delivery' && !address.trim()) {
+      return setError('Informe o endereço de entrega.');
+    }
     setError(null);
     setSubmitting(true);
 
@@ -82,9 +89,13 @@ export default function NewOrderModal({ onClose, onCreated }) {
 
     try {
       const { data } = await createOrder({
-        customerName:  name  || undefined,
-        customerPhone: phone || undefined,
-        notes:         notes || undefined,
+        customerName:    name    || undefined,
+        customerPhone:   phone   || undefined,
+        customerAddress: address || undefined,
+        deliveryType,
+        paymentMethod,
+        channel,
+        notes:           notes   || undefined,
         items,
       });
       onCreated?.(data.data);
@@ -210,6 +221,70 @@ export default function NewOrderModal({ onClose, onCreated }) {
 
             {/* Customer + total */}
             <div className="p-3 border-t border-white/10 space-y-2 shrink-0">
+              {/* Canal */}
+              <select value={channel} onChange={(e) => setChannel(e.target.value)} className="input w-full text-sm">
+                <option value="manual">Balcão / Manual</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="ifood">iFood</option>
+                <option value="mesa">Mesa</option>
+                <option value="telefone">Telefone</option>
+              </select>
+
+              {/* Entrega / Retirada */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryType('pickup')}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                    deliveryType === 'pickup'
+                      ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40'
+                      : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                  }`}
+                >
+                  🏪 Retirada
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeliveryType('delivery')}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                    deliveryType === 'delivery'
+                      ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/40'
+                      : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                  }`}
+                >
+                  🛵 Entrega
+                </button>
+              </div>
+              {deliveryType === 'delivery' && (
+                <input type="text" placeholder="Endereço de entrega*" value={address}
+                  onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+              )}
+
+              {/* Forma de pagamento */}
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { value: 'cash',   label: '💵 Dinheiro' },
+                  { value: 'pix',    label: '📱 Pix' },
+                  { value: 'credit', label: '💳 Crédito' },
+                  { value: 'debit',  label: '💳 Débito' },
+                  { value: 'voucher',label: '🎫 Vale' },
+                  { value: 'other',  label: '🔖 Outro' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setPaymentMethod(value)}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-colors ${
+                      paymentMethod === value
+                        ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
+                        : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <input type="text" placeholder="Nome do cliente (opcional)" value={name} onChange={(e) => setName(e.target.value)} className="input w-full text-sm" />
               <input type="tel"  placeholder="Telefone (opcional)"        value={phone} onChange={(e) => setPhone(e.target.value)} className="input w-full text-sm" />
               <input type="text" placeholder="Observações (opcional)"     value={notes} onChange={(e) => setNotes(e.target.value)} className="input w-full text-sm" />

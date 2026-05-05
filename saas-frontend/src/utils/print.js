@@ -1,5 +1,14 @@
 // ── Thermal receipt printer (80mm) ───────────────────────────
 
+const PAYMENT_LABELS = {
+  cash:    'Dinheiro',
+  pix:     'Pix',
+  credit:  'Cartão de Crédito',
+  debit:   'Cartão de Débito',
+  voucher: 'Vale Refeição',
+  other:   'Outro',
+};
+
 export function printOrder(order) {
   const user = (() => {
     try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
@@ -66,6 +75,12 @@ export function printOrder(order) {
     </table>
   </div>
   ${order.notes ? `<hr><div class="section"><p><b>Obs:</b> ${order.notes}</p></div>` : ''}
+  <hr>
+  <div class="section">
+    <p><b>Tipo:</b> ${order.deliveryType === 'delivery' ? 'Entrega' : 'Retirada'}</p>
+    ${order.customerAddress ? `<p><b>Endereço:</b> ${order.customerAddress}</p>` : ''}
+    <p><b>Pgto:</b> ${PAYMENT_LABELS[order.paymentMethod ?? order.payment_method] ?? (order.paymentMethod ?? order.payment_method ?? 'Dinheiro')}</p>
+  </div>
   <hr>
   <p class="c" style="font-size:11px;margin-top:6px">Obrigado pela preferência!</p>
 </body></html>`;

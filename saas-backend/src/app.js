@@ -7,6 +7,7 @@ const env        = require('./config/env');
 const errorHandler = require('./middleware/errorHandler.middleware');
 
 // Rotas
+const publicRoutes   = require('./modules/public/public.routes');
 const authRoutes     = require('./modules/auth/auth.routes');
 const productRoutes  = require('./modules/products/products.routes');
 const orderRoutes    = require('./modules/orders/orders.routes');
@@ -79,6 +80,8 @@ app.use('/api/categories',        authenticate, require('express').Router()
   .delete('/:id', productCtrl.deleteCat)
 );
 app.get('/api/stock/movements', authenticate, productCtrl.allMovements);
+
+app.use('/api/public', publicRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((req, res) =>

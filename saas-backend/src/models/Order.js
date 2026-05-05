@@ -117,18 +117,19 @@ class Order {
    */
   static async createOrder(
     { tenantId, orderNumber, customerName, customerPhone, customerAddress,
-      channel, total, notes, initialStatus = 'pending', idempotencyKey = null },
+      channel, total, notes, deliveryType = 'pickup', paymentMethod = 'cash',
+      initialStatus = 'pending', idempotencyKey = null },
     dbClient = db
   ) {
     const { rows } = await dbClient.query(
       `INSERT INTO orders
          (tenant_id, order_number, customer_name, customer_phone, customer_address,
-          channel, total, notes, status, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          channel, total, notes, delivery_type, payment_method, status, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [tenantId, orderNumber, customerName || null, customerPhone || null,
        customerAddress || null, channel || 'manual', total, notes || null,
-       initialStatus, idempotencyKey]
+       deliveryType, paymentMethod, initialStatus, idempotencyKey]
     );
     return rows[0];
   }

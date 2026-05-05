@@ -85,7 +85,7 @@ const processors = {
     return safe(async () => {
       const order = await service.createOrder(tenantId, {
         ...payload,
-        initialStatus:  'confirmed',
+        initialStatus: job.data.isOnline ? 'pending' : 'confirmed',
         idempotencyKey,
       });
 

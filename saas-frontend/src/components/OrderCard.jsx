@@ -143,12 +143,26 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge }) {
       </ul>
 
       {/* Footer */}
-      <div className="px-3 pt-1.5 pb-2 flex items-center justify-between border-t border-white/5">
-        <span className="text-base font-black text-white">
-          R$ {parseFloat(order.total).toFixed(2)}
-        </span>
+      <div className="px-3 pt-1.5 pb-2 border-t border-white/5 space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-base font-black text-white">
+            R$ {parseFloat(order.total).toFixed(2)}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {order.deliveryType === 'delivery'
+              ? <span className="text-xs text-blue-300 font-medium">🛵 Entrega</span>
+              : <span className="text-xs text-gray-500 font-medium">🏪 Retirada</span>
+            }
+            <span className="text-xs text-gray-500">·</span>
+            <span className="text-xs text-gray-400">
+              {{ cash: '💵', pix: '📱', credit: '💳', debit: '💳', voucher: '🎫', other: '🔖' }[order.paymentMethod] ?? '💵'}
+              {' '}
+              {{ cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito', voucher: 'Vale', other: 'Outro' }[order.paymentMethod] ?? 'Dinheiro'}
+            </span>
+          </div>
+        </div>
         {order.notes && (
-          <span className="text-xs text-amber-400/80 italic truncate max-w-[140px]" title={order.notes}>
+          <span className="text-xs text-amber-400/80 italic truncate block" title={order.notes}>
             💬 {order.notes}
           </span>
         )}

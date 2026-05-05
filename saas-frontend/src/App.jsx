@@ -7,6 +7,7 @@ import FinanceiroPage    from './pages/FinanceiroPage';
 import HistoricoPage     from './pages/HistoricoPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
 import Sidebar           from './components/Sidebar';
+import CustomerApp       from './CustomerApp';
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
@@ -18,6 +19,10 @@ export default function App() {
     localStorage.removeItem('user');
     setToken(null);
   };
+
+  // Customer menu app (no auth required)
+  const menuMatch = window.location.pathname.match(/^\/menu\/([^/]+)/);
+  if (menuMatch) return <CustomerApp slug={menuMatch[1]} />;
 
   if (!token) return <LoginPage onLogin={handleLogin} />;
 
