@@ -94,4 +94,23 @@ const cancel = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order, message: 'Pedido cancelado. Estoque devolvido.' });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions };
+/** GET /api/orders/customers?q=... — busca clientes pelo histórico */
+const searchCustomers = asyncHandler(async (req, res) => {
+  const q = (req.query.q ?? '').trim();
+  if (!q) return res.json({ success: true, data: [] });
+
+  const { rows } = await require('../../config/database').query(
+    `SELECT DISTINCT ON (lower(customer_name), customer_phone)
+            customer_name, customer_phone, customer_address
+     FROM   orders
+     WHERE  tenant_id = $1
+       AND  (customer_name ILIKE $2 OR customer_phone ILIKE $2)
+       AND  customer_name IS NOT NULL
+     ORDER  BY lower(customer_name), customer_phone, created_at DESC
+     LIMIT  8`,
+    [req.user.tenantId, `%${q}%`]
+  );
+  res.json({ success: true, data: rows });
+});
+
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers };

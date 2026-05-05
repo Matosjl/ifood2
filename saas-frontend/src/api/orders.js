@@ -16,5 +16,8 @@ export const updateOrderStatus = (id, status) =>
 export const cancelOrder = (id) =>
   api.patch(`/orders/${id}/status`, { status: 'cancelled' });
 
+export const searchCustomers = (q) =>
+  api.get('/orders/customers', { params: { q } });
+
 export const login = (email, password) =>
   api.post('/auth/login', { email, password });

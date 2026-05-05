@@ -85,13 +85,29 @@ export function printOrder(order) {
   <p class="c" style="font-size:11px;margin-top:6px">Obrigado pela preferência!</p>
 </body></html>`;
 
-  const w = window.open('', '_blank', 'width=370,height=560');
-  if (!w) {
-    // popup bloqueado — silencioso (não interrompe o fluxo no auto-print)
-    return false;
-  }
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => { w.print(); w.close(); }, 350);
+  // Usa iframe invisível — não precisa de permissão de popup e
+  // funciona em impressão automática (sem gesto direto do usuário).
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (e) {
+      console.warn('[print] Falha ao imprimir:', e);
+    }
+    // Remove iframe após a caixa de diálogo fechar
+    setTimeout(() => {
+      if (document.body.contains(iframe)) document.body.removeChild(iframe);
+    }, 2000);
+  }, 400);
+
   return true;
 }

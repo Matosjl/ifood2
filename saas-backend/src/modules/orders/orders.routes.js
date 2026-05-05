@@ -23,6 +23,7 @@ const itemRules = [
 // Rota estática (/transitions/:status) declarada ANTES de /:id para não colidir
 
 router.get('/transitions/:status',  ctrl.transitions);
+router.get('/customers',            ctrl.searchCustomers);
 router.get('/',                     ctrl.list);
 router.post('/',                    checkOrderLimit, itemRules, ctrl.create);
 router.get('/:id',                  ctrl.getOne);
