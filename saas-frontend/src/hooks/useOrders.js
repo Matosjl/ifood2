@@ -174,6 +174,38 @@ export default function useOrders() {
     return () => clearTimeout(t);
   }, [loading]);
 
+  // ── Fetch today's completed/cancelled orders (not in socket cache) ──
+  // The Redis cache only keeps active orders. After F5, delivered/cancelled
+  // orders disappear from the board. We fix this by fetching today's
+  // terminal orders once on mount and merging them.
+
+  useEffect(() => {
+    const fetchCompleted = async () => {
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const { data } = await getOrders({
+          limit: 200,
+          startDate: today.toISOString(),
+        });
+        const terminal = (data.data ?? [])
+          .filter((o) => ['delivered', 'cancelled', 'ready'].includes(o.status))
+          .map(norm);
+        if (terminal.length === 0) return;
+        setOrders((prev) => {
+          const existing = new Set(prev.map((o) => o.id));
+          const newOnes  = terminal.filter((o) => !existing.has(o.id));
+          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+        });
+      } catch {
+        // non-fatal
+      }
+    };
+    // Run after socket has had time to deliver its snapshot
+    const t = setTimeout(fetchCompleted, 2_000);
+    return () => clearTimeout(t);
+  }, []);
+
   // ── Actions (optimistic) ────────────────────────────────────
 
   const changeStatus = useCallback(async (id, status) => {

@@ -156,15 +156,20 @@ function QrCodeTab({ currentUser }) {
 // ─────────────────────────────────────────────────────────────
 
 function RestauranteTab({ currentUser, onToast }) {
-  const [name,    setName]    = useState('');
-  const [saving,  setSaving]  = useState(false);
-  const [tenant,  setTenant]  = useState(null);
+  const [name,      setName]      = useState('');
+  const [whatsapp,  setWhatsapp]  = useState('');
+  const [address,   setAddress]   = useState('');
+  const [saving,    setSaving]    = useState(false);
+  const [tenant,    setTenant]    = useState(null);
 
   useEffect(() => {
     getTenantInfo()
       .then(({ data }) => {
-        setTenant(data.data);
-        setName(data.data.name ?? '');
+        const t = data.data;
+        setTenant(t);
+        setName(t.name ?? '');
+        setWhatsapp(t.whatsapp_number ?? '');
+        setAddress(t.address ?? '');
       })
       .catch(() => {});
   }, []);
@@ -182,14 +187,13 @@ function RestauranteTab({ currentUser, onToast }) {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await updateTenantProfile({ name });
-      // Update stored user
+      await updateTenantProfile({ name, whatsappNumber: whatsapp.trim(), address: address.trim() });
       const u = getUser();
       if (u.tenant) {
         u.tenant.name = name.trim();
         localStorage.setItem('user', JSON.stringify(u));
       }
-      onToast('Nome do restaurante atualizado!');
+      onToast('Dados do restaurante atualizados!');
     } catch (err) {
       onToast(err.response?.data?.message ?? 'Erro ao atualizar.', 'error');
     } finally {
@@ -201,7 +205,7 @@ function RestauranteTab({ currentUser, onToast }) {
     <div className="max-w-md space-y-5">
       <div className="bg-gray-800/60 rounded-2xl p-4 border border-white/[0.06] space-y-1">
         <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Plano atual</p>
-        <p className="text-white font-semibold capitalize">{tenant?.plan?.name ?? tenant?.plan?.current ? tenant.plan.name : (getUser().tenant?.plan ?? '—')}</p>
+        <p className="text-white font-semibold capitalize">{getUser().tenant?.plan ?? '—'}</p>
         {tenant?.usage && (
           <p className="text-xs text-gray-400">
             {tenant.usage.ordersThisMonth} / {tenant.usage.ordersLimit ?? '∞'} pedidos este mês
@@ -211,19 +215,27 @@ function RestauranteTab({ currentUser, onToast }) {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome do Restaurante</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="input w-full"
-            placeholder="Nome do restaurante"
-          />
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome do Restaurante *</label>
+          <input value={name} onChange={(e) => setName(e.target.value)}
+            className="input w-full" placeholder="Nome do restaurante" />
         </div>
-        <button
-          type="submit"
-          disabled={saving || !name.trim()}
-          className="btn-green px-6 disabled:opacity-50"
-        >
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">
+            WhatsApp <span className="text-gray-600 font-normal">(aparece no cardápio do cliente)</span>
+          </label>
+          <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
+            className="input w-full" placeholder="5511999999999 (com código do país)" type="tel" />
+          <p className="text-[11px] text-gray-600 mt-1">Formato: 55 + DDD + número. Ex: 5511999887766</p>
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">
+            Endereço <span className="text-gray-600 font-normal">(opcional)</span>
+          </label>
+          <input value={address} onChange={(e) => setAddress(e.target.value)}
+            className="input w-full" placeholder="Rua, número — Bairro, Cidade" />
+        </div>
+        <button type="submit" disabled={saving || !name.trim()}
+          className="btn-green px-6 disabled:opacity-50">
           {saving ? 'Salvando...' : 'Salvar'}
         </button>
       </form>

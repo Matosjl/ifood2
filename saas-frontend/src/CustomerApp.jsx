@@ -40,13 +40,21 @@ const cartCount = (cart) =>
 // ── Status config ─────────────────────────────────────────────
 
 const STATUS_STEPS = [
-  { key: 'received',   label: 'Recebido',    icon: '📋' },
-  { key: 'preparing',  label: 'Em Preparo',  icon: '👨‍🍳' },
-  { key: 'ready',      label: 'Pronto',      icon: '✅' },
-  { key: 'delivered',  label: 'Entregue/Retirado', icon: '🎉' },
+  { key: 'received',  label: 'Pedido Recebido',     icon: '📋', desc: 'Aguardando confirmação do restaurante' },
+  { key: 'preparing', label: 'Em Preparo',           icon: '👨‍🍳', desc: 'Seu pedido está sendo preparado' },
+  { key: 'ready',     label: 'Pronto!',              icon: '✅', desc: 'Seu pedido está pronto para retirada/entrega' },
+  { key: 'delivered', label: 'Entregue / Retirado',  icon: '🎉', desc: 'Aproveite sua refeição!' },
 ];
 
-const STATUS_INDEX = { received: 0, preparing: 1, ready: 2, delivered: 3 };
+// Map backend statuses → step index
+const STATUS_INDEX = {
+  pending:   0,
+  confirmed: 0,
+  preparing: 1,
+  ready:     2,
+  delivered: 3,
+  cancelled: -1,
+};
 
 // ── Main Component ────────────────────────────────────────────
 
@@ -192,83 +200,156 @@ export default function CustomerApp({ slug }) {
   // ── PAGE: TRACKING ─────────────────────────────────────────
 
   if (page === 'tracking') {
-    const statusIdx = STATUS_INDEX[order?.status] ?? 0;
+    const statusIdx  = STATUS_INDEX[order?.status] ?? 0;
+    const cancelled  = order?.status === 'cancelled';
+    const delivered  = order?.status === 'delivered';
+    const tenant     = menuData?.tenant ?? {};
+    const whatsapp   = tenant.whatsapp_number;
+    const isDelivery = order?.delivery_type === 'delivery';
+
+    const PAYMENT_MAP = {
+      cash: '💵 Dinheiro', pix: '📱 Pix',
+      credit: '💳 Crédito', debit: '💳 Débito',
+      voucher: '🎫 Vale Refeição', other: '🔖 Outro',
+    };
 
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-6 text-white text-center shadow-lg">
-          <h1 className="text-xl font-black">{tenant.name ?? 'Restaurante'}</h1>
+        <div className={`px-4 py-5 text-white text-center shadow-lg ${cancelled ? 'bg-red-500' : 'bg-gradient-to-r from-orange-500 to-orange-600'}`}>
+          <p className="text-xs font-semibold opacity-75 uppercase tracking-widest mb-1">{tenant.name ?? 'Restaurante'}</p>
+          <h1 className="text-2xl font-black">
+            {cancelled ? '❌ Pedido Cancelado' : delivered ? '🎉 Pedido Entregue!' : `Pedido #${order?.order_number ?? order?.orderNumber ?? '---'}`}
+          </h1>
+          <p className="text-sm opacity-80 mt-1">
+            {isDelivery ? '🛵 Entrega' : '🏪 Retirada no local'}
+            {order?.payment_method ? ` · ${PAYMENT_MAP[order.payment_method] ?? order.payment_method}` : ''}
+          </p>
         </div>
 
-        <div className="max-w-lg mx-auto p-4 space-y-6 pt-8">
-          {/* Confirmation */}
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center space-y-2">
-            <div className="text-5xl">✅</div>
-            <h2 className="text-2xl font-black text-gray-900">
-              Pedido #{order?.orderNumber ?? order?.id?.slice(0, 6) ?? '---'} confirmado!
-            </h2>
-            <p className="text-gray-500 text-sm">
-              {order?.delivery_type === 'delivery' ? '🛵 Entrega' : '🏪 Retirada no local'}
-            </p>
-            {order?.payment_method && (
-              <p className="text-gray-400 text-xs mt-1">
-                {{ cash: '💵 Dinheiro', pix: '📱 Pix', credit: '💳 Cartão de Crédito', debit: '💳 Cartão de Débito', voucher: '🎫 Vale Refeição', other: '🔖 Outro' }[order.payment_method] ?? order.payment_method}
-              </p>
-            )}
-          </div>
+        <div className="flex-1 max-w-lg w-full mx-auto p-4 space-y-4 pb-8">
+
+          {/* Cancelled message */}
+          {cancelled && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-center space-y-2">
+              <p className="text-red-700 font-bold text-base">Seu pedido foi cancelado</p>
+              <p className="text-red-500 text-sm">Entre em contato com o restaurante para mais informações.</p>
+            </div>
+          )}
 
           {/* Status timeline */}
-          <div className="bg-white rounded-2xl shadow-sm p-6 space-y-4">
-            <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wide">Status do pedido</h3>
-            <div className="space-y-3">
-              {STATUS_STEPS.map((step, idx) => {
-                const done    = idx < statusIdx;
-                const current = idx === statusIdx;
-                const future  = idx > statusIdx;
-                return (
-                  <div key={step.key} className="flex items-center gap-3">
-                    {/* Circle */}
-                    <div className={[
-                      'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition-all',
-                      done    ? 'bg-green-100 text-green-600'
-                      : current ? 'bg-orange-500 text-white shadow-md shadow-orange-300'
-                      : 'bg-gray-100 text-gray-400',
-                    ].join(' ')}>
-                      {current ? (
-                        <span className="animate-pulse">{step.icon}</span>
-                      ) : done ? (
-                        '✓'
-                      ) : (
-                        <span className="text-xs">{idx + 1}</span>
-                      )}
-                    </div>
-                    {/* Label */}
-                    <span className={[
-                      'text-sm font-semibold',
-                      done    ? 'text-green-600'
-                      : current ? 'text-orange-600'
-                      : 'text-gray-400',
-                    ].join(' ')}>
-                      {step.label}
-                      {current && (
-                        <span className="ml-2 inline-block w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-xs text-gray-400 pt-2">Atualizado automaticamente a cada 15 segundos</p>
-          </div>
+          {!cancelled && (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              {/* Progress bar */}
+              <div className="h-1.5 bg-gray-100">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-700"
+                  style={{ width: `${Math.round(((statusIdx + 1) / STATUS_STEPS.length) * 100)}%` }}
+                />
+              </div>
 
-          {/* New order */}
-          <button
-            onClick={() => { setPage('menu'); setOrder(null); }}
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-2xl transition-colors shadow-md"
-          >
-            Fazer novo pedido
-          </button>
+              <div className="p-5 space-y-1">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Acompanhe seu pedido</p>
+
+                {STATUS_STEPS.map((step, idx) => {
+                  const done    = idx < statusIdx;
+                  const current = idx === statusIdx;
+                  return (
+                    <div key={step.key} className="flex items-start gap-4 pb-4 last:pb-0">
+                      {/* Icon col */}
+                      <div className="flex flex-col items-center gap-1 shrink-0">
+                        <div className={[
+                          'w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all duration-500',
+                          done    ? 'bg-green-100 text-green-600'
+                          : current ? 'bg-orange-500 text-white shadow-lg shadow-orange-200'
+                          : 'bg-gray-100 text-gray-300',
+                        ].join(' ')}>
+                          {done ? '✓' : step.icon}
+                        </div>
+                        {idx < STATUS_STEPS.length - 1 && (
+                          <div className={`w-0.5 h-6 rounded-full ${done ? 'bg-green-300' : 'bg-gray-200'}`} />
+                        )}
+                      </div>
+
+                      {/* Text col */}
+                      <div className="pt-1.5 flex-1">
+                        <p className={[
+                          'text-sm font-bold leading-tight',
+                          done    ? 'text-green-600'
+                          : current ? 'text-orange-600'
+                          : 'text-gray-300',
+                        ].join(' ')}>
+                          {step.label}
+                          {current && <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse align-middle" />}
+                        </p>
+                        {(done || current) && (
+                          <p className={`text-xs mt-0.5 ${current ? 'text-orange-400' : 'text-gray-400'}`}>
+                            {step.desc}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="px-5 pb-4">
+                <p className="text-[11px] text-gray-400 flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  Atualizado automaticamente a cada 15 segundos
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Order summary */}
+          {order?.items?.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm p-4 space-y-2">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Resumo</p>
+              {order.items.map((item, i) => (
+                <div key={i} className="flex justify-between text-sm text-gray-700">
+                  <span>{item.quantity ?? item.weight_kg + 'kg'} × {item.product_name}</span>
+                  <span className="font-semibold">R$ {parseFloat(item.total ?? 0).toFixed(2).replace('.', ',')}</span>
+                </div>
+              ))}
+              <div className="border-t pt-2 flex justify-between font-bold text-gray-900">
+                <span>Total</span>
+                <span className="text-orange-600">R$ {parseFloat(order.total ?? 0).toFixed(2).replace('.', ',')}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Delivery address */}
+          {isDelivery && order?.customer_address && (
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Endereço de Entrega</p>
+              <p className="text-sm text-gray-700">📍 {order.customer_address}</p>
+            </div>
+          )}
+
+          {/* Contact buttons */}
+          <div className="space-y-3">
+            {whatsapp && (
+              <a
+                href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`Olá! Tenho uma dúvida sobre o Pedido #${order?.order_number ?? order?.orderNumber ?? ''}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl bg-green-500 hover:bg-green-400 text-white font-bold text-sm transition-colors shadow-md shadow-green-200"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                </svg>
+                Falar com o restaurante
+              </a>
+            )}
+            <button
+              onClick={() => { setPage('menu'); setOrder(null); }}
+              className="w-full py-3 rounded-2xl border-2 border-orange-400 text-orange-600 font-bold text-sm hover:bg-orange-50 transition-colors"
+            >
+              Fazer novo pedido
+            </button>
+          </div>
         </div>
       </div>
     );
