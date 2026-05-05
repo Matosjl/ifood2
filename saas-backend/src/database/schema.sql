@@ -162,3 +162,33 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
 
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(30);
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address         TEXT;
+
+-- ── EXPENSES (gastos mensais) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS expenses (
+  id                  UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id           UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name                VARCHAR(200)  NOT NULL,
+  supplier            VARCHAR(200),
+  category            VARCHAR(50)   NOT NULL DEFAULT 'other',
+  -- category: 'rent'|'utilities'|'food_supplier'|'staff'|'marketing'|'tax'|'maintenance'|'other'
+  amount              DECIMAL(10,2) NOT NULL,
+  payment_method      VARCHAR(30)   NOT NULL DEFAULT 'pix',
+  -- payment_method: 'cash'|'pix'|'credit'|'debit'|'boleto'|'transfer'
+  is_installment      BOOLEAN       NOT NULL DEFAULT false,
+  installment_total   INTEGER,        -- total de parcelas
+  installment_current INTEGER,        -- parcela atual (1..N)
+  due_date            DATE          NOT NULL,
+  paid_at             TIMESTAMPTZ,
+  status              VARCHAR(20)   NOT NULL DEFAULT 'pending',
+  -- status: 'pending'|'paid'|'overdue'
+  notes               TEXT,
+  recurrence          VARCHAR(20),    -- null | 'monthly' | 'yearly'
+  parent_id           UUID          REFERENCES expenses(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_tenant   ON expenses(tenant_id, due_date DESC);
+CREATE INDEX IF NOT EXISTS idx_expenses_status   ON expenses(tenant_id, status);
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN NOT NULL DEFAULT false;
