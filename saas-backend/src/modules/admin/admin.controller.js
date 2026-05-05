@@ -1,5 +1,5 @@
 const db          = require('../../config/database');
-const bcrypt      = require('bcrypt');
+const bcrypt      = require('bcryptjs');
 const asyncHandler = require('../../utils/asyncHandler');
 const AppError    = require('../../utils/AppError');
 
