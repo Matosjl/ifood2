@@ -2,7 +2,7 @@ const NAV_ITEMS = [
   { key: 'orders',    emoji: '🍽️', label: 'Pedidos' },
   { key: 'products',  emoji: '📦', label: 'Produtos' },
   { key: 'stock',     emoji: '📊', label: 'Estoque' },
-  { key: 'financial', emoji: '💰', label: 'Financeiro', soon: true },
+  { key: 'financial', emoji: '💰', label: 'Financeiro' },
 ];
 
 export default function Sidebar({ page, setPage, onLogout }) {
