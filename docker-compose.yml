@@ -103,6 +103,13 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Worker não expõe HTTP — verifica se o processo node está vivo
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x node > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
@@ -116,6 +123,12 @@ services:
         VITE_API_URL: "${VITE_API_URL}"
     container_name: saas_frontend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }

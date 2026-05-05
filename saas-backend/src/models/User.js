@@ -114,6 +114,53 @@ class User {
     );
     return rowCount;
   }
+
+  // ── Profile updates ────────────────────────────────────────
+
+  /** Busca usuário com password_hash (para verificação de senha). */
+  static async findByIdWithHash(id, tenantId, dbClient = db) {
+    const { rows } = await dbClient.query(
+      `SELECT id, tenant_id, name, email, password_hash, role, active
+       FROM   users
+       WHERE  id = $1 AND tenant_id = $2 AND active = true`,
+      [id, tenantId]
+    );
+    return rows[0] || null;
+  }
+
+  /**
+   * Atualiza campos do usuário (null = sem alteração via COALESCE).
+   * Campos aceitos: name, passwordHash, role, active.
+   */
+  static async update(id, tenantId, { name, passwordHash, role, active } = {}, dbClient = db) {
+    const { rows } = await dbClient.query(
+      `UPDATE users
+       SET name          = COALESCE($3, name),
+           password_hash = COALESCE($4, password_hash),
+           role          = COALESCE($5, role),
+           active        = COALESCE($6, active),
+           updated_at    = NOW()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id, tenant_id, name, email, role, active, created_at, updated_at`,
+      [id, tenantId,
+       name        ?? null,
+       passwordHash ?? null,
+       role        ?? null,
+       active      ?? null]
+    );
+    return rows[0] || null;
+  }
+
+  /** Desativa um usuário (soft-delete). */
+  static async deactivate(id, tenantId, dbClient = db) {
+    const { rows } = await dbClient.query(
+      `UPDATE users SET active = false, updated_at = NOW()
+       WHERE  id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+    return rows[0] || null;
+  }
 }
 
 module.exports = User;

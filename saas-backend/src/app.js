@@ -12,6 +12,7 @@ const productRoutes  = require('./modules/products/products.routes');
 const orderRoutes    = require('./modules/orders/orders.routes');
 const tenantRoutes      = require('./modules/tenant/tenant.routes');
 const financeiroRoutes  = require('./modules/financeiro/financeiro.routes');
+const usersRoutes       = require('./modules/users/users.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -57,6 +58,7 @@ app.use('/api/products',   productRoutes);
 app.use('/api/orders',     orderRoutes);
 app.use('/api/tenant',     tenantRoutes);
 app.use('/api/financeiro', financeiroRoutes);
+app.use('/api/users',      usersRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

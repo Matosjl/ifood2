@@ -11,6 +11,13 @@ router.use(authenticate);
 // GET /api/tenant/me — dados + plano + uso atual
 router.get('/me', ctrl.getMe);
 
+// PUT /api/tenant/profile — atualizar nome do restaurante (owner)
+router.put('/profile',
+  authorize('owner'),
+  body('name').trim().notEmpty().withMessage('Nome do restaurante é obrigatório.'),
+  ctrl.updateProfile
+);
+
 // PUT /api/tenant/plan — alterar plano (owner only)
 router.put('/plan',
   authorize('owner'),

@@ -1,3 +1,4 @@
+const bcrypt               = require('bcrypt');
 const { validationResult } = require('express-validator');
 const authService          = require('./auth.service');
 const User                 = require('../../models/User');
@@ -72,4 +73,49 @@ const me = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { user } });
 });
 
-module.exports = { register, login, refresh, logout, me };
+/**
+ * PUT /api/auth/profile
+ * Body: { name?, currentPassword?, newPassword? }
+ * Permite ao usuário logado atualizar nome e/ou senha.
+ */
+const updateProfile = asyncHandler(async (req, res) => {
+  const { name, currentPassword, newPassword } = req.body;
+  const updates = {};
+
+  if (name?.trim()) updates.name = name.trim();
+
+  if (newPassword) {
+    if (!currentPassword)
+      throw new AppError('Informe a senha atual para alterá-la.', 400);
+    if (newPassword.length < 8)
+      throw new AppError('Nova senha deve ter pelo menos 8 caracteres.', 400);
+    if (newPassword === currentPassword)
+      throw new AppError('Nova senha deve ser diferente da atual.', 400);
+
+    const userWithHash = await User.findByIdWithHash(req.user.userId, req.user.tenantId);
+    if (!userWithHash) throw new AppError('Usuário não encontrado.', 404);
+
+    const valid = await bcrypt.compare(currentPassword, userWithHash.password_hash);
+    if (!valid) throw new AppError('Senha atual incorreta.', 400);
+
+    updates.passwordHash = await bcrypt.hash(newPassword, 12);
+  }
+
+  if (!Object.keys(updates).length)
+    throw new AppError('Nenhum campo para atualizar.', 400);
+
+  const updated = await User.update(req.user.userId, req.user.tenantId, updates);
+  if (!updated) throw new AppError('Usuário não encontrado.', 404);
+
+  res.json({
+    success: true,
+    data: {
+      id:    updated.id,
+      name:  updated.name,
+      email: updated.email,
+      role:  updated.role,
+    },
+  });
+});
+
+module.exports = { register, login, refresh, logout, me, updateProfile };

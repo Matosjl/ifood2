@@ -3,8 +3,10 @@ import LoginPage      from './pages/LoginPage';
 import DashboardPage  from './pages/DashboardPage';
 import ProductsPage   from './pages/ProductsPage';
 import StockPage      from './pages/StockPage';
-import FinanceiroPage from './pages/FinanceiroPage';
-import Sidebar        from './components/Sidebar';
+import FinanceiroPage    from './pages/FinanceiroPage';
+import HistoricoPage     from './pages/HistoricoPage';
+import ConfiguracoesPage from './pages/ConfiguracoesPage';
+import Sidebar           from './components/Sidebar';
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
@@ -27,6 +29,8 @@ export default function App() {
         {page === 'products'   && <ProductsPage />}
         {page === 'stock'      && <StockPage />}
         {page === 'financial'  && <FinanceiroPage />}
+        {page === 'historico'  && <HistoricoPage />}
+        {page === 'settings'   && <ConfiguracoesPage />}
       </div>
     </div>
   );
