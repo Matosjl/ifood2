@@ -30,8 +30,9 @@ function FullscreenBtn() {
 }
 
 export default function Header({
-  connected, soundEnabled, setSoundEnabled, onNewOrder,
-  viewMode, setViewMode, viewModes,
+  connected, soundEnabled, setSoundEnabled,
+  autoPrint, setAutoPrint,
+  onNewOrder, viewMode, setViewMode, viewModes,
 }) {
   return (
     <header className="flex items-center gap-3 px-4 py-3 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
@@ -100,6 +101,22 @@ export default function Header({
               </svg>
           }
         </button>
+
+        {/* Auto-print toggle */}
+        {setAutoPrint && (
+          <button
+            onClick={() => setAutoPrint(!autoPrint)}
+            title={autoPrint ? 'Impressão automática: ON (clique para desligar)' : 'Impressão automática: OFF (clique para ligar)'}
+            className={`p-2 rounded-lg transition-colors ${
+              autoPrint ? 'text-blue-400 hover:bg-blue-400/10' : 'text-gray-600 hover:bg-white/10'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+          </button>
+        )}
 
         <FullscreenBtn />
       </div>

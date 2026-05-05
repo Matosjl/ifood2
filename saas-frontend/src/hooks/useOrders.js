@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import useSocket from './useSocket';
 import { playAlert, unlockAudio } from '../utils/sound';
+import { printOrder } from '../utils/print';
 import { getOrders, updateOrderStatus, cancelOrder } from '../api/orders';
 
 // ── Column definitions ────────────────────────────────────────
@@ -75,6 +76,17 @@ export default function useOrders() {
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [autoPrint,    setAutoPrintState] = useState(
+    () => localStorage.getItem('autoPrint') !== 'false'  // padrão: ligado
+  );
+
+  const autoPrintRef = useRef(autoPrint);
+  autoPrintRef.current = autoPrint;
+
+  const setAutoPrint = useCallback((val) => {
+    setAutoPrintState(val);
+    localStorage.setItem('autoPrint', String(val));
+  }, []);
 
   const unackRef     = useRef(new Set()); // orders waiting for acknowledgement
   const alertRef     = useRef(null);      // continuous-alert interval
@@ -111,6 +123,7 @@ export default function useOrders() {
     const o = norm(order);
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
     if (soundRef.current) { playAlert(); }
+    if (autoPrintRef.current) { printOrder(o); }
     unackRef.current.add(o.id);
     startAlert();
   }, [startAlert]);
@@ -191,6 +204,7 @@ export default function useOrders() {
   return {
     orders, loading, socketConnected,
     soundEnabled, setSoundEnabled,
+    autoPrint, setAutoPrint,
     changeStatus, doCancel, addOrder,
     acknowledgeOrder, getColumnOrders,
   };

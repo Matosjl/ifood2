@@ -18,6 +18,7 @@ export default function DashboardPage() {
   const {
     orders, loading, socketConnected,
     soundEnabled, setSoundEnabled,
+    autoPrint, setAutoPrint,
     changeStatus, doCancel,
     acknowledgeOrder, getColumnOrders,
     addOrder,
@@ -33,6 +34,8 @@ export default function DashboardPage() {
         connected={socketConnected}
         soundEnabled={soundEnabled}
         setSoundEnabled={setSoundEnabled}
+        autoPrint={autoPrint}
+        setAutoPrint={setAutoPrint}
         onNewOrder={() => setShowModal(true)}
         viewMode={viewMode}
         setViewMode={setViewMode}
