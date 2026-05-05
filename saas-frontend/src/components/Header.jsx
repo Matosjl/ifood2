@@ -33,13 +33,22 @@ export default function Header({
   connected, soundEnabled, setSoundEnabled,
   autoPrint, setAutoPrint,
   onNewOrder, viewMode, setViewMode, viewModes,
+  pendingCount = 0,
 }) {
   return (
     <header className="flex items-center gap-3 px-4 py-3 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
 
-      {/* Left — title + status */}
+      {/* Left — title + status + pending badge */}
       <div className="flex items-center gap-3 shrink-0">
         <span className="text-base font-black tracking-tight text-white">🍽 Cozinha</span>
+
+        {/* Pending orders badge */}
+        {pendingCount > 0 && (
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-xs font-black animate-pulse shadow-lg shadow-red-500/40">
+            {pendingCount} pendente{pendingCount !== 1 ? 's' : ''}
+          </span>
+        )}
+
         <div className="flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400 shadow-[0_0_6px_#4ade80]' : 'bg-red-400 animate-pulse'}`} />
           <span className="text-xs text-gray-500 hidden sm:block">

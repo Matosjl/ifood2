@@ -21,6 +21,9 @@ const { PLANS }      = require('./config/plans');
 
 const app = express();
 
+// ── Trust proxy (nginx em frente ao Express) ──────────────────
+app.set('trust proxy', 1);
+
 // ── Segurança ─────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
