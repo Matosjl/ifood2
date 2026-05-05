@@ -23,15 +23,18 @@ const updatePlan = asyncHandler(async (req, res) => {
  * Atualiza o nome do restaurante (owner only).
  */
 const updateProfile = asyncHandler(async (req, res) => {
-  const { name } = req.body;
+  const { name, whatsappNumber, address } = req.body;
   if (!name?.trim()) throw new AppError('Nome do restaurante é obrigatório.', 400);
 
   const { rows } = await db.query(
     `UPDATE tenants
-     SET name = $2, updated_at = NOW()
+     SET name             = $2,
+         whatsapp_number  = COALESCE($3, whatsapp_number),
+         address          = COALESCE($4, address),
+         updated_at       = NOW()
      WHERE id = $1
-     RETURNING id, name, slug`,
-    [req.user.tenantId, name.trim()]
+     RETURNING id, name, slug, whatsapp_number, address`,
+    [req.user.tenantId, name.trim(), whatsappNumber || null, address || null]
   );
   if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
 

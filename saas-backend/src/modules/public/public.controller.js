@@ -7,7 +7,7 @@ const AppError       = require('../../utils/AppError');
 // GET /api/public/:slug  — menu público
 const getMenu = asyncHandler(async (req, res) => {
   const { rows: tenants } = await db.query(
-    `SELECT id, name, slug FROM tenants WHERE slug = $1 AND active = true`,
+    `SELECT id, name, slug, whatsapp_number, address FROM tenants WHERE slug = $1 AND active = true`,
     [req.params.slug]
   );
   const tenant = tenants[0];
