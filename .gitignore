@@ -31,9 +31,17 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
-
+.env
+.env.local
+.env.production
+.env.staging
 *token.json*
 *credentials.json*
+
+# Deployment artefacts — generated at runtime, never committed
+nginx/conf.d/app-ssl.conf
+backups/
+saas-frontend/dist/
 
 # Logs and debug files
 npm-debug.log*

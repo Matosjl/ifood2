@@ -1,0 +1,55 @@
+# =============================================================
+# Dev overrides — use alongside docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Or just: make dev
+# =============================================================
+
+services:
+
+  nginx:
+    # In dev, nginx only listens on HTTP (no SSL)
+    ports:
+      - "80:80"
+
+  backend:
+    build:
+      target: production          # same image, override entrypoint
+    command: ["node", "-r", "dotenv/config", "src/server.js"]
+    volumes:
+      - ./saas-backend/src:/app/src:ro   # hot-reload via nodemon not needed; fast rebuild
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+
+  worker:
+    command: ["node", "src/workers/index.js"]
+    environment:
+      NODE_ENV: development
+
+  frontend:
+    # In dev, replace the built container with Vite dev server
+    build:
+      context: ./saas-frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./saas-frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: "http://localhost"
+
+  # Expose ports for local debugging
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  # No certbot in dev
+  certbot:
+    profiles: ["ssl"]    # disabled unless explicitly included

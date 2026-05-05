@@ -1,0 +1,173 @@
+import { useState, useEffect, useRef } from 'react';
+
+// ── Status config ─────────────────────────────────────────────
+
+const STATUS = {
+  pending:   { label: 'Pendente',    border: 'border-yellow-500', badge: 'bg-yellow-500/20 text-yellow-300' },
+  confirmed: { label: 'Confirmado',  border: 'border-yellow-400', badge: 'bg-yellow-400/20 text-yellow-200' },
+  preparing: { label: 'Em Preparo',  border: 'border-blue-500',   badge: 'bg-blue-500/20   text-blue-300'   },
+  ready:     { label: 'Pronto',      border: 'border-green-400',  badge: 'bg-green-400/20  text-green-300'  },
+  delivered: { label: 'Entregue',    border: 'border-green-600',  badge: 'bg-green-600/20  text-green-400'  },
+  cancelled: { label: 'Cancelado',   border: 'border-red-500',    badge: 'bg-red-500/20    text-red-300'    },
+};
+
+// Actions available per status
+const ACTIONS = {
+  pending:   [{ label: 'Iniciar Preparo', status: 'preparing', cls: 'btn-blue'  },
+              { label: 'Cancelar',        status: 'cancelled', cls: 'btn-red', confirm: true }],
+  confirmed: [{ label: 'Iniciar Preparo', status: 'preparing', cls: 'btn-blue'  },
+              { label: 'Cancelar',        status: 'cancelled', cls: 'btn-red', confirm: true }],
+  preparing: [{ label: 'Pronto!',         status: 'ready',     cls: 'btn-green' },
+              { label: 'Cancelar',        status: 'cancelled', cls: 'btn-red', confirm: true }],
+  ready:     [{ label: 'Entregar',        status: 'delivered', cls: 'btn-green' }],
+  delivered: [],
+  cancelled: [],
+};
+
+// ── Timer ─────────────────────────────────────────────────────
+
+function Timer({ createdAt }) {
+  const [secs, setSecs] = useState(0);
+
+  useEffect(() => {
+    const origin = new Date(createdAt).getTime();
+    const tick   = () => setSecs(Math.max(0, Math.floor((Date.now() - origin) / 1_000)));
+    tick();
+    const id = setInterval(tick, 1_000);
+    return () => clearInterval(id);
+  }, [createdAt]);
+
+  const m   = Math.floor(secs / 60);
+  const s   = secs % 60;
+  const cls = m >= 20 ? 'text-red-400 animate-pulse-slow'
+            : m >= 10 ? 'text-yellow-400'
+            :           'text-gray-400';
+
+  return (
+    <span className={`font-mono text-xs font-semibold tabular-nums ${cls}`}>
+      ⏱ {String(m).padStart(2, '0')}:{String(s).padStart(2, '0')}
+    </span>
+  );
+}
+
+// ── Card ──────────────────────────────────────────────────────
+
+export default function OrderCard({ order, onStatusChange, onAcknowledge }) {
+  const [isNew,     setIsNew]     = useState(true);
+  const [confirming, setConfirming] = useState(null); // status awaiting confirm
+  const cfg = STATUS[order.status] ?? STATUS.pending;
+
+  useEffect(() => {
+    const t = setTimeout(() => setIsNew(false), 600);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleAction = (action) => {
+    onAcknowledge?.(order.id);
+    if (action.confirm) {
+      setConfirming(action.status);
+    } else {
+      onStatusChange(order.id, action.status);
+    }
+  };
+
+  const confirmCancel = () => {
+    onStatusChange(order.id, confirming);
+    setConfirming(null);
+  };
+
+  return (
+    <div
+      className={[
+        'relative rounded-xl border-l-4 bg-gray-800/80 backdrop-blur-sm',
+        'shadow-lg ring-1 ring-white/5',
+        'transition-all duration-200 hover:bg-gray-800 hover:shadow-xl hover:-translate-y-0.5',
+        cfg.border,
+        isNew ? 'order-card-enter' : '',
+      ].join(' ')}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 p-3 pb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-lg font-black text-white shrink-0">
+            #{order.orderNumber}
+          </span>
+          {order.channel !== 'manual' && (
+            <span className="text-xs bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-medium">
+              {order.channel}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Timer createdAt={order.createdAt} />
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.badge}`}>
+            {cfg.label}
+          </span>
+        </div>
+      </div>
+
+      {/* Customer */}
+      {(order.customerName || order.customerPhone) && (
+        <div className="px-3 pb-1">
+          {order.customerName && (
+            <p className="text-sm font-medium text-gray-200 truncate">{order.customerName}</p>
+          )}
+          {order.customerPhone && (
+            <p className="text-xs text-gray-400">{order.customerPhone}</p>
+          )}
+        </div>
+      )}
+
+      {/* Items */}
+      <ul className="px-3 py-1.5 space-y-0.5 border-t border-white/5">
+        {(order.items ?? []).map((item, i) => (
+          <li key={item.id ?? i} className="flex justify-between items-baseline gap-2">
+            <span className="text-sm text-gray-300 truncate leading-5">
+              {item.weightKg
+                ? `${item.weightKg}kg`
+                : `${item.quantity}×`} {item.productName}
+            </span>
+            <span className="text-xs text-gray-500 shrink-0">
+              R$ {parseFloat(item.total).toFixed(2)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {/* Footer */}
+      <div className="px-3 pt-1.5 pb-2 flex items-center justify-between border-t border-white/5">
+        <span className="text-base font-black text-white">
+          R$ {parseFloat(order.total).toFixed(2)}
+        </span>
+        {order.notes && (
+          <span className="text-xs text-amber-400/80 italic truncate max-w-[140px]" title={order.notes}>
+            💬 {order.notes}
+          </span>
+        )}
+      </div>
+
+      {/* Actions */}
+      {ACTIONS[order.status]?.length > 0 && (
+        <div className="px-3 pb-3 flex gap-2 flex-wrap">
+          {confirming ? (
+            <>
+              <span className="text-xs text-red-400 self-center">Confirmar cancelamento?</span>
+              <button onClick={confirmCancel}    className="btn-red   flex-1">Sim</button>
+              <button onClick={() => setConfirming(null)} className="btn-ghost flex-1">Não</button>
+            </>
+          ) : (
+            ACTIONS[order.status].map((a) => (
+              <button
+                key={a.status}
+                onClick={() => handleAction(a)}
+                className={`${a.cls} flex-1 min-w-0`}
+              >
+                {a.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
