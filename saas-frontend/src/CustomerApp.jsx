@@ -505,6 +505,17 @@ export default function CustomerApp({ slug }) {
                       inCart ? 'border-orange-300 ring-1 ring-orange-300' : 'border-gray-100',
                     ].join(' ')}
                   >
+                    {/* Product image */}
+                    {product.image_url && (
+                      <div className="w-full h-28 overflow-hidden bg-gray-100">
+                        <img
+                          src={product.image_url}
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
                     <div className="p-3 space-y-2">
                       <div>
                         <p className="font-bold text-gray-900 text-sm leading-tight">{product.name}</p>

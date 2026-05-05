@@ -15,7 +15,7 @@ const getMenu = asyncHandler(async (req, res) => {
 
   const { rows: products } = await db.query(
     `SELECT p.id, p.name, p.description, p.sale_type, p.sale_price,
-            p.stock_qty, c.name AS category_name
+            p.stock_qty, p.image_url, c.name AS category_name
      FROM   products p
      LEFT   JOIN categories c ON c.id = p.category_id
      WHERE  p.tenant_id = $1 AND p.active = true AND p.stock_qty > 0
