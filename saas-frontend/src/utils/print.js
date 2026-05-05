@@ -14,8 +14,8 @@ export function printOrder(order) {
     const qty = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}x`;
     return `
       <tr>
-        <td style="padding:2px 4px 2px 0">${qty} ${item.productName}</td>
-        <td style="text-align:right;white-space:nowrap">R$ ${parseFloat(item.total ?? 0).toFixed(2)}</td>
+        <td style="padding:5px 6px 5px 0;line-height:1.5">${qty} ${item.productName}</td>
+        <td style="text-align:right;white-space:nowrap;padding:5px 0;line-height:1.5">R$ ${parseFloat(item.total ?? 0).toFixed(2)}</td>
       </tr>`;
   }).join('');
 
@@ -25,38 +25,49 @@ export function printOrder(order) {
   <title>Pedido #${order.orderNumber}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Courier New',monospace; font-size:12px; width:80mm; padding:5mm 4mm; }
+    body { font-family:'Courier New',monospace; font-size:13px; line-height:1.6; width:80mm; padding:6mm 5mm; }
     .c  { text-align:center; }
     .b  { font-weight:bold; }
-    .lg { font-size:15px; }
-    .xl { font-size:22px; letter-spacing:1px; }
-    hr  { border:none; border-top:1px dashed #000; margin:5px 0; }
-    table { width:100%; border-collapse:collapse; }
-    td  { vertical-align:top; padding:2px 0; font-size:12px; }
-    .total td { border-top:1px dashed #000; padding-top:5px; font-weight:bold; font-size:14px; }
+    .lg { font-size:16px; }
+    .xl { font-size:24px; letter-spacing:2px; }
+    p   { margin-bottom:4px; }
+    hr  { border:none; border-top:1px dashed #000; margin:8px 0; }
+    table { width:100%; border-collapse:collapse; margin-top:4px; }
+    td  { vertical-align:top; font-size:13px; line-height:1.6; }
+    .total td { border-top:1px dashed #000; padding-top:8px; margin-top:4px; font-weight:bold; font-size:15px; }
+    .section { margin-bottom:6px; }
     @media print { @page { size:80mm auto; margin:0; } }
   </style>
 </head><body>
-  <p class="c b lg">${tenant}</p>
+  <div class="section c">
+    <p class="b lg">${tenant}</p>
+  </div>
   <hr>
-  <p class="c xl b">PEDIDO #${order.orderNumber}</p>
-  <p class="c">${date} ${time}</p>
-  ${order.channel && order.channel !== 'manual' ? `<p class="c b">Canal: ${order.channel.toUpperCase()}</p>` : ''}
+  <div class="section c">
+    <p class="xl b">PEDIDO #${order.orderNumber}</p>
+    <p>${date} &nbsp; ${time}</p>
+    ${order.channel && order.channel !== 'manual' ? `<p class="b">Canal: ${order.channel.toUpperCase()}</p>` : ''}
+  </div>
   <hr>
-  ${order.customerName  ? `<p><b>Cliente:</b> ${order.customerName}</p>`  : ''}
-  ${order.customerPhone ? `<p><b>Tel:</b> ${order.customerPhone}</p>`      : ''}
-  ${(order.customerName || order.customerPhone) ? '<hr>' : ''}
-  <p class="b" style="margin-bottom:3px">ITENS:</p>
-  <table>
-    ${itemRows}
-    <tr class="total">
-      <td>TOTAL</td>
-      <td style="text-align:right">R$ ${parseFloat(order.total ?? 0).toFixed(2)}</td>
-    </tr>
-  </table>
-  ${order.notes ? `<hr><p><b>Obs:</b> ${order.notes}</p>` : ''}
+  ${order.customerName || order.customerPhone ? `
+  <div class="section">
+    ${order.customerName  ? `<p><b>Cliente:</b> ${order.customerName}</p>`  : ''}
+    ${order.customerPhone ? `<p><b>Tel:</b> ${order.customerPhone}</p>`      : ''}
+  </div>
+  <hr>` : ''}
+  <div class="section">
+    <p class="b" style="margin-bottom:6px">ITENS:</p>
+    <table>
+      ${itemRows}
+      <tr class="total">
+        <td style="padding-top:8px">TOTAL</td>
+        <td style="text-align:right;padding-top:8px">R$ ${parseFloat(order.total ?? 0).toFixed(2)}</td>
+      </tr>
+    </table>
+  </div>
+  ${order.notes ? `<hr><div class="section"><p><b>Obs:</b> ${order.notes}</p></div>` : ''}
   <hr>
-  <p class="c" style="font-size:10px;margin-top:3px">Obrigado pela preferência!</p>
+  <p class="c" style="font-size:11px;margin-top:6px">Obrigado pela preferência!</p>
 </body></html>`;
 
   const w = window.open('', '_blank', 'width=370,height=560');
