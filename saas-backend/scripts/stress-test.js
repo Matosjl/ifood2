@@ -108,7 +108,10 @@ async function setupRestaurant(r, idx) {
   // 1. Registrar
   const reg = await req('POST', '/api/auth/register', r, authHeaders);
   record('setup', reg.ok, reg.ms);
-  if (!reg.ok) return null;
+  if (!reg.ok) {
+    console.error(`  ❌ Register falhou [${reg.status}] IP:${fakeIp} → ${JSON.stringify(reg.data).slice(0,120)}`);
+    return null;
+  }
 
   const tenantId = reg.data.data?.tenant?.id;
   const slug     = reg.data.data?.tenant?.slug;
@@ -119,7 +122,10 @@ async function setupRestaurant(r, idx) {
     'X-Real-IP':       fakeIp,
   });
   record('setup', login.ok, login.ms);
-  if (!login.ok) return null;
+  if (!login.ok) {
+    console.error(`  ❌ Login falhou [${login.status}] → ${JSON.stringify(login.data).slice(0,120)}`);
+    return null;
+  }
 
   const token = login.data.data?.accessToken;
 
