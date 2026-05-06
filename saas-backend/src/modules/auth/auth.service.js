@@ -43,8 +43,9 @@ const slugify = (name) =>
 /**
  * Registra um novo tenant e seu primeiro usuário (owner).
  * Tudo em uma única transaction.
+ * @param {boolean} [trial=false] — se true, coloca em trialing por 14 dias
  */
-const register = async ({ tenantName, name, email, password }) => {
+const register = async ({ tenantName, name, email, password, trial = false }) => {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
@@ -55,7 +56,15 @@ const register = async ({ tenantName, name, email, password }) => {
 
     // Cria tenant usando o model (inclui campos de assinatura)
     const slug   = slugify(tenantName);
-    const tenant = await Tenant.create({ name: tenantName.trim(), slug }, client);
+    const tenant = await Tenant.create(
+      {
+        name:                tenantName.trim(),
+        slug,
+        subscription_status: trial ? 'trialing' : 'active',
+        trial_ends_at:       trial ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null,
+      },
+      client
+    );
 
     // Inicializa contador de pedidos
     await client.query(
@@ -91,6 +100,7 @@ const register = async ({ tenantName, name, email, password }) => {
         slug:               tenant.slug,
         plan:               tenant.plan,
         subscriptionStatus: tenant.subscription_status,
+        trialEndsAt:        tenant.trial_ends_at ?? null,
       },
     };
   } catch (err) {
@@ -130,6 +140,7 @@ const login = async ({ email, password }) => {
       slug:               user.tenant_slug,
       plan:               user.tenant_plan,
       subscriptionStatus: user.tenant_subscription_status ?? 'active',
+      trialEndsAt:        user.tenant_trial_ends_at ?? null,
     },
   };
 };

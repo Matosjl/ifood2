@@ -20,15 +20,15 @@ class Tenant {
    * Em caso de conflito de slug, adiciona sufixo numerico aleatorio.
    * Deve ser chamado dentro de uma transaction.
    */
-  static async create({ name, slug, plan = 'basic' }, dbClient = db) {
+  static async create({ name, slug, plan = 'basic', subscription_status = 'active', trial_ends_at = null }, dbClient = db) {
     const { rows } = await dbClient.query(
       `INSERT INTO tenants
-         (name, slug, plan, subscription_status, billing_period_start)
-       VALUES ($1, $2, $3, 'active', date_trunc('month', NOW()))
+         (name, slug, plan, subscription_status, trial_ends_at, billing_period_start)
+       VALUES ($1, $2, $3, $4, $5, date_trunc('month', NOW()))
        ON CONFLICT (slug)
          DO UPDATE SET slug = $2 || '-' || floor(random()*9000+1000)::text
        RETURNING *`,
-      [name, slug, plan]
+      [name, slug, plan, subscription_status, trial_ends_at]
     );
     return rows[0];
   }

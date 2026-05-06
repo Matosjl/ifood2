@@ -21,7 +21,8 @@ class User {
               t.slug                AS tenant_slug,
               t.plan                AS tenant_plan,
               t.active              AS tenant_active,
-              t.subscription_status AS tenant_subscription_status
+              t.subscription_status AS tenant_subscription_status,
+              t.trial_ends_at       AS tenant_trial_ends_at
        FROM   users u
        JOIN   tenants t ON t.id = u.tenant_id
        WHERE  u.email = $1`,

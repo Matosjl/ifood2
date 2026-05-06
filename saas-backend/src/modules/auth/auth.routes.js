@@ -2,7 +2,7 @@ const { Router }                  = require('express');
 const { body }                    = require('express-validator');
 const rateLimit                   = require('express-rate-limit');
 const { authenticate }            = require('../../middleware/auth.middleware');
-const { register, login, refresh, logout, me, updateProfile } = require('./auth.controller');
+const { register, trialRegister, login, refresh, logout, me, updateProfile } = require('./auth.controller');
 const env                         = require('../../config/env');
 
 const router = Router();
@@ -33,13 +33,17 @@ const loginRules = [
 
 // ── Rotas ─────────────────────────────────────────────────────
 
-// /register não precisa de rate limit — já protegido pela ADMIN_KEY secreta
+// /register — protegido pela ADMIN_KEY (criação via painel admin)
 router.post('/register', (req, res, next) => {
   const key = req.headers['x-admin-key'];
   if (!key || key !== env.SUPER_ADMIN_KEY)
     return res.status(403).json({ success: false, message: 'Acesso negado. X-Admin-Key inválida.' });
   next();
 }, registerRules, register);
+
+// /trial-register — auto-cadastro público com trial de 14 dias
+router.post('/trial-register', authLimiter, registerRules, trialRegister);
+
 router.post('/login',    authLimiter, loginRules,    login);
 router.post('/refresh',  authLimiter, refresh);
 router.post('/logout',   authenticate, logout);
