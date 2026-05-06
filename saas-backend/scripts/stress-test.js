@@ -3,10 +3,10 @@
  * ── Stress Test — 5 Restaurantes Simultâneos ──────────────────
  *
  * Uso:
- *   node stress-test.js <BASE_URL> <ADMIN_KEY> [NUM_RESTAURANTS] [ORDERS_PER_RESTAURANT]
+ *   node stress-test.js <BASE_URL> <ADMIN_KEY> [NUM_RESTAURANTS] [ORDERS_PER_RESTAURANT] [CONCURRENCY]
  *
  * Exemplo:
- *   node stress-test.js http://153.75.246.234 minha-chave-admin 20 10
+ *   node stress-test.js http://153.75.246.234 minha-chave-admin 20 10 30
  *
  * O que o teste faz:
  *  1. Cria N restaurantes de teste via API de admin
@@ -24,6 +24,10 @@ const BASE_URL           = process.argv[2] || 'http://153.75.246.234';
 const ADMIN_KEY          = process.argv[3] || '';
 const NUM_RESTAURANTS    = parseInt(process.argv[4]) || 5;
 const ORDERS_PER_RESTAU  = parseInt(process.argv[5]) || 10;
+const CONCURRENCY        = parseInt(process.argv[6]) || 30;   // máx requisições simultâneas
+
+// ID único de run para evitar conflito de slug/email com runs anteriores
+const RUN_ID = Date.now().toString(36).toUpperCase();
 
 if (!ADMIN_KEY) {
   console.error('❌  Informe a ADMIN_KEY como segundo argumento.');
@@ -61,9 +65,9 @@ const cyan   = (s) => `\x1b[36m${s}\x1b[0m`;
 // ── Dados de teste ────────────────────────────────────────────
 
 const RESTAURANTS = Array.from({ length: NUM_RESTAURANTS }, (_, i) => ({
-  tenantName: `Teste Restaurante ${i + 1}`,
-  name:       `Owner ${i + 1}`,
-  email:      `teste.stress.${i + 1}.${Date.now()}@test.com`,
+  tenantName: `Stress ${RUN_ID} R${i + 1}`,
+  name:       `Owner ${RUN_ID} ${i + 1}`,
+  email:      `stress.${RUN_ID.toLowerCase()}.${i + 1}@test.com`,
   password:   'Stress@123',
 }));
 
@@ -84,6 +88,21 @@ const metrics = {
 function record(bucket, ok, ms) {
   if (ok) { metrics[bucket].ok++;   } else { metrics[bucket].fail++; }
   metrics[bucket].ms.push(ms);
+}
+
+// Executa tasks com no máximo `limit` simultâneos — evita explodir o banco
+async function pool(tasks, limit) {
+  const results = [];
+  let i = 0;
+  async function worker() {
+    while (i < tasks.length) {
+      const idx = i++;
+      results[idx] = await tasks[idx]();
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, worker);
+  await Promise.all(workers);
+  return results;
 }
 
 function avg(arr) { return arr.length ? Math.round(arr.reduce((a,b) => a+b,0)/arr.length) : 0; }
@@ -243,7 +262,7 @@ function report(restaurants) {
   console.log(`  ${bold('Taxa de sucesso: ')} ${parseFloat(successRate) >= 95 ? green(successRate + '%') : yellow(successRate + '%')}`);
 
   const verdict = parseFloat(successRate) >= 95
-    ? green('✅  SISTEMA APROVADO — aguenta 5 restaurantes simultâneos!')
+    ? green(`✅  SISTEMA APROVADO — aguenta ${NUM_RESTAURANTS} restaurantes simultâneos!`)
     : parseFloat(successRate) >= 80
     ? yellow('⚠️   SISTEMA ESTÁVEL mas com algumas falhas')
     : red('❌  SISTEMA COM PROBLEMAS sob carga simultânea');
@@ -259,13 +278,13 @@ async function main() {
   console.log(bold(cyan(`\n🚀  STRESS TEST — ${NUM_RESTAURANTS} Restaurantes Simultâneos`)));
   console.log(`    Servidor: ${yellow(BASE_URL)}`);
   console.log(`    Pedidos por restaurante: ${ORDERS_PER_RESTAU * 2} (${ORDERS_PER_RESTAU} painel + ${ORDERS_PER_RESTAU} app)`);
-  console.log(`    Total de pedidos: ${yellow(String(totalOrders))}\n`);
+  console.log(`    Total de pedidos: ${yellow(String(totalOrders))}  |  concorrência máx: ${yellow(String(CONCURRENCY))}\n`);
 
   // ── Fase 1: Setup dos 5 restaurantes em paralelo ─────────────
   console.log('⚙️   Fase 1: Criando restaurantes, produtos e abrindo caixas...');
   const setupStart = Date.now();
   const restaurants = await Promise.all(RESTAURANTS.map((r, i) => setupRestaurant(r, i)));
-  console.log(`    Concluído em ${Date.now() - setupStart}ms — ${restaurants.filter(Boolean).length}/5 restaurantes prontos\n`);
+  console.log(`    Concluído em ${Date.now() - setupStart}ms — ${restaurants.filter(Boolean).length}/${NUM_RESTAURANTS} restaurantes prontos\n`);
 
   const active = restaurants.filter(Boolean);
   if (!active.length) {
@@ -274,21 +293,23 @@ async function main() {
   }
 
   // ── Fase 2: Pedidos simultâneos ───────────────────────────────
-  console.log(`🔥  Fase 2: Disparando ${active.length * ORDERS_PER_RESTAU * 2} pedidos simultâneos...`);
+  const totalReqs = active.length * ORDERS_PER_RESTAU * 2;
+  console.log(`🔥  Fase 2: Disparando ${totalReqs} pedidos (concorrência máx: ${CONCURRENCY})...`);
   const ordersStart = Date.now();
 
   const allOrderTasks = [];
   let globalIdx = 0;
   for (const restaurant of active) {
     for (let i = 0; i < ORDERS_PER_RESTAU; i++) {
-      allOrderTasks.push(fireAuthOrder(restaurant, globalIdx));
-      allOrderTasks.push(firePublicOrder(restaurant, globalIdx));
+      const gIdx = globalIdx;
+      allOrderTasks.push(() => fireAuthOrder(restaurant, gIdx));
+      allOrderTasks.push(() => firePublicOrder(restaurant, gIdx));
       globalIdx++;
     }
   }
 
-  // Dispara TUDO de uma vez
-  await Promise.all(allOrderTasks);
+  // Dispara com pool controlado — máx CONCURRENCY simultâneos
+  await pool(allOrderTasks, CONCURRENCY);
   console.log(`    Concluído em ${Date.now() - ordersStart}ms\n`);
 
   // ── Fase 3: Limpeza ───────────────────────────────────────────

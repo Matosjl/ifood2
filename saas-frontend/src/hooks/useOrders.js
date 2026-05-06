@@ -116,16 +116,17 @@ export default function useOrders() {
 
   // ── Socket handlers ────────────────────────────────────────
 
-  // Socket snapshot: MERGE active orders, keep terminal ones already loaded
+  // Socket snapshot: MERGE active orders, preserve all REST-loaded orders
   const handleActiveOrders = useCallback((list) => {
     const active = list.map(norm);
     const activeIds = new Set(active.map((o) => o.id));
     setOrders((prev) => {
-      // Keep terminal orders (delivered/cancelled) not overwritten by socket
-      const terminal = prev.filter(
-        (o) => !activeIds.has(o.id) && ['delivered', 'cancelled'].includes(o.status)
-      );
-      return [...active, ...terminal];
+      // Se Redis veio vazio mas já temos pedidos carregados via REST, não apaga
+      if (active.length === 0 && prev.length > 0) return prev;
+      // Preserva TODOS os pedidos do prev que não estão na lista do socket
+      // (não apenas delivered/cancelled) para evitar perda ao recarregar
+      const preserved = prev.filter((o) => !activeIds.has(o.id));
+      return [...active, ...preserved];
     });
     setLoading(false);
   }, []);

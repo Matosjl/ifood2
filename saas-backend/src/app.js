@@ -16,6 +16,7 @@ const financeiroRoutes  = require('./modules/financeiro/financeiro.routes');
 const caixaRoutes       = require('./modules/caixa/caixa.routes');
 const usersRoutes       = require('./modules/users/users.routes');
 const adminRoutes    = require('./modules/admin/admin.routes');
+const bancoRoutes    = require('./modules/banco/banco.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -73,6 +74,7 @@ app.use('/api/financeiro', financeiroRoutes);
 app.use('/api/caixa',     caixaRoutes);
 app.use('/api/users',      usersRoutes);
 app.use('/api/admin',      adminRoutes);
+app.use('/api/banco',      bancoRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

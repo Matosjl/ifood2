@@ -212,3 +212,26 @@ CREATE TABLE IF NOT EXISTS cash_registers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cash_registers_tenant ON cash_registers(tenant_id, opened_at DESC);
+
+-- ── BANCO VIRTUAL (caixa financeiro) ──────────────────────────
+-- Controla saldo acumulado de entradas (fechamentos de caixa)
+-- e saídas (gastos pagos, retiradas manuais)
+CREATE TABLE IF NOT EXISTS banco_transactions (
+  id           UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id    UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  type         VARCHAR(10)   NOT NULL CHECK (type IN ('credit', 'debit')),
+  amount       DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+  description  VARCHAR(300),
+  source       VARCHAR(30)   NOT NULL DEFAULT 'manual',
+  -- source: 'caixa' | 'expense' | 'manual'
+  reference_id UUID,         -- caixa_id ou expense_id
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_banco_tenant ON banco_transactions(tenant_id, created_at DESC);
+
+-- Colunas extras no fechamento de caixa (contagem física)
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS cash_counted  DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS card_counted  DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS pix_counted   DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS discrepancy   DECIMAL(10,2);

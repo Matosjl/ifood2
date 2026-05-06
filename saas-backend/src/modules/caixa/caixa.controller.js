@@ -39,8 +39,23 @@ const openCaixa = asyncHandler(async (req, res) => {
 
 // ── POST /api/caixa/close ─────────────────────────────────────
 const closeCaixa = asyncHandler(async (req, res) => {
-  const { notes } = req.body;
-  const tenantId  = req.user.tenantId;
+  const {
+    notes,
+    cashCounted,  // valor contado em dinheiro (espécie)
+    cardCounted,  // valor contado em cartão (crédito + débito + vale)
+    pixCounted,   // valor contado em pix
+  } = req.body;
+
+  // Validação: pelo menos um valor deve ser informado
+  const allBlank = cashCounted === undefined && cardCounted === undefined && pixCounted === undefined;
+  if (allBlank) {
+    throw new AppError(
+      'Informe os valores contados em Dinheiro, Cartão e Pix antes de fechar o caixa.',
+      400
+    );
+  }
+
+  const tenantId = req.user.tenantId;
 
   // Find open caixa
   const { rows: caixas } = await db.query(
@@ -53,14 +68,14 @@ const closeCaixa = asyncHandler(async (req, res) => {
   // Summarize orders since caixa opened
   const { rows: summary } = await db.query(
     `SELECT
-       COUNT(*)::int                                    AS total_orders,
-       COALESCE(SUM(total), 0)::float                  AS total_revenue,
-       COALESCE(SUM(CASE WHEN payment_method='cash'     THEN total ELSE 0 END),0)::float AS cash,
-       COALESCE(SUM(CASE WHEN payment_method='pix'      THEN total ELSE 0 END),0)::float AS pix,
-       COALESCE(SUM(CASE WHEN payment_method='credit'   THEN total ELSE 0 END),0)::float AS credit,
-       COALESCE(SUM(CASE WHEN payment_method='debit'    THEN total ELSE 0 END),0)::float AS debit,
-       COALESCE(SUM(CASE WHEN payment_method='voucher'  THEN total ELSE 0 END),0)::float AS voucher,
-       COALESCE(SUM(CASE WHEN payment_method='other'    THEN total ELSE 0 END),0)::float AS other
+       COUNT(*)::int                                                              AS total_orders,
+       COALESCE(SUM(total), 0)::float                                            AS total_revenue,
+       COALESCE(SUM(CASE WHEN payment_method='cash'    THEN total ELSE 0 END),0)::float AS cash,
+       COALESCE(SUM(CASE WHEN payment_method='pix'     THEN total ELSE 0 END),0)::float AS pix,
+       COALESCE(SUM(CASE WHEN payment_method='credit'  THEN total ELSE 0 END),0)::float AS credit,
+       COALESCE(SUM(CASE WHEN payment_method='debit'   THEN total ELSE 0 END),0)::float AS debit,
+       COALESCE(SUM(CASE WHEN payment_method='voucher' THEN total ELSE 0 END),0)::float AS voucher,
+       COALESCE(SUM(CASE WHEN payment_method='other'   THEN total ELSE 0 END),0)::float AS other
      FROM orders
      WHERE tenant_id = $1
        AND status IN ('ready', 'delivered')
@@ -69,11 +84,30 @@ const closeCaixa = asyncHandler(async (req, res) => {
   );
 
   const s = summary[0];
+
+  // Sistema: cartão = crédito + débito + vale
+  const cardSystem = s.credit + s.debit + s.voucher;
+
+  // Valores contados pelo operador
+  const cashC  = parseFloat(cashCounted ?? 0);
+  const cardC  = parseFloat(cardCounted ?? 0);
+  const pixC   = parseFloat(pixCounted  ?? 0);
+  const totalCounted = cashC + cardC + pixC;
+
+  // Diferença: positivo = sobra, negativo = falta
+  const discrepancy = parseFloat((totalCounted - s.total_revenue).toFixed(2));
+
   const paymentSummary = {
     cash: s.cash, pix: s.pix, credit: s.credit,
     debit: s.debit, voucher: s.voucher, other: s.other,
+    // Valores contados pelo operador
+    cash_counted: cashC,
+    card_counted: cardC,
+    pix_counted:  pixC,
+    card_system:  cardSystem,
   };
-  const closingBalance = parseFloat(caixa.opening_balance) + s.cash;
+
+  const closingBalance = parseFloat(caixa.opening_balance) + cashC;
 
   const { rows } = await db.query(
     `UPDATE cash_registers
@@ -84,12 +118,33 @@ const closeCaixa = asyncHandler(async (req, res) => {
          total_orders    = $4,
          payment_summary = $5,
          closing_balance = $6,
-         notes           = COALESCE($7, notes)
+         notes           = COALESCE($7, notes),
+         cash_counted    = $8,
+         card_counted    = $9,
+         pix_counted     = $10,
+         discrepancy     = $11
      WHERE id = $1
      RETURNING *`,
     [caixa.id, req.user.id, s.total_revenue, s.total_orders,
-     JSON.stringify(paymentSummary), closingBalance, notes ?? null]
+     JSON.stringify(paymentSummary), closingBalance, notes ?? null,
+     cashC, cardC, pixC, discrepancy]
   );
+
+  // ── Registra no Banco virtual ─────────────────────────────────
+  // Entrada = total de receita do dia (o que o sistema registrou)
+  if (s.total_revenue > 0) {
+    await db.query(
+      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
+       VALUES ($1, 'credit', $2, $3, 'caixa', $4)`,
+      [
+        tenantId,
+        s.total_revenue,
+        `Fechamento de caixa — ${s.total_orders} pedido(s)`,
+        caixa.id,
+      ]
+    ).catch(() => {}); // non-blocking
+  }
+
   res.json({ success: true, data: rows[0] });
 });
 

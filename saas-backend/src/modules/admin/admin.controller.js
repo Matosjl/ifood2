@@ -87,4 +87,38 @@ const deactivateTenant = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Tenant desativado.' });
 });
 
-module.exports = { listTenants, createTenant, updateTenant, deactivateTenant };
+// DELETE /api/admin/tenants/:id/destroy — hard delete (permanente)
+const destroyTenant = asyncHandler(async (req, res) => {
+  const { rows: [tenant] } = await db.query(
+    'SELECT id, name FROM tenants WHERE id = $1',
+    [req.params.id]
+  );
+  if (!tenant) throw new AppError('Tenant não encontrado.', 404);
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    // Deleta na ordem correta (filhos antes dos pais)
+    await client.query(`DELETE FROM stock_movements   WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM order_items       WHERE order_id IN (SELECT id FROM orders WHERE tenant_id = $1)`, [req.params.id]);
+    await client.query(`DELETE FROM orders            WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM products          WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM categories        WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM cash_registers    WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM banco_transactions WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM expenses          WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM refresh_tokens    WHERE user_id IN (SELECT id FROM users WHERE tenant_id = $1)`, [req.params.id]);
+    await client.query(`DELETE FROM users             WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM order_counters    WHERE tenant_id = $1`, [req.params.id]);
+    await client.query(`DELETE FROM tenants           WHERE id = $1`, [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ success: true, message: `Restaurante "${tenant.name}" excluído permanentemente.` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+module.exports = { listTenants, createTenant, updateTenant, deactivateTenant, destroyTenant };
