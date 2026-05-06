@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getProducts, createOrder, searchCustomers } from '../api/orders';
+import { getCurrentCaixa } from '../api/caixa';
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
@@ -131,6 +132,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [submitting,  setSubmitting]  = useState(false);
   const [error,       setError]       = useState(null);
 
+  // ── Caixa check ──────────────────────────────────────────────
+  const [caixaOpen,   setCaixaOpen]   = useState(null); // null=checking, true=open, false=closed
+
   // Customer
   const [name,        setName]        = useState('');
   const [phone,       setPhone]       = useState('');
@@ -147,12 +151,16 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [changeFor,     setChangeFor]     = useState('');
   const [notes,         setNotes]         = useState('');
 
-  // ── Load products ────────────────────────────────────────────
+  // ── Load products + check caixa ─────────────────────────────
   useEffect(() => {
     getProducts({ active: true, limit: 200 })
       .then(({ data }) => setProducts(data.data ?? []))
       .catch(() => setError('Erro ao carregar produtos.'))
       .finally(() => setLoading(false));
+
+    getCurrentCaixa()
+      .then(({ data }) => setCaixaOpen(!!data.data))
+      .catch(() => setCaixaOpen(true)); // fail-open: don't block if API is down
   }, []);
 
   // ESC to close
@@ -267,7 +275,24 @@ export default function NewOrderModal({ onClose, onCreated }) {
           </button>
         </div>
 
-        <div className="flex flex-1 min-h-0 divide-x divide-white/10">
+        {/* Caixa fechado — blocker */}
+        {caixaOpen === false && (
+          <div className="flex flex-col items-center justify-center gap-4 py-16 px-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
+              <span className="text-4xl">🔒</span>
+            </div>
+            <div>
+              <p className="text-lg font-black text-white mb-1">Caixa Fechado</p>
+              <p className="text-sm text-gray-400">
+                Não é possível lançar pedidos com o caixa fechado.<br />
+                Vá em <span className="text-orange-400 font-semibold">Financeiro → Caixa</span> e abra o caixa primeiro.
+              </p>
+            </div>
+            <button onClick={onClose} className="btn-primary px-8">Entendido</button>
+          </div>
+        )}
+
+        {caixaOpen !== false && <div className="flex flex-1 min-h-0 divide-x divide-white/10">
 
           {/* ── LEFT — Catalog ─────────────────────────────── */}
           <div className="flex flex-col w-1/2 min-h-0">
@@ -499,7 +524,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

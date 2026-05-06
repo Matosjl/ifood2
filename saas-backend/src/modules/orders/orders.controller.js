@@ -5,6 +5,7 @@ const { enqueueAndWait }   = require('../../queues/order.queue');
 const Order                = require('../../models/Order');
 const asyncHandler         = require('../../utils/asyncHandler');
 const AppError             = require('../../utils/AppError');
+const db                   = require('../../config/database');
 
 const handleValidation = (req) => {
   const errors = validationResult(req);
@@ -55,6 +56,16 @@ const transitions = asyncHandler(async (req, res) => {
  */
 const create = asyncHandler(async (req, res) => {
   handleValidation(req);
+
+  // ── Caixa obrigatório ────────────────────────────────────────
+  const { rows: caixaRows } = await db.query(
+    `SELECT id FROM cash_registers WHERE tenant_id = $1 AND status = 'open' LIMIT 1`,
+    [req.user.tenantId]
+  );
+  if (!caixaRows[0]) {
+    throw new AppError('Caixa fechado. Abra o caixa na aba Financeiro antes de lançar pedidos.', 409);
+  }
+
   const idempotencyKey = req.headers['x-idempotency-key'] || uuidv4();
   const order = await enqueueAndWait(
     'create',
