@@ -3,16 +3,16 @@
  * ── Stress Test — 5 Restaurantes Simultâneos ──────────────────
  *
  * Uso:
- *   node stress-test.js <BASE_URL> <ADMIN_KEY>
+ *   node stress-test.js <BASE_URL> <ADMIN_KEY> [NUM_RESTAURANTS] [ORDERS_PER_RESTAURANT]
  *
  * Exemplo:
- *   node stress-test.js http://153.75.246.234 minha-chave-admin
+ *   node stress-test.js http://153.75.246.234 minha-chave-admin 20 10
  *
  * O que o teste faz:
- *  1. Cria 5 restaurantes de teste via API de admin
+ *  1. Cria N restaurantes de teste via API de admin
  *  2. Loga em cada um e cria produtos
  *  3. Abre o caixa de cada restaurante
- *  4. Dispara 20 pedidos simultâneos por restaurante (100 total)
+ *  4. Dispara pedidos simultâneos por restaurante
  *     - 50% via painel (autenticado)
  *     - 50% via app de cardápio (público)
  *  5. Mede tempo de resposta e taxa de sucesso
@@ -20,12 +20,14 @@
  *  7. Limpa os dados de teste
  */
 
-const BASE_URL  = process.argv[2] || 'http://153.75.246.234';
-const ADMIN_KEY = process.argv[3] || '';
+const BASE_URL           = process.argv[2] || 'http://153.75.246.234';
+const ADMIN_KEY          = process.argv[3] || '';
+const NUM_RESTAURANTS    = parseInt(process.argv[4]) || 5;
+const ORDERS_PER_RESTAU  = parseInt(process.argv[5]) || 10;
 
 if (!ADMIN_KEY) {
   console.error('❌  Informe a ADMIN_KEY como segundo argumento.');
-  console.error('    node stress-test.js http://IP_DO_VPS SUA_ADMIN_KEY');
+  console.error('    node stress-test.js http://IP_DO_VPS SUA_ADMIN_KEY [num_restaurantes] [pedidos_por_restaurante]');
   process.exit(1);
 }
 
@@ -58,7 +60,7 @@ const cyan   = (s) => `\x1b[36m${s}\x1b[0m`;
 
 // ── Dados de teste ────────────────────────────────────────────
 
-const RESTAURANTS = Array.from({ length: 5 }, (_, i) => ({
+const RESTAURANTS = Array.from({ length: NUM_RESTAURANTS }, (_, i) => ({
   tenantName: `Teste Restaurante ${i + 1}`,
   name:       `Owner ${i + 1}`,
   email:      `teste.stress.${i + 1}.${Date.now()}@test.com`,
@@ -227,9 +229,11 @@ function report(restaurants) {
 // ── Main ──────────────────────────────────────────────────────
 
 async function main() {
-  console.log(bold(cyan('\n🚀  STRESS TEST — 5 Restaurantes Simultâneos')));
+  const totalOrders = NUM_RESTAURANTS * ORDERS_PER_RESTAU * 2;
+  console.log(bold(cyan(`\n🚀  STRESS TEST — ${NUM_RESTAURANTS} Restaurantes Simultâneos`)));
   console.log(`    Servidor: ${yellow(BASE_URL)}`);
-  console.log(`    Pedidos por restaurante: 20 (10 painel + 10 app)\n`);
+  console.log(`    Pedidos por restaurante: ${ORDERS_PER_RESTAU * 2} (${ORDERS_PER_RESTAU} painel + ${ORDERS_PER_RESTAU} app)`);
+  console.log(`    Total de pedidos: ${yellow(String(totalOrders))}\n`);
 
   // ── Fase 1: Setup dos 5 restaurantes em paralelo ─────────────
   console.log('⚙️   Fase 1: Criando restaurantes, produtos e abrindo caixas...');
@@ -244,12 +248,12 @@ async function main() {
   }
 
   // ── Fase 2: Pedidos simultâneos ───────────────────────────────
-  console.log('🔥  Fase 2: Disparando 100 pedidos simultâneos...');
+  console.log(`🔥  Fase 2: Disparando ${active.length * ORDERS_PER_RESTAU * 2} pedidos simultâneos...`);
   const ordersStart = Date.now();
 
   const allOrderTasks = [];
   for (const restaurant of active) {
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < ORDERS_PER_RESTAU; i++) {
       allOrderTasks.push(fireAuthOrder(restaurant, i));
       allOrderTasks.push(firePublicOrder(restaurant, i));
     }
