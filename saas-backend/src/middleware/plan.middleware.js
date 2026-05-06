@@ -41,6 +41,22 @@ const checkOrderLimit = asyncHandler(async (req, res, next) => {
   if (!tenant.active) {
     throw new AppError('Conta inativa. Contate o suporte.', 403);
   }
+
+  // ── Trial expiry check ────────────────────────────────────────
+  if (tenant.subscription_status === 'trialing' && tenant.trial_ends_at) {
+    if (new Date(tenant.trial_ends_at) < new Date()) {
+      // Auto-suspend expired trial
+      await require('../config/database').query(
+        `UPDATE tenants SET subscription_status = 'suspended', updated_at = NOW() WHERE id = $1`,
+        [tenant.id]
+      );
+      throw new AppError(
+        'Seu período de teste de 14 dias encerrou. Assine um plano para continuar.',
+        402
+      );
+    }
+  }
+
   if (tenant.subscription_status === 'suspended') {
     throw new AppError(
       'Assinatura suspensa. Regularize o pagamento para continuar criando pedidos.',

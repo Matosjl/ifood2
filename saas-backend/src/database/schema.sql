@@ -235,3 +235,11 @@ ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS cash_counted  DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS card_counted  DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS pix_counted   DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS discrepancy   DECIMAL(10,2);
+
+-- Trial de 14 dias no tenant
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+-- Preenche trial para tenants existentes que ainda estão ativos (retroativo)
+UPDATE tenants
+SET trial_ends_at = created_at + INTERVAL '14 days'
+WHERE trial_ends_at IS NULL
+  AND subscription_status IN ('active', 'trialing');

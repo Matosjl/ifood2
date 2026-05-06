@@ -31,6 +31,17 @@ const register = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/auth/trial-register
+ * Auto-cadastro público — coloca tenant em trialing por 14 dias.
+ */
+const trialRegister = asyncHandler(async (req, res) => {
+  handleValidation(req);
+  const { tenantName, name, email, password } = req.body;
+  const result = await authService.register({ tenantName, name, email, password, trial: true });
+  res.status(201).json({ success: true, data: result });
+});
+
+/**
  * POST /api/auth/login
  */
 const login = asyncHandler(async (req, res) => {
@@ -118,4 +129,4 @@ const updateProfile = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { register, login, refresh, logout, me, updateProfile };
+module.exports = { register, trialRegister, login, refresh, logout, me, updateProfile };

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { login } from '../api/orders';
 import { unlockAudio } from '../utils/sound';
 
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ onLogin, onGoRegister, onGoLanding }) {
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState(null);
@@ -15,8 +15,9 @@ export default function LoginPage({ onLogin }) {
     unlockAudio(); // unlock Web Audio on first user gesture
     try {
       const { data } = await login(email, password);
-      localStorage.setItem('token', data.data.accessToken);
-      localStorage.setItem('user',  JSON.stringify(data.data.user));
+      localStorage.setItem('token',  data.data.accessToken);
+      localStorage.setItem('user',   JSON.stringify(data.data.user));
+      localStorage.setItem('tenant', JSON.stringify(data.data.tenant));
       onLogin(data.data.accessToken);
     } catch (err) {
       setError(err.response?.data?.message ?? 'Credenciais inválidas.');
@@ -29,9 +30,16 @@ export default function LoginPage({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">🍽</div>
-          <h1 className="text-2xl font-black text-white">Painel da Cozinha</h1>
-          <p className="text-gray-500 text-sm mt-1">Sistema de gestão de pedidos</p>
+          {onGoLanding && (
+            <button onClick={onGoLanding} className="inline-flex items-center gap-2 mb-4 text-gray-500 hover:text-white transition-colors text-sm">
+              ← Voltar ao início
+            </button>
+          )}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <span className="text-4xl">⚡</span>
+            <span className="text-2xl font-black text-white">ZapFome</span>
+          </div>
+          <p className="text-gray-500 text-sm mt-1">Acesse seu painel</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-900 rounded-2xl p-6 border border-white/10 shadow-2xl space-y-4">
@@ -66,6 +74,15 @@ export default function LoginPage({ onLogin }) {
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
+
+          {onGoRegister && (
+            <p className="text-center text-sm text-gray-500 pt-2">
+              Não tem conta?{' '}
+              <button type="button" onClick={onGoRegister} className="text-orange-400 hover:text-orange-300 font-semibold">
+                Teste grátis 14 dias
+              </button>
+            </p>
+          )}
         </form>
       </div>
     </div>
