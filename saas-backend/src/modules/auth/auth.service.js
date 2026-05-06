@@ -64,7 +64,7 @@ const register = async ({ tenantName, name, email, password }) => {
     );
 
     // Cria usuário owner
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create(
       { tenantId: tenant.id, name, email, passwordHash, role: 'owner' },
       client

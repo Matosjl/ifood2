@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { listTenants, createTenant, updateTenant, deactivateTenant } from './api/admin';
+import { listTenants, createTenant, updateTenant, deactivateTenant, destroyTenant } from './api/admin';
 
 const PLANS = ['basic', 'pro', 'premium'];
 const PLAN_COLORS = { basic: 'text-gray-400', pro: 'text-blue-400', premium: 'text-yellow-400' };
@@ -149,6 +149,22 @@ export default function AdminApp() {
     setTenants(ts => ts.map(t => t.id === tenant.id ? { ...t, subscription_status: newStatus, active: newStatus === 'active' } : t));
   };
 
+  const handleDestroy = async (tenant) => {
+    const confirmed = confirm(
+      `⚠️ ATENÇÃO: Isso irá APAGAR PERMANENTEMENTE o restaurante "${tenant.name}" e todos os seus dados (pedidos, produtos, usuários, etc.).\n\nEssa ação NÃO pode ser desfeita!\n\nDigite o nome do restaurante para confirmar:`
+    );
+    if (!confirmed) return;
+    const name = prompt(`Digite exatamente: ${tenant.name}`);
+    if (name !== tenant.name) { alert('Nome incorreto. Operação cancelada.'); return; }
+    try {
+      await destroyTenant(adminKey, tenant.id);
+      setTenants(ts => ts.filter(t => t.id !== tenant.id));
+      alert('Restaurante excluído permanentemente.');
+    } catch (e) {
+      alert(e.response?.data?.message ?? 'Erro ao excluir restaurante.');
+    }
+  };
+
   if (!authed) return <AdminLogin onLogin={handleLogin} />;
 
   const filtered = tenants.filter(t =>
@@ -272,16 +288,25 @@ export default function AdminApp() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleToggleActive(t)}
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors ${
-                          t.subscription_status === 'active'
-                            ? 'text-red-400 hover:bg-red-400/10'
-                            : 'text-green-400 hover:bg-green-400/10'
-                        }`}
-                      >
-                        {t.subscription_status === 'active' ? 'Suspender' : 'Ativar'}
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleToggleActive(t)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors ${
+                            t.subscription_status === 'active'
+                              ? 'text-yellow-400 hover:bg-yellow-400/10'
+                              : 'text-green-400 hover:bg-green-400/10'
+                          }`}
+                        >
+                          {t.subscription_status === 'active' ? 'Suspender' : 'Ativar'}
+                        </button>
+                        <button
+                          onClick={() => handleDestroy(t)}
+                          title="Excluir permanentemente"
+                          className="text-xs font-semibold px-2 py-1 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

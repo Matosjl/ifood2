@@ -7,9 +7,9 @@ const pool = new Pool({
   database: env.DB_NAME,
   user:     env.DB_USER,
   password: env.DB_PASSWORD,
-  max: 20,                      // máximo de conexões no pool
+  max: 50,                      // máximo de conexões no pool (suporta 50 tenants simultâneos)
   idleTimeoutMillis:  30_000,   // fecha conexão ociosa após 30s
-  connectionTimeoutMillis: 3_000,
+  connectionTimeoutMillis: 10_000, // aguarda até 10s por conexão disponível
 });
 
 pool.on('error', (err) => {

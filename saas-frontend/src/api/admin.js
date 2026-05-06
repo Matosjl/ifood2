@@ -13,3 +13,4 @@ export const listTenants      = (key)           => adminApi(key).get('/tenants')
 export const createTenant     = (key, data)     => adminApi(key).post('/tenants', data);
 export const updateTenant     = (key, id, data) => adminApi(key).patch(`/tenants/${id}`, data);
 export const deactivateTenant = (key, id)       => adminApi(key).delete(`/tenants/${id}`);
+export const destroyTenant    = (key, id)       => adminApi(key).delete(`/tenants/${id}/destroy`);

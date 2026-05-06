@@ -4,6 +4,7 @@ import {
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
 import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory } from '../api/caixa';
+import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBancoTransaction } from '../api/banco';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -900,16 +901,20 @@ const PM_LABELS = {
 };
 
 function TabCaixa() {
-  const [caixa,    setCaixa]    = useState(undefined); // undefined=loading, null=none, obj=open
-  const [history,  setHistory]  = useState([]);
-  const [detail,   setDetail]   = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [err,      setErr]      = useState('');
-  const [openVal,  setOpenVal]  = useState('');
-  const [openNote, setOpenNote] = useState('');
-  const [closeNote,setCloseNote]= useState('');
-  const [confirm,  setConfirm]  = useState(false); // close confirm
+  const [caixa,       setCaixa]       = useState(undefined);
+  const [history,     setHistory]     = useState([]);
+  const [detail,      setDetail]      = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState('');
+  const [openVal,     setOpenVal]     = useState('');
+  const [openNote,    setOpenNote]    = useState('');
+  const [closeNote,   setCloseNote]   = useState('');
+  const [confirm,     setConfirm]     = useState(false);
+  // Contagem física no fechamento
+  const [cashCounted, setCashCounted] = useState('');
+  const [cardCounted, setCardCounted] = useState('');
+  const [pixCounted,  setPixCounted]  = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -937,10 +942,21 @@ function TabCaixa() {
   };
 
   const handleClose = async () => {
+    // Validação: pelo menos um valor contado deve ser informado
+    if (cashCounted === '' && cardCounted === '' && pixCounted === '') {
+      setErr('Informe os valores contados em Dinheiro, Cartão e/ou Pix antes de fechar.');
+      return;
+    }
     setSaving(true); setErr('');
     try {
-      await closeCaixa({ notes: closeNote || undefined });
-      setCloseNote(''); setConfirm(false);
+      await closeCaixa({
+        notes:       closeNote   || undefined,
+        cashCounted: cashCounted !== '' ? parseFloat(cashCounted) : 0,
+        cardCounted: cardCounted !== '' ? parseFloat(cardCounted) : 0,
+        pixCounted:  pixCounted  !== '' ? parseFloat(pixCounted)  : 0,
+      });
+      setCloseNote(''); setCashCounted(''); setCardCounted(''); setPixCounted('');
+      setConfirm(false);
       await load();
     } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao fechar caixa.'); }
     finally { setSaving(false); }
@@ -1029,22 +1045,65 @@ function TabCaixa() {
               🔒 Fechar Caixa
             </button>
           ) : (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 space-y-3">
-              <p className="text-sm font-bold text-red-400">⚠️ Confirmar fechamento do caixa?</p>
-              <p className="text-xs text-gray-400">O sistema irá gerar um resumo completo de todas as vendas realizadas desde a abertura.</p>
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 space-y-4">
+              <div>
+                <p className="text-sm font-bold text-red-400 mb-1">🔒 Fechamento de Caixa</p>
+                <p className="text-xs text-gray-400">Informe os valores que você contou fisicamente. O sistema compara com as vendas registradas.</p>
+              </div>
+
+              {/* Contagem física */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-green-400 mb-1">💵 Dinheiro</label>
+                  <input type="number" step="0.01" min="0" placeholder="R$ 0,00"
+                    value={cashCounted} onChange={(e) => setCashCounted(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-2 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-blue-400 mb-1">💳 Cartão</label>
+                  <input type="number" step="0.01" min="0" placeholder="R$ 0,00"
+                    value={cardCounted} onChange={(e) => setCardCounted(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-2 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-purple-400 mb-1">🔵 Pix</label>
+                  <input type="number" step="0.01" min="0" placeholder="R$ 0,00"
+                    value={pixCounted} onChange={(e) => setPixCounted(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-2 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+
+              {/* Totais contados vs sistema */}
+              {(cashCounted !== '' || cardCounted !== '' || pixCounted !== '') && (() => {
+                const counted = (parseFloat(cashCounted)||0) + (parseFloat(cardCounted)||0) + (parseFloat(pixCounted)||0);
+                const diff = counted; // diff final calculado no backend
+                return (
+                  <div className="bg-gray-900/60 rounded-xl p-3 text-xs space-y-1">
+                    <div className="flex justify-between text-gray-400">
+                      <span>Total contado:</span>
+                      <span className="text-white font-bold">{fmtBRL(counted)}</span>
+                    </div>
+                    <p className="text-gray-500 italic">A diferença será calculada ao fechar e salva no relatório.</p>
+                  </div>
+                );
+              })()}
+
               <input
-                type="text" placeholder="Observação do fechamento (opcional)"
+                type="text" placeholder="Observação (opcional)"
                 value={closeNote} onChange={(e) => setCloseNote(e.target.value)}
                 className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
               />
               <div className="flex gap-2">
-                <button onClick={() => setConfirm(false)}
+                <button onClick={() => { setConfirm(false); setCashCounted(''); setCardCounted(''); setPixCounted(''); }}
                   className="flex-1 py-2.5 rounded-xl border border-white/10 text-gray-300 text-sm hover:bg-white/5 transition-colors">
                   Cancelar
                 </button>
                 <button onClick={handleClose} disabled={saving}
                   className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm transition-colors disabled:opacity-50">
-                  {saving ? 'Fechando…' : 'Confirmar Fechamento'}
+                  {saving ? 'Fechando…' : '🔒 Confirmar Fechamento'}
                 </button>
               </div>
             </div>
@@ -1112,6 +1171,152 @@ function TabCaixa() {
   );
 }
 
+// ── Tab Banco ─────────────────────────────────────────────────
+
+function TabBanco() {
+  const [balance,  setBalance]  = useState(null);
+  const [txs,      setTxs]      = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [type,     setType]     = useState('credit');
+  const [amount,   setAmount]   = useState('');
+  const [desc,     setDesc]     = useState('');
+  const [saving,   setSaving]   = useState(false);
+  const [err,      setErr]      = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [balRes, txRes] = await Promise.all([
+        getBancoBalance(),
+        getBancoTransactions({ limit: 50 }),
+      ]);
+      setBalance(balRes.data.data);
+      setTxs(txRes.data.data ?? []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!amount || parseFloat(amount) <= 0) { setErr('Informe um valor maior que zero.'); return; }
+    if (!desc.trim()) { setErr('Informe uma descrição.'); return; }
+    setSaving(true); setErr('');
+    try {
+      await addBancoTransaction({ type, amount: parseFloat(amount), description: desc.trim() });
+      setAmount(''); setDesc(''); setShowForm(false);
+      await load();
+    } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao lançar.'); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remover este lançamento manual?')) return;
+    try { await deleteBancoTransaction(id); setTxs(t => t.filter(x => x.id !== id)); }
+    catch { alert('Não foi possível remover.'); }
+  };
+
+  const fmtDt = (s) => {
+    if (!s) return '—';
+    const d = new Date(s);
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-48">
+      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  const bal = parseFloat(balance?.balance ?? 0);
+
+  return (
+    <div className="flex flex-col h-full overflow-auto p-5 space-y-5">
+
+      {/* Saldo */}
+      <div className={`rounded-2xl border p-5 ${bal >= 0 ? 'bg-green-500/10 border-green-500/25' : 'bg-red-500/10 border-red-500/25'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Saldo em Banco</p>
+            <p className={`text-3xl font-black ${bal >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtBRL(bal)}</p>
+            <div className="flex gap-4 mt-2">
+              <p className="text-xs text-gray-400">↑ Entradas: <span className="text-green-400 font-bold">{fmtBRL(balance?.total_in)}</span></p>
+              <p className="text-xs text-gray-400">↓ Saídas: <span className="text-red-400 font-bold">{fmtBRL(balance?.total_out)}</span></p>
+            </div>
+          </div>
+          <span className="text-4xl">🏦</span>
+        </div>
+      </div>
+
+      {/* Botão lançamento manual */}
+      <button onClick={() => setShowForm(v => !v)}
+        className="w-full py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-gray-300 hover:bg-white/5 transition-colors">
+        {showForm ? '✕ Cancelar' : '+ Lançamento Manual'}
+      </button>
+
+      {/* Form lançamento */}
+      {showForm && (
+        <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl p-4 space-y-3">
+          <div className="flex gap-2">
+            <button onClick={() => setType('credit')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${type === 'credit' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              ↑ Entrada
+            </button>
+            <button onClick={() => setType('debit')}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${type === 'debit' ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              ↓ Saída
+            </button>
+          </div>
+          <input type="number" step="0.01" min="0" placeholder="Valor R$"
+            value={amount} onChange={e => setAmount(e.target.value)}
+            className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <input type="text" placeholder="Descrição *"
+            value={desc} onChange={e => setDesc(e.target.value)}
+            className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {err && <p className="text-xs text-red-400">{err}</p>}
+          <button onClick={handleAdd} disabled={saving}
+            className={`w-full py-2.5 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-50 ${type === 'credit' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'}`}>
+            {saving ? 'Lançando…' : `${type === 'credit' ? '↑ Confirmar Entrada' : '↓ Confirmar Saída'}`}
+          </button>
+        </div>
+      )}
+
+      {/* Extrato */}
+      <div>
+        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Extrato</h3>
+        {txs.length === 0 ? (
+          <p className="text-gray-600 text-sm text-center py-8 italic">Nenhum lançamento ainda.<br/>Feche um caixa para ver a entrada automática.</p>
+        ) : (
+          <div className="space-y-2">
+            {txs.map(tx => (
+              <div key={tx.id} className="flex items-center gap-3 bg-gray-900/40 border border-white/[0.05] rounded-xl px-4 py-3">
+                <span className={`text-lg ${tx.type === 'credit' ? 'text-green-400' : 'text-red-400'}`}>
+                  {tx.type === 'credit' ? '↑' : '↓'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white font-semibold truncate">{tx.description}</p>
+                  <p className="text-xs text-gray-500">{fmtDt(tx.created_at)} · {tx.source === 'caixa' ? '🧾 Caixa' : tx.source === 'expense' ? '💸 Gasto' : '✏️ Manual'}</p>
+                </div>
+                <p className={`text-sm font-black tabular-nums ${tx.type === 'credit' ? 'text-green-400' : 'text-red-400'}`}>
+                  {tx.type === 'credit' ? '+' : '-'}{fmtBRL(tx.amount)}
+                </p>
+                {tx.source === 'manual' && (
+                  <button onClick={() => handleDelete(tx.id)} className="text-gray-600 hover:text-red-400 transition-colors ml-1">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
 const TABS = [
@@ -1119,6 +1324,7 @@ const TABS = [
   { id: 'receitas',  label: '📈 Receitas'  },
   { id: 'gastos',    label: '💸 Gastos'    },
   { id: 'resultado', label: '📊 Resultado' },
+  { id: 'banco',     label: '🏦 Banco'     },
 ];
 
 export default function FinanceiroPage() {
@@ -1154,6 +1360,7 @@ export default function FinanceiroPage() {
         {tab === 'receitas'  && <TabReceitas />}
         {tab === 'gastos'    && <TabGastos />}
         {tab === 'resultado' && <TabResultado />}
+        {tab === 'banco'     && <TabBanco />}
       </div>
     </div>
   );
