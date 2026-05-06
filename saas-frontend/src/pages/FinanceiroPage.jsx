@@ -3,6 +3,7 @@ import {
   getSummary, getExpenses, createExpense, updateExpense,
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
+import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory } from '../api/caixa';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -891,16 +892,237 @@ function TabResultado() {
   );
 }
 
+// ── Tab: Caixa ────────────────────────────────────────────────
+
+const PM_LABELS = {
+  cash: '💵 Dinheiro', pix: '📱 Pix', credit: '💳 Crédito',
+  debit: '💳 Débito', voucher: '🎫 Vale Ref.', other: '🔖 Outro',
+};
+
+function TabCaixa() {
+  const [caixa,    setCaixa]    = useState(undefined); // undefined=loading, null=none, obj=open
+  const [history,  setHistory]  = useState([]);
+  const [detail,   setDetail]   = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(false);
+  const [err,      setErr]      = useState('');
+  const [openVal,  setOpenVal]  = useState('');
+  const [openNote, setOpenNote] = useState('');
+  const [closeNote,setCloseNote]= useState('');
+  const [confirm,  setConfirm]  = useState(false); // close confirm
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [currRes, histRes] = await Promise.all([
+        getCurrentCaixa(),
+        getCaixaHistory({ limit: 20 }),
+      ]);
+      setCaixa(currRes.data.data);
+      setHistory(histRes.data.data ?? []);
+    } catch { setCaixa(null); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleOpen = async () => {
+    setSaving(true); setErr('');
+    try {
+      await openCaixa({ openingBalance: parseFloat(openVal) || 0, notes: openNote || undefined });
+      setOpenVal(''); setOpenNote('');
+      await load();
+    } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao abrir caixa.'); }
+    finally { setSaving(false); }
+  };
+
+  const handleClose = async () => {
+    setSaving(true); setErr('');
+    try {
+      await closeCaixa({ notes: closeNote || undefined });
+      setCloseNote(''); setConfirm(false);
+      await load();
+    } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao fechar caixa.'); }
+    finally { setSaving(false); }
+  };
+
+  const fmtDt = (s) => {
+    if (!s) return '—';
+    const d = new Date(s);
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-48">
+      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full overflow-auto p-5 space-y-5">
+
+      {err && <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">{err}</p>}
+
+      {/* ── CAIXA FECHADO → abrir ───────────────────────────── */}
+      {!caixa && (
+        <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-3">
+            <span className="text-2xl">🔐</span>
+            <div>
+              <p className="font-bold text-white">Caixa Fechado</p>
+              <p className="text-xs text-gray-500">Abra o caixa para iniciar as vendas do dia</p>
+            </div>
+          </div>
+          <div className="px-5 py-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Valor em caixa (dinheiro em espécie)</label>
+              <input
+                type="number" step="0.01" min="0" placeholder="R$ 0,00"
+                value={openVal} onChange={(e) => setOpenVal(e.target.value)}
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Observação (opcional)</label>
+              <input
+                type="text" placeholder="Ex: Troco separado para delivery"
+                value={openNote} onChange={(e) => setOpenNote(e.target.value)}
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <button
+              onClick={handleOpen} disabled={saving}
+              className="w-full py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-sm transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Abrindo…' : '🟢 Abrir Caixa'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── CAIXA ABERTO ─────────────────────────────────────── */}
+      {caixa && (
+        <div className="space-y-4">
+          {/* Status card */}
+          <div className="bg-green-500/10 border border-green-500/25 rounded-2xl p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-sm font-bold text-green-400 uppercase tracking-wide">Caixa Aberto</span>
+                </div>
+                <p className="text-2xl font-black text-white">{fmtBRL(caixa.opening_balance)}</p>
+                <p className="text-xs text-gray-400 mt-1">Aberto em {fmtDt(caixa.opened_at)}</p>
+                {caixa.opened_by_name && <p className="text-xs text-gray-500">por {caixa.opened_by_name}</p>}
+                {caixa.notes && <p className="text-xs text-gray-500 italic mt-1">"{caixa.notes}"</p>}
+              </div>
+              <span className="text-4xl">💰</span>
+            </div>
+          </div>
+
+          {/* Close caixa */}
+          {!confirm ? (
+            <button
+              onClick={() => setConfirm(true)}
+              className="w-full py-3 rounded-xl border-2 border-red-500/40 text-red-400 font-bold text-sm hover:bg-red-500/10 transition-colors"
+            >
+              🔒 Fechar Caixa
+            </button>
+          ) : (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 space-y-3">
+              <p className="text-sm font-bold text-red-400">⚠️ Confirmar fechamento do caixa?</p>
+              <p className="text-xs text-gray-400">O sistema irá gerar um resumo completo de todas as vendas realizadas desde a abertura.</p>
+              <input
+                type="text" placeholder="Observação do fechamento (opcional)"
+                value={closeNote} onChange={(e) => setCloseNote(e.target.value)}
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-white/10 text-gray-300 text-sm hover:bg-white/5 transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={handleClose} disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm transition-colors disabled:opacity-50">
+                  {saving ? 'Fechando…' : 'Confirmar Fechamento'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── HISTÓRICO DE CAIXAS ───────────────────────────────── */}
+      <div>
+        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Histórico de Caixas</h3>
+        {history.length === 0 ? (
+          <p className="text-gray-600 text-sm text-center py-8 italic">Nenhum caixa fechado ainda</p>
+        ) : (
+          <div className="space-y-3">
+            {history.map((h) => (
+              <div key={h.id}
+                className="bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden cursor-pointer hover:border-white/10 transition-colors"
+                onClick={() => setDetail(detail?.id === h.id ? null : h)}>
+                <div className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-white">
+                      {new Date(h.opened_at).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                      <span className="text-gray-500 font-normal ml-2 text-xs">
+                        {new Date(h.opened_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        {h.closed_at ? ` → ${new Date(h.closed_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                      </span>
+                    </p>
+                    <p className="text-xs text-gray-500">{h.total_orders} pedido{h.total_orders !== 1 ? 's' : ''}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-base font-black text-green-400">{fmtBRL(h.total_revenue)}</p>
+                    <p className="text-xs text-gray-500">em caixa: {fmtBRL(h.closing_balance)}</p>
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {detail?.id === h.id && h.payment_summary && (
+                  <div className="px-4 pb-4 border-t border-white/[0.06] pt-3 space-y-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Vendas por forma de pagamento</p>
+                    {Object.entries(h.payment_summary)
+                      .filter(([, v]) => v > 0)
+                      .map(([k, v]) => (
+                        <div key={k} className="flex justify-between text-sm">
+                          <span className="text-gray-400">{PM_LABELS[k] ?? k}</span>
+                          <span className="font-bold text-white tabular-nums">{fmtBRL(v)}</span>
+                        </div>
+                      ))}
+                    <div className="border-t border-white/[0.06] pt-2 flex justify-between text-sm font-black">
+                      <span className="text-gray-300">Abertura (troco)</span>
+                      <span className="text-white">{fmtBRL(h.opening_balance)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-black">
+                      <span className="text-green-400">Total em caixa (dinheiro + abertura)</span>
+                      <span className="text-green-400">{fmtBRL(h.closing_balance)}</span>
+                    </div>
+                    {h.notes && <p className="text-xs text-gray-500 italic mt-1">"{h.notes}"</p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
 const TABS = [
+  { id: 'caixa',     label: '🧾 Caixa'     },
   { id: 'receitas',  label: '📈 Receitas'  },
   { id: 'gastos',    label: '💸 Gastos'    },
   { id: 'resultado', label: '📊 Resultado' },
 ];
 
 export default function FinanceiroPage() {
-  const [tab, setTab] = useState('receitas');
+  const [tab, setTab] = useState('caixa');
 
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
@@ -910,12 +1132,12 @@ export default function FinanceiroPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b border-white/[0.06] bg-gray-900/40 shrink-0 px-4 gap-1 pt-1">
+      <div className="flex border-b border-white/[0.06] bg-gray-900/40 shrink-0 px-4 gap-1 pt-1 overflow-x-auto scrollbar-none">
         {TABS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
+            className={`shrink-0 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
               tab === id
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-gray-500 hover:text-gray-300'
@@ -928,6 +1150,7 @@ export default function FinanceiroPage() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
+        {tab === 'caixa'     && <TabCaixa />}
         {tab === 'receitas'  && <TabReceitas />}
         {tab === 'gastos'    && <TabGastos />}
         {tab === 'resultado' && <TabResultado />}

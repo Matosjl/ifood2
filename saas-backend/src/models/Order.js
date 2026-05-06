@@ -37,7 +37,9 @@ class Order {
       conditions.push(`o.created_at >= $${params.length}`);
     }
     if (endDate) {
-      params.push(endDate);
+      // If only a date (YYYY-MM-DD), extend to end of that day
+      const endTs = endDate.length === 10 ? `${endDate}T23:59:59.999Z` : endDate;
+      params.push(endTs);
       conditions.push(`o.created_at <= $${params.length}`);
     }
 

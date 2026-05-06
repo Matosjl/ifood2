@@ -192,3 +192,23 @@ CREATE INDEX IF NOT EXISTS idx_expenses_tenant   ON expenses(tenant_id, due_date
 CREATE INDEX IF NOT EXISTS idx_expenses_status   ON expenses(tenant_id, status);
 
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN NOT NULL DEFAULT false;
+
+-- ── CASH REGISTERS (caixa) ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS cash_registers (
+  id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id       UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  opened_by       UUID          REFERENCES users(id) ON DELETE SET NULL,
+  closed_by       UUID          REFERENCES users(id) ON DELETE SET NULL,
+  opening_balance DECIMAL(10,2) NOT NULL DEFAULT 0,
+  closing_balance DECIMAL(10,2),
+  total_revenue   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total_orders    INTEGER       NOT NULL DEFAULT 0,
+  payment_summary JSONB,        -- { cash: X, pix: Y, credit: Z, ... }
+  status          VARCHAR(20)   NOT NULL DEFAULT 'open',
+  -- 'open' | 'closed'
+  opened_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  closed_at       TIMESTAMPTZ,
+  notes           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_registers_tenant ON cash_registers(tenant_id, opened_at DESC);
