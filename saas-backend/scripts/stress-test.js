@@ -173,7 +173,13 @@ async function firePublicOrder(restaurant, idx) {
     ],
   };
 
-  const r = await req('POST', `/api/public/${slug}/orders`, body);
+  // Simula IPs diferentes (como clientes reais de celulares distintos)
+  const fakeIp = `10.${(idx % 254) + 1}.${(idx % 100) + 1}.${(idx % 200) + 1}`;
+
+  const r = await req('POST', `/api/public/${slug}/orders`, body, {
+    'X-Forwarded-For': fakeIp,
+    'X-Real-IP':       fakeIp,
+  });
   record('public', r.ok, r.ms);
   return r;
 }
