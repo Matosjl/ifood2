@@ -13,17 +13,20 @@ const CACHE_TTL = 300; // seconds — refreshed on every write
 // ── Payload (same shape as eventService, avoids raw DB columns) ──
 
 const buildPayload = (order) => ({
-  id:           order.id,
-  orderNumber:  order.order_number,
-  status:       order.status,
-  channel:      order.channel,
-  total:        parseFloat(order.total),
-  notes:        order.notes        || null,
-  customerName:  order.customer_name  || null,
-  customerPhone: order.customer_phone || null,
-  items:        order.items || [],
-  createdAt:    order.created_at,
-  updatedAt:    order.updated_at,
+  id:              order.id,
+  orderNumber:     order.order_number,
+  status:          order.status,
+  channel:         order.channel,
+  total:           parseFloat(order.total),
+  notes:           order.notes           || null,
+  deliveryType:    order.delivery_type   || 'pickup',
+  paymentMethod:   order.payment_method  || 'cash',
+  customerName:    order.customer_name   || null,
+  customerPhone:   order.customer_phone  || null,
+  customerAddress: order.customer_address || null,
+  items:           order.items || [],
+  createdAt:       order.created_at,
+  updatedAt:       order.updated_at,
 });
 
 // ── Cache operations ──────────────────────────────────────────
