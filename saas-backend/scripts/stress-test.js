@@ -96,9 +96,17 @@ function p95(arr) {
 
 // ── Setup de um restaurante ───────────────────────────────────
 
-async function setupRestaurant(r) {
+async function setupRestaurant(r, idx) {
+  // IP único por restaurante para não bater no rate limiter de auth
+  const fakeIp = `192.168.${Math.floor(idx / 254) + 1}.${(idx % 254) + 1}`;
+  const authHeaders = {
+    'x-admin-key':     ADMIN_KEY,
+    'X-Forwarded-For': fakeIp,
+    'X-Real-IP':       fakeIp,
+  };
+
   // 1. Registrar
-  const reg = await req('POST', '/api/auth/register', r, { 'x-admin-key': ADMIN_KEY });
+  const reg = await req('POST', '/api/auth/register', r, authHeaders);
   record('setup', reg.ok, reg.ms);
   if (!reg.ok) return null;
 
@@ -106,7 +114,10 @@ async function setupRestaurant(r) {
   const slug     = reg.data.data?.tenant?.slug;
 
   // 2. Login
-  const login = await req('POST', '/api/auth/login', { email: r.email, password: r.password });
+  const login = await req('POST', '/api/auth/login', { email: r.email, password: r.password }, {
+    'X-Forwarded-For': fakeIp,
+    'X-Real-IP':       fakeIp,
+  });
   record('setup', login.ok, login.ms);
   if (!login.ok) return null;
 
@@ -201,7 +212,7 @@ function report(restaurants) {
   console.log(bold(cyan('  📊  RELATÓRIO DO STRESS TEST')));
   console.log(bold('═'.repeat(60)));
 
-  console.log(`\n  ${bold('Restaurantes criados:')} ${restaurants.filter(Boolean).length}/5`);
+  console.log(`\n  ${bold('Restaurantes criados:')} ${restaurants.filter(Boolean).length}/${NUM_RESTAURANTS}`);
   console.log(`  ${bold('Setup    ')}  ✅ ${green(metrics.setup.ok)}  ❌ ${red(metrics.setup.fail)}  avg ${avg(metrics.setup.ms)}ms  p95 ${p95(metrics.setup.ms)}ms`);
   console.log(`  ${bold('Pedidos painel')}  ✅ ${green(metrics.orders.ok)}  ❌ ${red(metrics.orders.fail)}  avg ${avg(metrics.orders.ms)}ms  p95 ${p95(metrics.orders.ms)}ms  max ${max(metrics.orders.ms)}ms`);
   console.log(`  ${bold('Pedidos app   ')}  ✅ ${green(metrics.public.ok)}  ❌ ${red(metrics.public.fail)}  avg ${avg(metrics.public.ms)}ms  p95 ${p95(metrics.public.ms)}ms  max ${max(metrics.public.ms)}ms`);
@@ -238,7 +249,7 @@ async function main() {
   // ── Fase 1: Setup dos 5 restaurantes em paralelo ─────────────
   console.log('⚙️   Fase 1: Criando restaurantes, produtos e abrindo caixas...');
   const setupStart = Date.now();
-  const restaurants = await Promise.all(RESTAURANTS.map(setupRestaurant));
+  const restaurants = await Promise.all(RESTAURANTS.map((r, i) => setupRestaurant(r, i)));
   console.log(`    Concluído em ${Date.now() - setupStart}ms — ${restaurants.filter(Boolean).length}/5 restaurantes prontos\n`);
 
   const active = restaurants.filter(Boolean);
