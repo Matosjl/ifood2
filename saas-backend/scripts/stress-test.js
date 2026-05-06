@@ -171,6 +171,7 @@ async function fireAuthOrder(restaurant, idx) {
 
   const r = await req('POST', '/api/orders', body, { Authorization: `Bearer ${token}` });
   record('orders', r.ok, r.ms);
+  if (!r.ok) console.error(`  ❌ Pedido painel [${r.status}] → ${JSON.stringify(r.data).slice(0,150)}`);
   return r;
 }
 
@@ -200,6 +201,7 @@ async function firePublicOrder(restaurant, idx) {
     'X-Real-IP':       fakeIp,
   });
   record('public', r.ok, r.ms);
+  if (!r.ok) console.error(`  ❌ Pedido app [${r.status}] → ${JSON.stringify(r.data).slice(0,150)}`);
   return r;
 }
 
