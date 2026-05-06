@@ -22,12 +22,18 @@ services:
       - certbot_www:/var/www/certbot:ro
       - certbot_certs:/etc/letsencrypt:ro
       - uploads_data:/var/www/uploads:ro
+      - ./scripts/nginx-watchdog.sh:/usr/local/bin/nginx-watchdog.sh:ro
     depends_on:
       - backend
       - frontend
     restart: unless-stopped
+    # Watchdog roda em paralelo: detecta backend restart e recarrega nginx
+    command: >
+      /bin/sh -c "chmod +x /usr/local/bin/nginx-watchdog.sh &&
+        /usr/local/bin/nginx-watchdog.sh &
+        nginx -g 'daemon off;'"
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health 2>/dev/null || nginx -t"]
       interval: 30s
       timeout: 10s
       retries: 3
