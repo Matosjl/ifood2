@@ -152,24 +152,31 @@ async function setupRestaurant(r, idx) {
 
 // ── Disparar pedido autenticado (painel) ──────────────────────
 
-async function fireAuthOrder(restaurant, idx) {
+async function fireAuthOrder(restaurant, globalIdx) {
   const { token, productIds } = restaurant;
   if (!productIds?.length) return;
 
+  // IP único global — simula cada operador/garçom de um IP diferente
+  const fakeIp = `10.${Math.floor(globalIdx / 254) + 1}.${(globalIdx % 254) + 1}.1`;
+
   const body = {
-    customerName:  `Cliente Teste ${idx}`,
-    customerPhone: `119${String(idx).padStart(8,'0')}`,
-    deliveryType:  idx % 2 === 0 ? 'delivery' : 'pickup',
-    customerAddress: idx % 2 === 0 ? `Rua Teste ${idx}, nº ${idx}` : undefined,
-    paymentMethod: ['cash','pix','credit','debit'][idx % 4],
+    customerName:  `Cliente Teste ${globalIdx}`,
+    customerPhone: `119${String(globalIdx).padStart(8,'0')}`,
+    deliveryType:  globalIdx % 2 === 0 ? 'delivery' : 'pickup',
+    customerAddress: globalIdx % 2 === 0 ? `Rua Teste ${globalIdx}, nº ${globalIdx}` : undefined,
+    paymentMethod: ['cash','pix','credit','debit'][globalIdx % 4],
     channel:       'manual',
     items: [
-      { productId: productIds[0], quantity: (idx % 3) + 1 },
+      { productId: productIds[0], quantity: (globalIdx % 3) + 1 },
       ...(productIds[1] ? [{ productId: productIds[1], quantity: 1 }] : []),
     ],
   };
 
-  const r = await req('POST', '/api/orders', body, { Authorization: `Bearer ${token}` });
+  const r = await req('POST', '/api/orders', body, {
+    Authorization:     `Bearer ${token}`,
+    'X-Forwarded-For': fakeIp,
+    'X-Real-IP':       fakeIp,
+  });
   record('orders', r.ok, r.ms);
   if (!r.ok) console.error(`  ❌ Pedido painel [${r.status}] → ${JSON.stringify(r.data).slice(0,150)}`);
   return r;
@@ -177,24 +184,24 @@ async function fireAuthOrder(restaurant, idx) {
 
 // ── Disparar pedido público (app cardápio) ────────────────────
 
-async function firePublicOrder(restaurant, idx) {
+async function firePublicOrder(restaurant, globalIdx) {
   const { slug, productIds } = restaurant;
   if (!slug || !productIds?.length) return;
 
+  // IP único global diferente do painel (range 172.x.x.x)
+  const fakeIp = `172.${Math.floor(globalIdx / 254) + 16}.${(globalIdx % 254) + 1}.1`;
+
   const body = {
-    customerName:  `App Cliente ${idx}`,
-    customerPhone: `119${String(idx + 5000).padStart(8,'0')}`,
-    deliveryType:  idx % 3 === 0 ? 'delivery' : 'pickup',
-    customerAddress: idx % 3 === 0 ? `Av. App ${idx}` : undefined,
-    paymentMethod: ['pix','cash','credit'][idx % 3],
-    notes:         `Pedido público #${idx} do app`,
+    customerName:  `App Cliente ${globalIdx}`,
+    customerPhone: `119${String(globalIdx + 5000).padStart(8,'0')}`,
+    deliveryType:  globalIdx % 3 === 0 ? 'delivery' : 'pickup',
+    customerAddress: globalIdx % 3 === 0 ? `Av. App ${globalIdx}` : undefined,
+    paymentMethod: ['pix','cash','credit'][globalIdx % 3],
+    notes:         `Pedido público #${globalIdx} do app`,
     items: [
       { productId: productIds[2 % productIds.length], quantity: 1 },
     ],
   };
-
-  // Simula IPs diferentes (como clientes reais de celulares distintos)
-  const fakeIp = `10.${(idx % 254) + 1}.${(idx % 100) + 1}.${(idx % 200) + 1}`;
 
   const r = await req('POST', `/api/public/${slug}/orders`, body, {
     'X-Forwarded-For': fakeIp,
@@ -271,10 +278,12 @@ async function main() {
   const ordersStart = Date.now();
 
   const allOrderTasks = [];
+  let globalIdx = 0;
   for (const restaurant of active) {
     for (let i = 0; i < ORDERS_PER_RESTAU; i++) {
-      allOrderTasks.push(fireAuthOrder(restaurant, i));
-      allOrderTasks.push(firePublicOrder(restaurant, i));
+      allOrderTasks.push(fireAuthOrder(restaurant, globalIdx));
+      allOrderTasks.push(firePublicOrder(restaurant, globalIdx));
+      globalIdx++;
     }
   }
 
