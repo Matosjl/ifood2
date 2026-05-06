@@ -116,8 +116,17 @@ export default function useOrders() {
 
   // ── Socket handlers ────────────────────────────────────────
 
+  // Socket snapshot: MERGE active orders, keep terminal ones already loaded
   const handleActiveOrders = useCallback((list) => {
-    setOrders(list.map(norm));
+    const active = list.map(norm);
+    const activeIds = new Set(active.map((o) => o.id));
+    setOrders((prev) => {
+      // Keep terminal orders (delivered/cancelled) not overwritten by socket
+      const terminal = prev.filter(
+        (o) => !activeIds.has(o.id) && ['delivered', 'cancelled'].includes(o.status)
+      );
+      return [...active, ...terminal];
+    });
     setLoading(false);
   }, []);
 
@@ -157,53 +166,28 @@ export default function useOrders() {
     onOrderDeleted: handleOrderDeleted,
   });
 
-  // ── Fallback REST fetch (if socket snapshot never arrives) ──
+  // ── Load ALL of today's orders immediately on mount ──────────
+  // This is the primary source of data. The socket snapshot only has
+  // active orders; this ensures delivered/cancelled persist after F5.
 
   useEffect(() => {
-    const t = setTimeout(async () => {
-      if (!loading) return;
-      try {
-        const { data } = await getOrders({ limit: 100 });
-        setOrders((data.data ?? []).map(norm));
-      } catch {
-        // non-fatal
-      } finally {
-        setLoading(false);
-      }
-    }, 4_000);
-    return () => clearTimeout(t);
-  }, [loading]);
-
-  // ── Fetch today's completed/cancelled orders (not in socket cache) ──
-  // The Redis cache only keeps active orders. After F5, delivered/cancelled
-  // orders disappear from the board. We fix this by fetching today's
-  // terminal orders once on mount and merging them.
-
-  useEffect(() => {
-    const fetchCompleted = async () => {
+    let cancelled = false;
+    const fetchToday = async () => {
       try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const { data } = await getOrders({
-          limit: 200,
-          startDate: today.toISOString(),
-        });
-        const terminal = (data.data ?? [])
-          .filter((o) => ['delivered', 'cancelled', 'ready'].includes(o.status))
-          .map(norm);
-        if (terminal.length === 0) return;
-        setOrders((prev) => {
-          const existing = new Set(prev.map((o) => o.id));
-          const newOnes  = terminal.filter((o) => !existing.has(o.id));
-          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-        });
+        const { data } = await getOrders({ limit: 500, startDate: today.toISOString() });
+        if (cancelled) return;
+        const all = (data.data ?? []).map(norm);
+        setOrders(all);
       } catch {
-        // non-fatal
+        // non-fatal — socket will still deliver active orders
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
-    // Run after socket has had time to deliver its snapshot
-    const t = setTimeout(fetchCompleted, 2_000);
-    return () => clearTimeout(t);
+    fetchToday();
+    return () => { cancelled = true; };
   }, []);
 
   // ── Actions (optimistic) ────────────────────────────────────
