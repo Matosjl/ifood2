@@ -33,7 +33,8 @@ const loginRules = [
 
 // ── Rotas ─────────────────────────────────────────────────────
 
-router.post('/register', authLimiter, (req, res, next) => {
+// /register não precisa de rate limit — já protegido pela ADMIN_KEY secreta
+router.post('/register', (req, res, next) => {
   const key = req.headers['x-admin-key'];
   if (!key || key !== env.SUPER_ADMIN_KEY)
     return res.status(403).json({ success: false, message: 'Acesso negado. X-Admin-Key inválida.' });
