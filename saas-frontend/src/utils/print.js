@@ -70,7 +70,8 @@ export function printOrder(order) {
     * { margin:0; padding:0; box-sizing:border-box; }
     body {
       font-family: 'Courier New', Courier, monospace;
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: bold;
       line-height: 1.6;
       width: 80mm;
       min-width: 80mm;
@@ -78,14 +79,14 @@ export function printOrder(order) {
       color: #000;
     }
     .center  { text-align: center; }
-    hr       { border: none; border-top: 1px dashed #000; margin: 7px 0; }
-    hr.solid { border-top: 2px solid #000; }
-    p        { margin-bottom: 3px; }
+    hr       { border: none; border-top: 2px dashed #000; margin: 7px 0; }
+    hr.solid { border-top: 3px solid #000; }
+    p        { margin-bottom: 3px; font-weight: bold; }
     table    { width: 100%; border-collapse: collapse; }
 
     /* Número do pedido — destaque máximo */
     .num-pedido {
-      font-size: 28px;
+      font-size: 30px;
       font-weight: 900;
       letter-spacing: 3px;
       text-align: center;
@@ -95,8 +96,9 @@ export function printOrder(order) {
     /* Data/hora */
     .datetime {
       text-align: center;
-      font-size: 12px;
-      color: #333;
+      font-size: 13px;
+      font-weight: bold;
+      color: #000;
       margin-bottom: 2px;
     }
     /* Nome do cliente — caixa destacada */
@@ -114,56 +116,58 @@ export function printOrder(order) {
       text-transform: uppercase;
     }
     .cliente-tel {
-      font-size: 12px;
-      color: #444;
+      font-size: 13px;
+      font-weight: bold;
+      color: #000;
       margin-top: 1px;
     }
     /* Cabeçalho dos itens */
     .itens-titulo {
-      font-weight: bold;
-      font-size: 12px;
+      font-weight: 900;
+      font-size: 13px;
       letter-spacing: 1px;
       margin-bottom: 3px;
       text-transform: uppercase;
     }
     /* Linha do total */
     .total-row td {
-      border-top: 2px solid #000;
+      border-top: 3px solid #000;
       padding-top: 6px;
       font-weight: 900;
-      font-size: 16px;
+      font-size: 17px;
     }
     /* Troco — sublinhado */
     .troco {
       text-decoration: underline;
-      font-weight: bold;
-      font-size: 14px;
+      font-weight: 900;
+      font-size: 15px;
       margin: 4px 0;
     }
     /* Tipo entrega/retirada */
     .tipo-label {
-      font-size: 13px;
-      font-weight: bold;
+      font-size: 14px;
+      font-weight: 900;
       text-transform: uppercase;
     }
     .endereco {
-      font-size: 12px;
+      font-size: 13px;
+      font-weight: bold;
       margin-top: 2px;
       line-height: 1.5;
     }
     /* Rodapé */
     .obrigado {
       text-align: center;
-      font-size: 16px;
-      font-weight: bold;
+      font-size: 17px;
+      font-weight: 900;
       letter-spacing: 0.5px;
       margin-top: 8px;
       padding-top: 4px;
     }
     /* Restaurante */
     .restaurante {
-      font-size: 15px;
-      font-weight: bold;
+      font-size: 16px;
+      font-weight: 900;
       text-align: center;
       letter-spacing: 1px;
       text-transform: uppercase;
