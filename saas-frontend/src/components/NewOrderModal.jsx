@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getProducts, createOrder, searchCustomers } from '../api/orders';
 import { getCurrentCaixa } from '../api/caixa';
+import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
@@ -150,6 +151,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [needsChange,   setNeedsChange]   = useState(false);
   const [changeFor,     setChangeFor]     = useState('');
   const [notes,         setNotes]         = useState('');
+  const [fiadoClientes,    setFiadoClientes]    = useState([]);
+  const [fiadoClienteId,   setFiadoClienteId]   = useState('');
+  const [fiadoClienteSearch, setFiadoClienteSearch] = useState('');
 
   // ── Load products + check caixa ─────────────────────────────
   useEffect(() => {
@@ -162,6 +166,13 @@ export default function NewOrderModal({ onClose, onCreated }) {
       .then(({ data }) => setCaixaOpen(!!data.data))
       .catch(() => setCaixaOpen(true)); // fail-open: don't block if API is down
   }, []);
+
+  useEffect(() => {
+    if (paymentMethod !== 'fiado') return;
+    listFiadoClientes({ search: fiadoClienteSearch })
+      .then(({ data }) => setFiadoClientes(data.data ?? []))
+      .catch(() => {});
+  }, [paymentMethod, fiadoClienteSearch]);
 
   // ESC to close
   useEffect(() => {
@@ -224,6 +235,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
     if (!name.trim())                                       return setError('Nome do cliente é obrigatório.');
     if (cartEntries.length === 0)                           return setError('Adicione pelo menos 1 item.');
     if (deliveryType === 'delivery' && !address.trim())     return setError('Informe o endereço de entrega.');
+    if (paymentMethod === 'fiado' && !fiadoClienteId)       return setError('Selecione o cliente do fiado.');
 
     setError(null);
     setSubmitting(true);
@@ -251,6 +263,15 @@ export default function NewOrderModal({ onClose, onCreated }) {
         notes: fullNotes || undefined,
         items,
       });
+      if (paymentMethod === 'fiado' && data.data?.id) {
+        const cliente = fiadoClientes.find((c) => c.id === fiadoClienteId);
+        await createFiadoCompra({
+          cliente_id: fiadoClienteId,
+          order_id:   data.data.id,
+          descricao:  `Pedido #${data.data.order_number ?? data.data.id}`,
+          valor:      total,
+        }).catch(() => {});
+      }
       onCreated?.(data.data);
       onClose();
     } catch (err) {
@@ -439,17 +460,64 @@ export default function NewOrderModal({ onClose, onCreated }) {
                   { value: 'credit',  label: '💳 Crédito'  },
                   { value: 'debit',   label: '💳 Débito'   },
                   { value: 'voucher', label: '🎫 Vale'     },
+                  { value: 'fiado',   label: '🤝 Fiado'    },
                   { value: 'other',   label: '🔖 Outro'    },
                 ].map(({ value, label }) => (
-                  <button key={value} type="button" onClick={() => setPaymentMethod(value)}
+                  <button key={value} type="button" onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
                     className={`py-1.5 px-1 rounded-lg text-xs font-semibold transition-colors ${
                       paymentMethod === value
-                        ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
+                        ? value === 'fiado'
+                          ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                          : 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
                         : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
                     }`}
                   >{label}</button>
                 ))}
               </div>
+
+              {/* Fiado — seleção de cliente */}
+              {paymentMethod === 'fiado' && (
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    placeholder="Buscar cliente do fiado..."
+                    value={fiadoClienteSearch}
+                    onChange={(e) => { setFiadoClienteSearch(e.target.value); setFiadoClienteId(''); }}
+                    className="input w-full text-sm"
+                  />
+                  {fiadoClientes.length > 0 && (
+                    <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-gray-800 divide-y divide-white/[0.04]">
+                      {fiadoClientes.filter((c) => !c.bloqueado).map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setFiadoClienteId(c.id); setFiadoClienteSearch(c.name); }}
+                          className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                            fiadoClienteId === c.id
+                              ? 'bg-purple-500/20 text-purple-300'
+                              : 'text-gray-300 hover:bg-gray-700'
+                          }`}
+                        >
+                          <span className="font-semibold">{c.name}</span>
+                          {parseFloat(c.total_aberto) > 0 && (
+                            <span className="ml-2 text-yellow-400">
+                              Deve R$ {parseFloat(c.total_aberto).toFixed(2)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      {fiadoClientes.every((c) => c.bloqueado) && (
+                        <p className="px-3 py-2 text-xs text-gray-500">Nenhum cliente disponível.</p>
+                      )}
+                    </div>
+                  )}
+                  {fiadoClienteId && (
+                    <p className="text-xs text-purple-400 font-semibold">
+                      ✓ {fiadoClientes.find((c) => c.id === fiadoClienteId)?.name ?? 'Cliente selecionado'}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Troco — só para dinheiro */}
               {paymentMethod === 'cash' && (

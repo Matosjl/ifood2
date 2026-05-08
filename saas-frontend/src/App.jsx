@@ -8,6 +8,7 @@ import StockPage         from './pages/StockPage';
 import FinanceiroPage    from './pages/FinanceiroPage';
 import HistoricoPage     from './pages/HistoricoPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
+import FiadoPage         from './pages/FiadoPage';
 import Sidebar           from './components/Sidebar';
 import TrialBanner       from './components/TrialBanner';
 import CustomerApp       from './CustomerApp';
@@ -32,9 +33,20 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  // Escuta logout disparado pelo axios quando refresh token falha
+  useEffect(() => {
+    const onAuthLogout = () => {
+      setToken(null);
+      navigate('/entrar');
+    };
+    window.addEventListener('auth:logout', onAuthLogout);
+    return () => window.removeEventListener('auth:logout', onAuthLogout);
+  }, []);
+
   const handleLogin  = (newToken) => { setToken(newToken); navigate('/'); };
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
     localStorage.removeItem('tenant');
     setToken(null);
@@ -93,6 +105,7 @@ export default function App() {
           {page === 'stock'     && <StockPage />}
           {page === 'financial' && <FinanceiroPage />}
           {page === 'historico' && <HistoricoPage />}
+          {page === 'fiado'     && <FiadoPage />}
           {page === 'settings'  && <ConfiguracoesPage />}
         </div>
       </div>

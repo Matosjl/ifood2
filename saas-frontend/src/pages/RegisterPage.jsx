@@ -22,10 +22,11 @@ export default function RegisterPage({ onLogin, onGoLogin }) {
     setLoading(true);
     try {
       const { data } = await api.post('/auth/trial-register', form);
-      const { accessToken, user, tenant } = data.data;
-      localStorage.setItem('token',  accessToken);
-      localStorage.setItem('user',   JSON.stringify(user));
-      localStorage.setItem('tenant', JSON.stringify(tenant));
+      const { accessToken, refreshToken, user, tenant } = data.data;
+      localStorage.setItem('token',        accessToken);
+      localStorage.setItem('refreshToken', refreshToken ?? '');
+      localStorage.setItem('user',         JSON.stringify(user));
+      localStorage.setItem('tenant',       JSON.stringify(tenant));
       onLogin(accessToken);
     } catch (err) {
       setError(err.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.');

@@ -243,3 +243,41 @@ UPDATE tenants
 SET trial_ends_at = created_at + INTERVAL '14 days'
 WHERE trial_ends_at IS NULL
   AND subscription_status IN ('active', 'trialing');
+
+-- ── FIADO ─────────────────────────────────────────────────────
+-- Clientes que compram fiado
+CREATE TABLE IF NOT EXISTS fiado_clientes (
+  id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id    UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name         VARCHAR(200) NOT NULL,
+  phone        VARCHAR(30),
+  address      TEXT,
+  dia_acerto   INTEGER,          -- dia do mês combinado para pagamento
+  bloqueado    BOOLEAN      NOT NULL DEFAULT false,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiado_clientes_tenant ON fiado_clientes(tenant_id, name);
+
+-- Compras fiadas (vinculadas a pedidos)
+CREATE TABLE IF NOT EXISTS fiado_compras (
+  id            UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id     UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cliente_id    UUID          NOT NULL REFERENCES fiado_clientes(id) ON DELETE CASCADE,
+  order_id      UUID          REFERENCES orders(id) ON DELETE SET NULL,
+  descricao     VARCHAR(300)  NOT NULL DEFAULT 'Compra fiada',
+  valor         DECIMAL(10,2) NOT NULL,
+  status        VARCHAR(20)   NOT NULL DEFAULT 'pendente',
+  -- status: 'pendente' | 'pago' | 'cancelado'
+  paid_at       TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiado_compras_cliente ON fiado_compras(tenant_id, cliente_id, status);
+CREATE INDEX IF NOT EXISTS idx_fiado_compras_order   ON fiado_compras(order_id);
+
+-- Adiciona payment_method 'fiado' aos pedidos (já existe a coluna, só documenta)
+-- payment_method aceita: 'cash'|'pix'|'credit'|'debit'|'fiado'

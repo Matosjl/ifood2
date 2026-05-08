@@ -15,9 +15,10 @@ export default function LoginPage({ onLogin, onGoRegister, onGoLanding }) {
     unlockAudio(); // unlock Web Audio on first user gesture
     try {
       const { data } = await login(email, password);
-      localStorage.setItem('token',  data.data.accessToken);
-      localStorage.setItem('user',   JSON.stringify(data.data.user));
-      localStorage.setItem('tenant', JSON.stringify(data.data.tenant));
+      localStorage.setItem('token',        data.data.accessToken);
+      localStorage.setItem('refreshToken', data.data.refreshToken ?? '');
+      localStorage.setItem('user',         JSON.stringify(data.data.user));
+      localStorage.setItem('tenant',       JSON.stringify(data.data.tenant));
       onLogin(data.data.accessToken);
     } catch (err) {
       setError(err.response?.data?.message ?? 'Credenciais inválidas.');

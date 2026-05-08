@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { key: 'stock',     emoji: '📊', label: 'Estoque' },
   { key: 'historico', emoji: '📋', label: 'Histórico' },
   { key: 'financial', emoji: '💰', label: 'Financeiro' },
+  { key: 'fiado',     emoji: '🤝', label: 'Fiado' },
   { key: 'settings',  emoji: '⚙️',  label: 'Configurações' },
 ];
 
