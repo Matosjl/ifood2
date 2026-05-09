@@ -83,7 +83,7 @@ async function main() {
   process.stdout.write('  📦 Buscando produtos... ');
   const prodRes = await req('GET', '/products?active=true&limit=50', null, accessToken);
   const products = prodRes.body?.data?.data ?? prodRes.body?.data ?? [];
-  const activeProds = products.filter((p) => p.stock_qty > 0 || p.sale_type === 'kg');
+  const activeProds = products.filter((p) => p.active);
   if (activeProds.length === 0) {
     console.error('\n  ❌ Nenhum produto ativo com estoque encontrado. Cadastre produtos primeiro.');
     process.exit(1);
@@ -94,8 +94,7 @@ async function main() {
   process.stdout.write('  💰 Verificando caixa... ');
   const caixaRes = await req('GET', '/caixa/current', null, accessToken);
   if (!caixaRes.body?.data) {
-    // Abrir caixa
-    await req('POST', '/caixa/abrir', { saldo_inicial: 0 }, accessToken);
+    await req('POST', '/caixa/open', { initialBalance: 0 }, accessToken);
     console.log('✅ Caixa aberto');
   } else {
     console.log('✅ Caixa já aberto');
