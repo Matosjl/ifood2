@@ -8,8 +8,13 @@
 const https  = require('https');
 const http   = require('http');
 const urlLib = require('url');
-const crypto = require('crypto');
 const { execSync } = require('child_process');
+const path   = require('path');
+
+// Usa módulos do backend (já instalados no projeto)
+const BACKEND = path.resolve(__dirname, '../saas-backend/node_modules');
+const jwt     = require(path.join(BACKEND, 'jsonwebtoken'));
+const bcrypt  = require(path.join(BACKEND, 'bcryptjs'));
 
 const [,, API_URL_RAW, R_STR, P_STR] = process.argv;
 if (!API_URL_RAW) {
@@ -20,11 +25,11 @@ if (!API_URL_RAW) {
 const API_URL   = API_URL_RAW.replace(/\/$/, '') + '/api';
 const N_REST    = parseInt(R_STR  ?? '50',  10);
 const N_PEDIDOS = parseInt(P_STR  ?? '100', 10);
-// Suporta DB_URL direto ou via docker exec
-const DB_URL       = process.env.DB_URL;
 const DB_CONTAINER = process.env.DB_CONTAINER ?? 'saas_postgres';
-const DB_USER_ENV  = process.env.DB_USER ?? 'postgres';
-const DB_NAME_ENV  = process.env.DB_NAME ?? 'saas_db';
+const DB_USER_ENV  = process.env.DB_USER  ?? 'postgres';
+const DB_NAME_ENV  = process.env.DB_NAME  ?? 'saas_db';
+const JWT_SECRET   = process.env.JWT_SECRET;
+if (!JWT_SECRET) { console.error('Defina JWT_SECRET no ambiente'); process.exit(1); }
 
 // ── HTTP helper ───────────────────────────────────────────────
 
@@ -84,8 +89,8 @@ async function seedRestaurantes(n) {
   psql(`DELETE FROM users WHERE email LIKE 'stressteste%@load.test'`);
   psql(`DELETE FROM tenants WHERE name LIKE 'Load Test %'`);
 
-  // bcrypt hash de 'Senha1234' (pre-computado)
-  const hash = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LPVImNNyRXW';
+  // Gerar hash bcrypt real
+  const hash = bcrypt.hashSync('Senha1234', 10);
 
   const tenants = [];
   for (let i = 1; i <= n; i++) {
@@ -116,14 +121,15 @@ async function seedRestaurantes(n) {
 
 // ── Pedidos para um restaurante ───────────────────────────────
 
-async function criarPedidos(email, senha) {
-  const loginRes = await req('POST', '/auth/login', { email, password: senha });
-  if (loginRes.status !== 200) return { ok: 0, fail: N_PEDIDOS, error: loginRes.body?.message };
+async function criarPedidos(tenantInfo) {
+  // Assina JWT diretamente — sem chamar /auth/login (evita rate limit)
+  let token = jwt.sign(
+    { sub: tenantInfo.userId, tenantId: tenantInfo.tenantId, role: 'owner' },
+    JWT_SECRET,
+    { expiresIn: '2h' }
+  );
 
-  let { accessToken: token, refreshToken } = loginRes.body.data;
-
-  // Buscar produto
-  const prodRes = await req('GET', '/products?active=true&limit=5', null, token);
+  const prodRes  = await req('GET', '/products?active=true&limit=5', null, token);
   const products = (prodRes.body?.data?.data ?? prodRes.body?.data ?? []).filter(p => p.active);
   if (!products.length) return { ok: 0, fail: N_PEDIDOS, error: 'sem produtos' };
 
@@ -147,13 +153,13 @@ async function criarPedidos(email, senha) {
     const res = await req('POST', '/orders', body, token);
 
     if (res.status === 401) {
-      const ref = await req('POST', '/auth/refresh', { refreshToken });
-      if (ref.status === 200) {
-        token        = ref.body.data.accessToken;
-        refreshToken = ref.body.data.refreshToken;
-        const retry  = await req('POST', '/orders', body, token);
-        retry.status === 201 ? ok++ : fail++;
-      } else fail++;
+      // Re-assina token se expirou
+      token = jwt.sign(
+        { sub: tenantInfo.userId, tenantId: tenantInfo.tenantId, role: 'owner' },
+        JWT_SECRET, { expiresIn: '2h' }
+      );
+      const retry = await req('POST', '/orders', body, token);
+      retry.status === 201 ? ok++ : fail++;
     } else if (res.status === 201) {
       ok++;
     } else {
@@ -183,7 +189,7 @@ async function main() {
   for (let i = 0; i < tenants.length; i += CONCURRENCY) {
     const batch   = tenants.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
-      batch.map(t => criarPedidos(t.email, 'Senha1234').then(r => ({ ...r, idx: t.idx })))
+      batch.map(t => criarPedidos(t).then(r => ({ ...r, idx: t.idx })))
     );
 
     for (const r of results) {
