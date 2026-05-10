@@ -9,12 +9,8 @@ const https  = require('https');
 const http   = require('http');
 const urlLib = require('url');
 const { execSync } = require('child_process');
-const path   = require('path');
-
-// Usa módulos do backend (já instalados no projeto)
-const BACKEND = path.resolve(__dirname, '../saas-backend/node_modules');
-const jwt     = require(path.join(BACKEND, 'jsonwebtoken'));
-const bcrypt  = require(path.join(BACKEND, 'bcryptjs'));
+const jwt   = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const [,, API_URL_RAW, R_STR, P_STR] = process.argv;
 if (!API_URL_RAW) {
