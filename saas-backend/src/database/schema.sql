@@ -281,3 +281,39 @@ CREATE INDEX IF NOT EXISTS idx_fiado_compras_order   ON fiado_compras(order_id);
 
 -- Adiciona payment_method 'fiado' aos pedidos (já existe a coluna, só documenta)
 -- payment_method aceita: 'cash'|'pix'|'credit'|'debit'|'fiado'
+
+-- ── Migração: colunas de contagem física no fechamento de caixa ──
+-- (idempotente — ADD COLUMN IF NOT EXISTS é seguro re-executar)
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS cash_counted  DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS card_counted  DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS pix_counted   DECIMAL(10,2);
+ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS discrepancy   DECIMAL(10,2);
+
+-- ── Migração: tabelas de fiado ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS fiado_clientes (
+  id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name        VARCHAR(200)  NOT NULL,
+  phone       VARCHAR(30),
+  address     TEXT,
+  dia_acerto  INT,
+  bloqueado   BOOLEAN       NOT NULL DEFAULT FALSE,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS fiado_compras (
+  id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cliente_id  UUID          NOT NULL REFERENCES fiado_clientes(id) ON DELETE CASCADE,
+  order_id    UUID          REFERENCES orders(id) ON DELETE SET NULL,
+  descricao   VARCHAR(300)  NOT NULL DEFAULT 'Compra fiada',
+  valor       DECIMAL(10,2) NOT NULL,
+  status      VARCHAR(20)   NOT NULL DEFAULT 'pendente',
+  paid_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fiado_clientes_tenant2 ON fiado_clientes(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_fiado_compras_cliente2 ON fiado_compras(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_fiado_compras_tenant2  ON fiado_compras(tenant_id);

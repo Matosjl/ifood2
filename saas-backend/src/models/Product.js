@@ -107,27 +107,41 @@ class Product {
 
   /**
    * Desconta estoque de forma ATÔMICA.
-   * A cláusula AND stock_qty >= qty garante que não há
-   * estoque negativo, mesmo com requisições concorrentes.
    *
-   * Retorna o produto atualizado, ou lança AppError 400.
+   * Comportamento:
+   *  - stock_qty >= qty  → desconta normalmente
+   *  - stock_qty = 0     → estoque não rastreado (produto novo sem entrada manual)
+   *                        permite a venda mas não desconta (evita bloqueio silencioso)
+   *  - stock_qty > 0 mas < qty → lança AppError 400 (estoque insuficiente real)
+   *
    * DEVE ser chamado dentro de uma transaction.
    */
   static async deductStock(id, tenantId, qty, dbClient = db) {
+    // Tenta descontar estoque quando suficiente
     const { rows } = await dbClient.query(
       `UPDATE products
        SET stock_qty  = stock_qty - $3,
            updated_at = NOW()
        WHERE id = $1
          AND tenant_id = $2
-         AND stock_qty >= $3    -- guard atômico contra estoque negativo
+         AND stock_qty >= $3
        RETURNING *`,
       [id, tenantId, qty]
     );
-    if (rows.length === 0) {
-      throw new AppError(`Estoque insuficiente para o produto solicitado.`, 400);
-    }
-    return rows[0];
+    if (rows.length > 0) return rows[0];
+
+    // Verifica se é estoque não rastreado (stock_qty = 0) ou realmente insuficiente
+    const { rows: check } = await dbClient.query(
+      `SELECT id, stock_qty FROM products WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    if (!check[0]) throw new AppError(`Produto não encontrado.`, 404);
+
+    // stock_qty = 0 significa "nunca foi reposto manualmente" → permite venda sem desconto
+    if (parseFloat(check[0].stock_qty) === 0) return check[0];
+
+    // stock_qty > 0 mas < qty → realmente sem estoque suficiente
+    throw new AppError(`Estoque insuficiente para o produto solicitado.`, 400);
   }
 
   /**
