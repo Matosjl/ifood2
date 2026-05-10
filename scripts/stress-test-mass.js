@@ -76,38 +76,36 @@ function psql(sql) {
 async function seedRestaurantes(n) {
   process.stdout.write(`  🌱 Criando ${n} restaurantes no banco...`);
 
-  // Limpar restaurantes de teste anteriores
+  // Limpar dados de testes anteriores (cascata cuida de users, products, etc.)
+  psql(`DELETE FROM orders WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
+  psql(`DELETE FROM cash_registers WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
+  psql(`DELETE FROM products WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
+  psql(`DELETE FROM order_counters WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
   psql(`DELETE FROM users WHERE email LIKE 'stressteste%@load.test'`);
-  psql(`DELETE FROM tenants WHERE slug LIKE 'load-test-%'`);
+  psql(`DELETE FROM tenants WHERE name LIKE 'Load Test %'`);
+
+  // bcrypt hash de 'Senha1234' (pre-computado)
+  const hash = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LPVImNNyRXW';
 
   const tenants = [];
   for (let i = 1; i <= n; i++) {
     const tenantId = psql(`SELECT gen_random_uuid()`);
     const userId   = psql(`SELECT gen_random_uuid()`);
-    const slug     = `load-test-${i}`;
     const email    = `stressteste${i}@load.test`;
-    // bcrypt hash de 'Senha1234' (pre-computado para velocidade)
-    const hash     = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LPVImNNyRXW'; // "Senha1234"
 
     psql(`INSERT INTO tenants (id, name, slug, plan, subscription_status, trial_ends_at)
-          VALUES ('${tenantId}', 'Load Test ${i}', '${slug}', 'basic', 'trialing', NOW() + INTERVAL '14 days')
-          ON CONFLICT (slug) DO NOTHING`);
+          VALUES ('${tenantId}', 'Load Test ${i}', 'load-test-${i}-${Date.now()}', 'basic', 'trialing', NOW() + INTERVAL '14 days')`);
 
-    psql(`INSERT INTO order_counters (tenant_id) VALUES ('${tenantId}') ON CONFLICT DO NOTHING`);
+    psql(`INSERT INTO order_counters (tenant_id) VALUES ('${tenantId}')`);
 
     psql(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
-          VALUES ('${userId}', '${tenantId}', 'Admin ${i}', '${email}', '${hash}', 'owner')
-          ON CONFLICT (email) DO NOTHING`);
+          VALUES ('${userId}', '${tenantId}', 'Admin ${i}', '${email}', '${hash}', 'owner')`);
 
-    // Produto
     psql(`INSERT INTO products (tenant_id, name, sale_type, sale_price, active)
-          VALUES ('${tenantId}', 'Item Teste', 'unit', 10.00, true)
-          ON CONFLICT DO NOTHING`);
+          VALUES ('${tenantId}', 'Item Teste', 'unit', 10.00, true)`);
 
-    // Caixa
     psql(`INSERT INTO cash_registers (tenant_id, opened_by, opening_balance)
-          VALUES ('${tenantId}', '${userId}', 0)
-          ON CONFLICT DO NOTHING`);
+          VALUES ('${tenantId}', '${userId}', 0)`);
 
     tenants.push({ idx: i, tenantId, userId, email });
   }
