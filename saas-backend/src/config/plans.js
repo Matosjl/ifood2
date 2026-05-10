@@ -7,39 +7,63 @@
  * features.*: boolean — controla acesso a funcionalidades especificas.
  * O middleware plan.middleware.js usa estas definicoes.
  */
+// WhatsApp do dono para contato de assinatura
+const OWNER_WHATSAPP = '5551981521264';
+
 const PLANS = {
   basic: {
-    id:       'basic',
-    name:     'Basic',
-    price:    49,
-    currency: 'BRL',
+    id:          'basic',
+    name:        'Basic',
+    price:       67,
+    priceLabel:  'R$ 67/mês',
+    description: 'Ideal para começar',
+    currency:    'BRL',
+    color:       'orange',
+    highlights: [
+      'Pedidos ilimitados',
+      'Controle de caixa',
+      'Histórico de pedidos',
+      'Fiado e clientes',
+      'Cardápio digital',
+    ],
     limits: {
-      ordersPerMonth: 100,
+      ordersPerMonth: null,  // ilimitado
       usersMax:       2,
     },
     features: {
-      whatsapp:    false,  // integracao WhatsApp (Evolution API)
-      ai:          false,  // IA de atendimento (GPT)
-      reports:     false,  // relatorios avancados
-      multiUser:   false,  // mais de 1 usuario (apenas o owner)
-      stockAlerts: false,  // alertas de estoque baixo
-      api:         false,  // acesso a API publica
+      whatsapp:    false,
+      ai:          false,
+      reports:     false,
+      multiUser:   false,
+      stockAlerts: false,
+      api:         false,
     },
   },
 
   pro: {
-    id:       'pro',
-    name:     'Pro',
-    price:    97,
-    currency: 'BRL',
+    id:          'pro',
+    name:        'Pro',
+    price:       179.99,
+    priceLabel:  'R$ 179,99/mês',
+    description: 'Para quem quer crescer',
+    currency:    'BRL',
+    color:       'blue',
+    popular:     true,
+    highlights: [
+      'Tudo do Basic',
+      'Relatórios avançados',
+      'Múltiplos usuários (até 5)',
+      'Alertas de estoque',
+      'Suporte prioritário',
+    ],
     limits: {
-      ordersPerMonth: 500,
+      ordersPerMonth: null,
       usersMax:       5,
     },
     features: {
       whatsapp:    true,
-      ai:          true,
-      reports:     false,
+      ai:          false,
+      reports:     true,
       multiUser:   true,
       stockAlerts: true,
       api:         false,
@@ -47,13 +71,23 @@ const PLANS = {
   },
 
   premium: {
-    id:       'premium',
-    name:     'Premium',
-    price:    149,
-    currency: 'BRL',
+    id:          'premium',
+    name:        'Premium',
+    price:       370,
+    priceLabel:  'R$ 370/mês',
+    description: 'Poder total sem limites',
+    currency:    'BRL',
+    color:       'purple',
+    highlights: [
+      'Tudo do Pro',
+      'Usuários ilimitados',
+      'API pública',
+      'Integrações avançadas',
+      'Suporte VIP via WhatsApp',
+    ],
     limits: {
-      ordersPerMonth: null,   // ilimitado
-      usersMax:       null,   // ilimitado
+      ordersPerMonth: null,
+      usersMax:       null,
     },
     features: {
       whatsapp:    true,
@@ -68,4 +102,8 @@ const PLANS = {
 
 const VALID_PLAN_IDS = Object.keys(PLANS);
 
-module.exports = { PLANS, VALID_PLAN_IDS };
+// Duracao do trial em dias
+const TRIAL_DAYS         = 10;   // trial total
+const PREMIUM_TRIAL_DAYS = 3;    // primeiros dias com Premium liberado
+
+module.exports = { PLANS, VALID_PLAN_IDS, OWNER_WHATSAPP, TRIAL_DAYS, PREMIUM_TRIAL_DAYS };

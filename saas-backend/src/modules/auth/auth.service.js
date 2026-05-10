@@ -6,6 +6,7 @@ const env      = require('../../config/env');
 const User     = require('../../models/User');
 const Tenant   = require('../../models/Tenant');
 const AppError = require('../../utils/AppError');
+const { TRIAL_DAYS, PREMIUM_TRIAL_DAYS } = require('../../config/plans');
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -56,12 +57,15 @@ const register = async ({ tenantName, name, email, password, trial = false }) =>
 
     // Cria tenant usando o model (inclui campos de assinatura)
     const slug   = slugify(tenantName);
+    const now = Date.now();
     const tenant = await Tenant.create(
       {
-        name:                tenantName.trim(),
+        name:                    tenantName.trim(),
         slug,
-        subscription_status: trial ? 'trialing' : 'active',
-        trial_ends_at:       trial ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null,
+        plan:                    trial ? 'premium' : 'basic',  // começa no Premium durante trial
+        subscription_status:     trial ? 'trialing' : 'active',
+        trial_ends_at:           trial ? new Date(now + TRIAL_DAYS         * 24 * 60 * 60 * 1000) : null,
+        premium_trial_ends_at:   trial ? new Date(now + PREMIUM_TRIAL_DAYS * 24 * 60 * 60 * 1000) : null,
       },
       client
     );
@@ -95,12 +99,13 @@ const register = async ({ tenantName, name, email, password, trial = false }) =>
       refreshToken,
       user:   { id: user.id, name: user.name, email: user.email, role: user.role },
       tenant: {
-        id:                 tenant.id,
-        name:               tenant.name,
-        slug:               tenant.slug,
-        plan:               tenant.plan,
-        subscriptionStatus: tenant.subscription_status,
-        trialEndsAt:        tenant.trial_ends_at ?? null,
+        id:                   tenant.id,
+        name:                 tenant.name,
+        slug:                 tenant.slug,
+        plan:                 tenant.plan,
+        subscriptionStatus:   tenant.subscription_status,
+        trialEndsAt:          tenant.trial_ends_at          ?? null,
+        premiumTrialEndsAt:   tenant.premium_trial_ends_at  ?? null,
       },
     };
   } catch (err) {
@@ -135,12 +140,13 @@ const login = async ({ email, password }) => {
     refreshToken,
     user:   { id: user.id, name: user.name, email: user.email, role: user.role },
     tenant: {
-      id:                 user.tenant_id,
-      name:               user.tenant_name,
-      slug:               user.tenant_slug,
-      plan:               user.tenant_plan,
-      subscriptionStatus: user.tenant_subscription_status ?? 'active',
-      trialEndsAt:        user.tenant_trial_ends_at ?? null,
+      id:                  user.tenant_id,
+      name:                user.tenant_name,
+      slug:                user.tenant_slug,
+      plan:                user.tenant_plan,
+      subscriptionStatus:  user.tenant_subscription_status ?? 'active',
+      trialEndsAt:         user.tenant_trial_ends_at         ?? null,
+      premiumTrialEndsAt:  user.tenant_premium_trial_ends_at ?? null,
     },
   };
 };

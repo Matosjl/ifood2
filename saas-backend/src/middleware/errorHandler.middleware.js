@@ -11,6 +11,8 @@ const errorHandler = (err, req, res, next) => {
     return res.status(err.statusCode).json({
       success: false,
       message: err.message,
+      // Inclui dados extras (ex: whatsappLink para erros 402)
+      ...(err.data && Object.keys(err.data).length > 0 && { data: err.data }),
     });
   }
 

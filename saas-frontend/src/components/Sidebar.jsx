@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+
 const NAV_ITEMS = [
   { key: 'orders',    emoji: '🍽️', label: 'Pedidos' },
   { key: 'products',  emoji: '📦', label: 'Produtos' },
@@ -6,13 +8,61 @@ const NAV_ITEMS = [
   { key: 'financial', emoji: '💰', label: 'Financeiro' },
   { key: 'fiado',     emoji: '🤝', label: 'Fiado' },
   { key: 'settings',  emoji: '⚙️',  label: 'Configurações' },
+  { key: 'plans',     emoji: '💎', label: 'Planos' },
 ];
 
-export default function Sidebar({ page, setPage, onLogout }) {
-  const user = (() => {
+const daysLeft = (dateStr) => {
+  if (!dateStr) return null;
+  const diff = new Date(dateStr) - Date.now();
+  return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
+};
+
+function TrialWidget({ onShowPlans }) {
+  const tenant = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('tenant') || 'null'); } catch { return null; }
+  }, []);
+
+  if (!tenant || tenant.subscriptionStatus !== 'trialing') return null;
+
+  const total   = daysLeft(tenant.trialEndsAt);
+  const premium = daysLeft(tenant.premiumTrialEndsAt);
+  if (!total || total <= 0) return null;
+
+  const premiumActive = premium !== null && premium > 0;
+  const urgent        = total <= 2;
+
+  const color = premiumActive
+    ? 'text-purple-400 bg-purple-500/10 border-purple-500/20'
+    : urgent
+      ? 'text-red-400 bg-red-500/10 border-red-500/20'
+      : 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+
+  const label = premiumActive
+    ? `Premium: ${premium}d`
+    : `Trial: ${total}d`;
+
+  return (
+    <button
+      onClick={onShowPlans}
+      title="Ver planos"
+      className={`hidden md:flex items-center gap-2 mx-2 mb-1 px-3 py-2 rounded-xl border text-xs font-bold transition-opacity hover:opacity-80 ${color}`}
+    >
+      <span>{premiumActive ? '⭐' : urgent ? '⚠️' : '🎁'}</span>
+      <span className="flex-1 text-left truncate">{label} restante{total !== 1 ? 's' : ''}</span>
+    </button>
+  );
+}
+
+export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
+  const user = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
     catch { return {}; }
-  })();
+  }, []);
+
+  const tenant = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('tenant') ?? '{}'); }
+    catch { return {}; }
+  }, []);
 
   return (
     <aside className="w-14 md:w-56 shrink-0 bg-gray-900 border-r border-white/[0.06] flex flex-col h-full z-10">
@@ -25,29 +75,35 @@ export default function Sidebar({ page, setPage, onLogout }) {
           </div>
           <div className="hidden md:block min-w-0">
             <p className="text-sm font-black text-white truncate leading-tight">
-              {user.tenant?.name ?? 'Restaurante'}
+              {tenant.name ?? 'Restaurante'}
             </p>
             <p className="text-[10px] text-gray-500 truncate capitalize mt-0.5">
-              Plano {user.tenant?.plan ?? 'básico'}
+              Plano {tenant.plan ?? 'básico'}
             </p>
           </div>
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-2 space-y-0.5">
+      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map(({ key, emoji, label, soon }) => (
           <button
             key={key}
             disabled={soon}
-            onClick={() => !soon && setPage(key)}
+            onClick={() => {
+              if (soon) return;
+              if (key === 'plans') { onShowPlans?.(); return; }
+              setPage(key);
+            }}
             className={[
               'w-full flex items-center gap-3 px-2.5 md:px-3 py-2.5 rounded-xl text-sm font-semibold transition-all',
               page === key
                 ? 'bg-orange-500/15 text-orange-400'
-                : soon
-                  ? 'text-gray-600 cursor-not-allowed opacity-50'
-                  : 'text-gray-400 hover:text-white hover:bg-white/[0.06]',
+                : key === 'plans'
+                  ? 'text-purple-400 hover:bg-purple-500/10'
+                  : soon
+                    ? 'text-gray-600 cursor-not-allowed opacity-50'
+                    : 'text-gray-400 hover:text-white hover:bg-white/[0.06]',
             ].join(' ')}
           >
             <span className="text-base shrink-0 w-5 text-center leading-none">{emoji}</span>
@@ -60,6 +116,9 @@ export default function Sidebar({ page, setPage, onLogout }) {
           </button>
         ))}
       </nav>
+
+      {/* Trial widget */}
+      <TrialWidget onShowPlans={onShowPlans} />
 
       {/* User + Logout */}
       <div className="p-2 border-t border-white/[0.06] shrink-0 space-y-0.5">

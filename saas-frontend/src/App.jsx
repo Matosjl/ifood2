@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import LoginPage         from './pages/LoginPage';
 import LandingPage       from './pages/LandingPage';
 import RegisterPage      from './pages/RegisterPage';
@@ -9,8 +9,10 @@ import FinanceiroPage    from './pages/FinanceiroPage';
 import HistoricoPage     from './pages/HistoricoPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
 import FiadoPage         from './pages/FiadoPage';
+import PlansPage         from './pages/PlansPage';
 import Sidebar           from './components/Sidebar';
 import TrialBanner       from './components/TrialBanner';
+import PlanWall          from './components/PlanWall';
 import CustomerApp       from './CustomerApp';
 import AdminApp          from './AdminApp';
 
@@ -22,9 +24,11 @@ const navigate = (path) => {
 };
 
 export default function App() {
-  const [token,    setToken]    = useState(() => localStorage.getItem('token'));
-  const [page,     setPage]     = useState('orders');
-  const [route,    setRoute]    = useState(getRoute);
+  const [token,        setToken]        = useState(() => localStorage.getItem('token'));
+  const [page,         setPage]         = useState('orders');
+  const [route,        setRoute]        = useState(getRoute);
+  const [showPlanWall, setShowPlanWall] = useState(false);
+  const [showPlansPage, setShowPlansPage] = useState(false);
 
   // Sync route on back/forward
   useEffect(() => {
@@ -43,6 +47,26 @@ export default function App() {
     return () => window.removeEventListener('auth:logout', onAuthLogout);
   }, []);
 
+  // Escuta 402 disparado pelo axios (trial expirado / conta bloqueada)
+  useEffect(() => {
+    const onBlocked = () => {
+      setShowPlanWall(true);
+    };
+    window.addEventListener('billing:blocked', onBlocked);
+    return () => window.removeEventListener('billing:blocked', onBlocked);
+  }, []);
+
+  // Detecta conta já suspensa no login (subscriptionStatus no localStorage)
+  useEffect(() => {
+    if (!token) return;
+    const tenant = (() => {
+      try { return JSON.parse(localStorage.getItem('tenant') || 'null'); } catch { return null; }
+    })();
+    if (tenant?.subscriptionStatus === 'suspended' || tenant?.subscriptionStatus === 'cancelled') {
+      setShowPlanWall(true);
+    }
+  }, [token]);
+
   const handleLogin  = (newToken) => { setToken(newToken); navigate('/'); };
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -50,8 +74,11 @@ export default function App() {
     localStorage.removeItem('user');
     localStorage.removeItem('tenant');
     setToken(null);
+    setShowPlanWall(false);
     navigate('/');
   };
+
+  const handleShowPlans = useCallback(() => setShowPlansPage(true), []);
 
   // ── Admin panel ───────────────────────────────────────────
   if (route.startsWith('/admin')) return <AdminApp />;
@@ -96,19 +123,39 @@ export default function App() {
   // ── App (authenticated) ───────────────────────────────────
   return (
     <div className="flex flex-col h-screen bg-gray-950 overflow-hidden">
-      <TrialBanner />
+
+      {/* Trial banner — dias restantes */}
+      <TrialBanner onShowPlans={handleShowPlans} />
+
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <Sidebar page={page} setPage={setPage} onLogout={handleLogout} />
+        <Sidebar
+          page={showPlansPage ? 'plans' : page}
+          setPage={(p) => { setShowPlansPage(false); setPage(p); }}
+          onLogout={handleLogout}
+          onShowPlans={handleShowPlans}
+        />
+
         <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-          {page === 'orders'    && <DashboardPage />}
-          {page === 'products'  && <ProductsPage />}
-          {page === 'stock'     && <StockPage />}
-          {page === 'financial' && <FinanceiroPage />}
-          {page === 'historico' && <HistoricoPage />}
-          {page === 'fiado'     && <FiadoPage />}
-          {page === 'settings'  && <ConfiguracoesPage />}
+          {showPlansPage ? (
+            <PlansPage />
+          ) : (
+            <>
+              {page === 'orders'    && <DashboardPage />}
+              {page === 'products'  && <ProductsPage />}
+              {page === 'stock'     && <StockPage />}
+              {page === 'financial' && <FinanceiroPage />}
+              {page === 'historico' && <HistoricoPage />}
+              {page === 'fiado'     && <FiadoPage />}
+              {page === 'settings'  && <ConfiguracoesPage />}
+            </>
+          )}
         </div>
       </div>
+
+      {/* Plan wall — sobrepõe tudo quando conta está bloqueada */}
+      {showPlanWall && (
+        <PlanWall onDismiss={() => setShowPlanWall(false)} />
+      )}
     </div>
   );
 }

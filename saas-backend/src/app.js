@@ -18,6 +18,7 @@ const usersRoutes       = require('./modules/users/users.routes');
 const adminRoutes    = require('./modules/admin/admin.routes');
 const bancoRoutes    = require('./modules/banco/banco.routes');
 const fiadoRoutes    = require('./modules/fiado/fiado.routes');
+const billingRoutes  = require('./modules/billing/billing.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -77,6 +78,7 @@ app.use('/api/users',      usersRoutes);
 app.use('/api/admin',      adminRoutes);
 app.use('/api/banco',      bancoRoutes);
 app.use('/api/fiado',      fiadoRoutes);
+app.use('/api/billing',    billingRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

@@ -46,7 +46,7 @@ export default function RegisterPage({ onLogin, onGoLogin }) {
             <span className="text-3xl font-black text-white">ZapFome</span>
           </div>
           <p className="text-gray-400 font-semibold">Crie sua conta grátis</p>
-          <p className="text-sm text-orange-400 mt-1">14 dias de teste · Sem cartão de crédito</p>
+          <p className="text-sm text-orange-400 mt-1">3 dias Premium + 7 dias Basic grátis · Sem cartão</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-900 rounded-2xl p-6 border border-white/10 shadow-2xl space-y-4">

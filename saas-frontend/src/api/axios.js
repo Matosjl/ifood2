@@ -37,6 +37,13 @@ api.interceptors.response.use(
   async (err) => {
     const original = err.config;
 
+    // 402 — plano bloqueado / trial expirado
+    if (err.response?.status === 402) {
+      const payload = err.response.data ?? {};
+      window.dispatchEvent(new CustomEvent('billing:blocked', { detail: payload }));
+      return Promise.reject(err);
+    }
+
     if (err.response?.status !== 401 || original._retry) {
       return Promise.reject(err);
     }

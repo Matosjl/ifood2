@@ -14,9 +14,11 @@ CREATE TABLE IF NOT EXISTS tenants (
   -- plan: 'basic' | 'pro' | 'premium'
   active               BOOLEAN      NOT NULL DEFAULT true,
 
-  -- ── Assinatura / SaaS ─────────────────��───────────────────
+  -- ── Assinatura / SaaS ────────────────────────────────────
   subscription_status  VARCHAR(20)  NOT NULL DEFAULT 'active',
   -- subscription_status: 'active' | 'suspended' | 'cancelled' | 'trialing'
+  trial_ends_at        TIMESTAMPTZ,            -- fim do trial total (10 dias)
+  premium_trial_ends_at TIMESTAMPTZ,           -- fim do periodo Premium (3 dias)
   next_billing_date    TIMESTAMPTZ,
   stripe_customer_id   VARCHAR(255),           -- para integracao futura com Stripe
   payment_provider     VARCHAR(50),            -- 'stripe' | 'mercadopago'
