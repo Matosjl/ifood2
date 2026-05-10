@@ -154,6 +154,9 @@ async function main() {
       orderIds.push(res.body.data?.id);
     } else {
       errors++;
+      if (errors <= 3) {
+        process.stdout.write(`\n  ⚠️  Erro #${errors} [HTTP ${res.status}]: ${res.body?.message ?? JSON.stringify(res.body)}\n`);
+      }
     }
 
     progress(i + 1, TOTAL, errors);
