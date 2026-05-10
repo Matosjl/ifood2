@@ -61,14 +61,12 @@ function req(method, path, body, token) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const rnd   = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// ── Seed via psql (docker exec ou direto) ────────────────────
+// ── Seed via docker exec psql ─────────────────────────────────
 
 function psql(sql) {
   try {
-    const escaped = sql.replace(/'/g, "'\\''");
-    const cmd = DB_URL
-      ? `psql "${DB_URL}" -t -c '${escaped}'`
-      : `docker exec ${DB_CONTAINER} psql -U ${DB_USER_ENV} -d ${DB_NAME_ENV} -t -c '${escaped}'`;
+    // Sempre usa docker exec — postgres não está exposto no host
+    const cmd = `docker exec ${DB_CONTAINER} psql -U ${DB_USER_ENV} -d ${DB_NAME_ENV} -t -c "${sql.replace(/"/g, '\\"')}"`;
     return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   } catch (e) {
     throw new Error(`psql: ${e.stderr?.toString()?.trim() ?? e.message}`);
