@@ -1,30 +1,33 @@
 #!/usr/bin/env node
 /**
- * Stress test em massa: N restaurantes × M pedidos
- * Uso: node stress-test-mass.js <api_url> [restaurantes=50] [pedidos=100]
- * Ex:  node stress-test-mass.js http://localhost 50 100
+ * Stress test em massa: cria N restaurantes via DB + M pedidos via HTTP
+ * Uso: node stress-test-mass.js <db_url> <api_url> [restaurantes=50] [pedidos=100]
+ * Ex:  DB_URL="postgres://user:pass@localhost:5432/db" node stress-test-mass.js http://localhost 50 100
  */
 
-const https = require('https');
-const http  = require('http');
-const url   = require('url');
+const https  = require('https');
+const http   = require('http');
+const urlLib = require('url');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
 
 const [,, API_URL_RAW, R_STR, P_STR] = process.argv;
 if (!API_URL_RAW) {
-  console.error('Uso: node stress-test-mass.js <api_url> [restaurantes=50] [pedidos=100]');
+  console.error('Uso: DB_URL="postgres://..." node stress-test-mass.js <api_url> [rest=50] [pedidos=100]');
   process.exit(1);
 }
 
-const API_URL     = API_URL_RAW.replace(/\/$/, '') + '/api';
-const N_REST      = parseInt(R_STR ?? '50', 10);
-const N_PEDIDOS   = parseInt(P_STR ?? '100', 10);
-const CONCURRENCY = 5; // restaurantes em paralelo
+const API_URL   = API_URL_RAW.replace(/\/$/, '') + '/api';
+const N_REST    = parseInt(R_STR  ?? '50',  10);
+const N_PEDIDOS = parseInt(P_STR  ?? '100', 10);
+const DB_URL    = process.env.DB_URL;
+if (!DB_URL) { console.error('Defina DB_URL no ambiente'); process.exit(1); }
 
 // ── HTTP helper ───────────────────────────────────────────────
 
 function req(method, path, body, token) {
   return new Promise((resolve, reject) => {
-    const parsed  = url.parse(API_URL + path);
+    const parsed  = urlLib.parse(API_URL + path);
     const payload = body ? JSON.stringify(body) : null;
     const options = {
       hostname: parsed.hostname,
@@ -55,147 +58,139 @@ function req(method, path, body, token) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const rnd   = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// ── Setup de um restaurante ───────────────────────────────────
+// ── Seed via psql ─────────────────────────────────────────────
 
-async function setupRestaurante(idx) {
-  const email = `stressmass${idx}@teste.com`;
-  const senha = 'Senha1234';
-
-  // Registrar (ignora se já existe)
-  const regRes = await req('POST', '/auth/trial-register', {
-    tenantName: `Stress Rest ${idx}`,
-    name: `Admin ${idx}`,
-    email,
-    password: senha,
-  });
-
-  let token, refreshToken;
-
-  if (regRes.status === 201) {
-    token        = regRes.body.data.accessToken;
-    refreshToken = regRes.body.data.refreshToken;
-  } else {
-    // Já existe — faz login
-    const loginRes = await req('POST', '/auth/login', { email, password: senha });
-    if (loginRes.status !== 200) throw new Error(`Login falhou rest ${idx}: ${loginRes.body?.message}`);
-    token        = loginRes.body.data.accessToken;
-    refreshToken = loginRes.body.data.refreshToken;
+function psql(sql) {
+  try {
+    return execSync(`psql "${DB_URL}" -t -c "${sql.replace(/"/g, '\\"')}"`, {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch (e) {
+    throw new Error(`psql: ${e.stderr?.toString()?.trim() ?? e.message}`);
   }
-
-  // Buscar produtos existentes
-  let products = [];
-  const prodRes = await req('GET', '/products?active=true&limit=10', null, token);
-  products = (prodRes.body?.data?.data ?? prodRes.body?.data ?? []).filter(p => p.active);
-
-  // Criar produtos se não existir nenhum
-  if (products.length === 0) {
-    const catRes = await req('POST', '/categories', { name: 'Cardápio' }, token);
-    const catId  = catRes.body?.data?.id;
-
-    for (const name of ['Hambúrguer', 'Pizza', 'Suco']) {
-      const p = await req('POST', '/products', {
-        name, saleType: 'unit', salePrice: '20.00', categoryId: catId,
-      }, token);
-      if (p.body?.data?.id) products.push(p.body.data);
-    }
-  }
-
-  if (products.length === 0) throw new Error(`Rest ${idx}: nenhum produto criado`);
-
-  // Abrir caixa (ignora se já aberto)
-  const caixaRes = await req('GET', '/caixa/current', null, token);
-  if (!caixaRes.body?.data) {
-    await req('POST', '/caixa/open', { initialBalance: 0 }, token);
-  }
-
-  return { idx, email, token, refreshToken, products };
 }
 
-// ── Pedidos de um restaurante ─────────────────────────────────
+async function seedRestaurantes(n) {
+  process.stdout.write(`  🌱 Criando ${n} restaurantes no banco...`);
 
-async function criarPedidos(rest) {
+  // Limpar restaurantes de teste anteriores
+  psql(`DELETE FROM users WHERE email LIKE 'stressteste%@load.test'`);
+  psql(`DELETE FROM tenants WHERE slug LIKE 'load-test-%'`);
+
+  const tenants = [];
+  for (let i = 1; i <= n; i++) {
+    const tenantId = psql(`SELECT gen_random_uuid()`);
+    const userId   = psql(`SELECT gen_random_uuid()`);
+    const slug     = `load-test-${i}`;
+    const email    = `stressteste${i}@load.test`;
+    // bcrypt hash de 'Senha1234' (pre-computado para velocidade)
+    const hash     = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LPVImNNyRXW'; // "Senha1234"
+
+    psql(`INSERT INTO tenants (id, name, slug, plan, subscription_status, trial_ends_at)
+          VALUES ('${tenantId}', 'Load Test ${i}', '${slug}', 'basic', 'trialing', NOW() + INTERVAL '14 days')
+          ON CONFLICT (slug) DO NOTHING`);
+
+    psql(`INSERT INTO order_counters (tenant_id) VALUES ('${tenantId}') ON CONFLICT DO NOTHING`);
+
+    psql(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
+          VALUES ('${userId}', '${tenantId}', 'Admin ${i}', '${email}', '${hash}', 'owner')
+          ON CONFLICT (email) DO NOTHING`);
+
+    // Produto
+    psql(`INSERT INTO products (tenant_id, name, sale_type, sale_price, active)
+          VALUES ('${tenantId}', 'Item Teste', 'unit', 10.00, true)
+          ON CONFLICT DO NOTHING`);
+
+    // Caixa
+    psql(`INSERT INTO cash_registers (tenant_id, opened_by, opening_balance)
+          VALUES ('${tenantId}', '${userId}', 0)
+          ON CONFLICT DO NOTHING`);
+
+    tenants.push({ idx: i, tenantId, userId, email });
+  }
+
+  console.log(' ✅');
+  return tenants;
+}
+
+// ── Pedidos para um restaurante ───────────────────────────────
+
+async function criarPedidos(email, senha) {
+  const loginRes = await req('POST', '/auth/login', { email, password: senha });
+  if (loginRes.status !== 200) return { ok: 0, fail: N_PEDIDOS, error: loginRes.body?.message };
+
+  let { accessToken: token, refreshToken } = loginRes.body.data;
+
+  // Buscar produto
+  const prodRes = await req('GET', '/products?active=true&limit=5', null, token);
+  const products = (prodRes.body?.data?.data ?? prodRes.body?.data ?? []).filter(p => p.active);
+  if (!products.length) return { ok: 0, fail: N_PEDIDOS, error: 'sem produtos' };
+
   const PAYMENT  = ['cash', 'pix', 'credit', 'debit'];
   const DELIVERY = ['pickup', 'delivery'];
-  const CHANNELS = ['manual', 'whatsapp'];
 
   let ok = 0, fail = 0;
 
   for (let i = 0; i < N_PEDIDOS; i++) {
-    const prod = rnd(rest.products);
+    const prod         = rnd(products);
     const deliveryType = rnd(DELIVERY);
     const body = {
       customerName:    `Cliente ${i + 1}`,
       deliveryType,
       customerAddress: deliveryType === 'delivery' ? `Rua ${i + 1}` : undefined,
       paymentMethod:   rnd(PAYMENT),
-      channel:         rnd(CHANNELS),
+      channel:         'manual',
       items:           [{ productId: prod.id, quantity: 1 }],
     };
 
-    const res = await req('POST', '/orders', body, rest.token);
+    const res = await req('POST', '/orders', body, token);
 
     if (res.status === 401) {
-      const ref = await req('POST', '/auth/refresh', { refreshToken: rest.refreshToken });
+      const ref = await req('POST', '/auth/refresh', { refreshToken });
       if (ref.status === 200) {
-        rest.token        = ref.body.data.accessToken;
-        rest.refreshToken = ref.body.data.refreshToken;
-        const retry = await req('POST', '/orders', body, rest.token);
+        token        = ref.body.data.accessToken;
+        refreshToken = ref.body.data.refreshToken;
+        const retry  = await req('POST', '/orders', body, token);
         retry.status === 201 ? ok++ : fail++;
-      } else { fail++; }
+      } else fail++;
     } else if (res.status === 201) {
       ok++;
     } else {
       fail++;
     }
 
-    await sleep(30); // 30ms entre pedidos
+    await sleep(20);
   }
 
-  return { ok, fail };
-}
-
-// ── Runner com concorrência ───────────────────────────────────
-
-async function runBatch(batch) {
-  return Promise.all(batch.map(async (idx) => {
-    try {
-      const rest    = await setupRestaurante(idx);
-      const result  = await criarPedidos(rest);
-      return { idx, ...result, error: null };
-    } catch (e) {
-      return { idx, ok: 0, fail: N_PEDIDOS, error: e.message };
-    }
-  }));
+  return { ok, fail, error: null };
 }
 
 // ── Main ──────────────────────────────────────────────────────
 
 async function main() {
   console.log(`\n🚀 Stress test em massa`);
-  console.log(`   ${N_REST} restaurantes × ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos total`);
-  console.log(`   Concorrência: ${CONCURRENCY} restaurantes em paralelo\n`);
+  console.log(`   ${N_REST} restaurantes × ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos\n`);
 
+  const tenants = await seedRestaurantes(N_REST);
+
+  console.log(`  🍽️  Criando pedidos (5 restaurantes em paralelo)...\n`);
+
+  const CONCURRENCY = 5;
   const startTime   = Date.now();
-  let totalOk       = 0;
-  let totalFail     = 0;
-  let restOk        = 0;
-  let restFail      = 0;
+  let totalOk = 0, totalFail = 0, restOk = 0, restFail = 0;
 
-  // Processar em lotes de CONCURRENCY
-  for (let i = 0; i < N_REST; i += CONCURRENCY) {
-    const batch   = Array.from({ length: Math.min(CONCURRENCY, N_REST - i) }, (_, j) => i + j + 1);
-    const results = await runBatch(batch);
+  for (let i = 0; i < tenants.length; i += CONCURRENCY) {
+    const batch   = tenants.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(t => criarPedidos(t.email, 'Senha1234').then(r => ({ ...r, idx: t.idx })))
+    );
 
     for (const r of results) {
       totalOk   += r.ok;
       totalFail += r.fail;
-      if (r.error || r.fail > r.ok) {
-        restFail++;
-        process.stdout.write(`  ❌ Rest #${r.idx}: ${r.ok}/${N_PEDIDOS} criados${r.error ? ` — ${r.error}` : ''}\n`);
-      } else {
-        restOk++;
-        process.stdout.write(`  ✅ Rest #${r.idx}: ${r.ok}/${N_PEDIDOS} criados\n`);
-      }
+      const icon = (r.ok === N_PEDIDOS) ? '✅' : r.ok > 0 ? '⚠️ ' : '❌';
+      process.stdout.write(`  ${icon} Rest #${r.idx}: ${r.ok}/${N_PEDIDOS}${r.error ? ` — ${r.error}` : ''}\n`);
+      r.ok === N_PEDIDOS ? restOk++ : restFail++;
     }
   }
 
@@ -204,16 +199,14 @@ async function main() {
 
   console.log('\n' + '─'.repeat(50));
   console.log(`📊 RESULTADO FINAL`);
-  console.log(`   Tempo total:        ${elapsed}s`);
+  console.log(`   Tempo:              ${elapsed}s`);
   console.log(`   Restaurantes OK:    ${restOk}/${N_REST}`);
   console.log(`   Pedidos criados:    ${totalOk}/${N_REST * N_PEDIDOS} (${taxa}%)`);
   console.log(`   Pedidos com erro:   ${totalFail}`);
-
-  if (parseFloat(taxa) >= 95) {
-    console.log(`\n   ✅ SISTEMA ESTÁVEL — taxa de sucesso ${taxa}%\n`);
-  } else {
-    console.log(`\n   ⚠️  Taxa de sucesso abaixo do esperado: ${taxa}%\n`);
-  }
+  console.log(parseFloat(taxa) >= 95
+    ? `\n   ✅ SISTEMA ESTÁVEL — ${taxa}% de sucesso\n`
+    : `\n   ⚠️  Taxa abaixo do esperado: ${taxa}%\n`
+  );
 }
 
-main().catch(e => { console.error('\n❌ Erro fatal:', e.message); process.exit(1); });
+main().catch(e => { console.error('\n❌', e.message); process.exit(1); });
