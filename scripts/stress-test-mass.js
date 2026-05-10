@@ -20,8 +20,11 @@ if (!API_URL_RAW) {
 const API_URL   = API_URL_RAW.replace(/\/$/, '') + '/api';
 const N_REST    = parseInt(R_STR  ?? '50',  10);
 const N_PEDIDOS = parseInt(P_STR  ?? '100', 10);
-const DB_URL    = process.env.DB_URL;
-if (!DB_URL) { console.error('Defina DB_URL no ambiente'); process.exit(1); }
+// Suporta DB_URL direto ou via docker exec
+const DB_URL       = process.env.DB_URL;
+const DB_CONTAINER = process.env.DB_CONTAINER ?? 'saas_postgres';
+const DB_USER_ENV  = process.env.DB_USER ?? 'postgres';
+const DB_NAME_ENV  = process.env.DB_NAME ?? 'saas_db';
 
 // ── HTTP helper ───────────────────────────────────────────────
 
@@ -58,13 +61,15 @@ function req(method, path, body, token) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const rnd   = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// ── Seed via psql ─────────────────────────────────────────────
+// ── Seed via psql (docker exec ou direto) ────────────────────
 
 function psql(sql) {
   try {
-    return execSync(`psql "${DB_URL}" -t -c "${sql.replace(/"/g, '\\"')}"`, {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const escaped = sql.replace(/'/g, "'\\''");
+    const cmd = DB_URL
+      ? `psql "${DB_URL}" -t -c '${escaped}'`
+      : `docker exec ${DB_CONTAINER} psql -U ${DB_USER_ENV} -d ${DB_NAME_ENV} -t -c '${escaped}'`;
+    return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   } catch (e) {
     throw new Error(`psql: ${e.stderr?.toString()?.trim() ?? e.message}`);
   }
