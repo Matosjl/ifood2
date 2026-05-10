@@ -162,7 +162,7 @@ async function criarPedidos(tenantInfo) {
       fail++;
     }
 
-    await sleep(20);
+    await sleep(220); // 220ms = ~4 req/s = 240 req/min (abaixo do limite de 300)
   }
 
   return { ok, fail, error: null };
@@ -172,21 +172,19 @@ async function criarPedidos(tenantInfo) {
 
 async function main() {
   console.log(`\n🚀 Stress test em massa`);
-  console.log(`   ${N_REST} restaurantes × ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos\n`);
+  console.log(`   ${N_REST} restaurantes × ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos`);
+  console.log(`   Modo: sequencial com 220ms entre requests (respeita rate limit 300 req/min)\n`);
 
   const tenants = await seedRestaurantes(N_REST);
 
-  console.log(`  🍽️  Criando pedidos (5 restaurantes em paralelo)...\n`);
+  console.log(`  🍽️  Criando pedidos (1 restaurante por vez)...\n`);
 
-  const CONCURRENCY = 5;
   const startTime   = Date.now();
   let totalOk = 0, totalFail = 0, restOk = 0, restFail = 0;
 
-  for (let i = 0; i < tenants.length; i += CONCURRENCY) {
-    const batch   = tenants.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(t => criarPedidos(t).then(r => ({ ...r, idx: t.idx })))
-    );
+  // Sequencial para respeitar rate limit de IP único
+  for (let i = 0; i < tenants.length; i++) {
+    const results = [await criarPedidos(tenants[i]).then(r => ({ ...r, idx: tenants[i].idx }))];
 
     for (const r of results) {
       totalOk   += r.ok;
