@@ -78,6 +78,10 @@ const create = asyncHandler(async (req, res) => {
 /**
  * PATCH /api/orders/:id/status
  * Body: { status }
+ *
+ * Mudança de status vai DIRETO ao banco — não passa pela fila BullMQ.
+ * Apenas criação e cancelamento precisam da fila (deductStock / addStock).
+ * Isso elimina o travamento de 15s quando o worker está ocupado.
  */
 const updateStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
@@ -88,11 +92,19 @@ const updateStatus = asyncHandler(async (req, res) => {
     throw new AppError(`Status invalido. Use: ${validStatuses.join(', ')}.`, 400);
   }
 
-  const order = await enqueueAndWait('updateStatus', {
-    orderId:  req.params.id,
-    tenantId: req.user.tenantId,
-    status,
-  });
+  // Cancelamento ainda precisa da fila (devolve estoque)
+  if (status === 'cancelled') {
+    const order = await enqueueAndWait('cancel', {
+      orderId:  req.params.id,
+      tenantId: req.user.tenantId,
+    });
+    return res.json({ success: true, data: order });
+  }
+
+  // Todos os outros status: direto no banco, sem fila, sem timeout
+  const order = await service.updateStatus(req.params.id, req.user.tenantId, status);
+  if (!order) throw new AppError('Pedido nao encontrado.', 404);
+
   res.json({ success: true, data: order });
 });
 

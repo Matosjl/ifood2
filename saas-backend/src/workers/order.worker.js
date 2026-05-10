@@ -8,7 +8,7 @@ const { createLogger } = require('../utils/logger');
 
 const logger      = createLogger('Worker:orders');
 const QUEUE_NAME  = 'orders';
-const CONCURRENCY = 2;
+const CONCURRENCY = 5;
 
 // ── Error classifier ──────────────────────────────────────────
 
