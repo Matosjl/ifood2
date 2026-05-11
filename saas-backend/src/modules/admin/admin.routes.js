@@ -13,10 +13,12 @@ router.use((req, res, next) => {
   next();
 });
 
-router.get   ('/tenants',              ctrl.listTenants);
-router.post  ('/tenants',              ctrl.createTenant);
-router.patch ('/tenants/:id',          ctrl.updateTenant);
-router.delete('/tenants/:id',          ctrl.deactivateTenant);
-router.delete('/tenants/:id/destroy',  ctrl.destroyTenant);
+router.get   ('/tenants',                    ctrl.listTenants);
+router.post  ('/tenants',                    ctrl.createTenant);
+router.patch ('/tenants/:id',                ctrl.updateTenant);
+router.post  ('/tenants/:id/activate',       ctrl.activateTenant);
+router.post  ('/tenants/:id/extend-trial',   ctrl.extendTrial);
+router.delete('/tenants/:id',                ctrl.deactivateTenant);
+router.delete('/tenants/:id/destroy',        ctrl.destroyTenant);
 
 module.exports = router;

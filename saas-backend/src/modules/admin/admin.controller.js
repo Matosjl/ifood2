@@ -78,6 +78,44 @@ const updateTenant = asyncHandler(async (req, res) => {
   res.json({ success: true, data: tenant });
 });
 
+// POST /api/admin/tenants/:id/activate — ativa conta após pagamento confirmado
+const activateTenant = asyncHandler(async (req, res) => {
+  const { plan = null } = req.body;
+  const { rows: [tenant] } = await db.query(
+    `UPDATE tenants
+     SET subscription_status  = 'active',
+         active               = true,
+         plan                 = COALESCE($2, plan),
+         trial_ends_at        = NULL,
+         premium_trial_ends_at = NULL,
+         updated_at           = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [req.params.id, plan]
+  );
+  if (!tenant) throw new AppError('Tenant não encontrado.', 404);
+  res.json({ success: true, data: tenant });
+});
+
+// POST /api/admin/tenants/:id/extend-trial — adiciona dias ao trial
+const extendTrial = asyncHandler(async (req, res) => {
+  const { days = 7 } = req.body;
+  const { rows: [tenant] } = await db.query(
+    `UPDATE tenants
+     SET trial_ends_at = GREATEST(COALESCE(trial_ends_at, NOW()), NOW()) + ($2 || ' days')::INTERVAL,
+         subscription_status = CASE
+           WHEN subscription_status = 'suspended' THEN 'trialing'
+           ELSE subscription_status
+         END,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [req.params.id, days]
+  );
+  if (!tenant) throw new AppError('Tenant não encontrado.', 404);
+  res.json({ success: true, data: tenant });
+});
+
 // DELETE /api/admin/tenants/:id — deactivate (soft)
 const deactivateTenant = asyncHandler(async (req, res) => {
   await db.query(
@@ -121,4 +159,4 @@ const destroyTenant = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { listTenants, createTenant, updateTenant, deactivateTenant, destroyTenant };
+module.exports = { listTenants, createTenant, updateTenant, activateTenant, extendTrial, deactivateTenant, destroyTenant };
