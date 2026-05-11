@@ -13,7 +13,24 @@ COPY package*.json ./
 # Install only production dependencies
 RUN npm ci --omit=dev --ignore-scripts
 
-# ── Stage 2: production image ─────────────────────────────────
+# ── Stage 2: test image (has devDependencies — jest, supertest) ──
+FROM node:20-alpine AS test
+
+WORKDIR /app
+
+COPY package*.json ./
+
+# Install ALL deps (including jest, supertest)
+RUN npm ci --ignore-scripts
+
+# Copy full source (tests/ included)
+COPY . .
+
+ENV NODE_ENV=test
+
+CMD ["npm", "test"]
+
+# ── Stage 3: production image ─────────────────────────────────
 FROM node:20-alpine AS production
 
 # Security: run as non-root

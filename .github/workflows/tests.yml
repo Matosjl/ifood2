@@ -32,7 +32,7 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production
       DB_HOST: localhost
       DB_PORT: 5432
-      DB_NAME_TEST: saas_restaurant_test
+      DB_NAME: saas_restaurant_test
       DB_USER: saas_user
       DB_PASSWORD: saas_pass
       # Redis is not required for tests — queue is mocked. Provide a dummy URL so
