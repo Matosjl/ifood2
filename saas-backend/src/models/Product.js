@@ -61,20 +61,20 @@ class Product {
   // ── Escrita ────────────────────────────────────────────────
 
   static async create(tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, stockQty, alertThreshold } = data;
+    const { categoryId, name, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured } = data;
     const { rows } = await dbClient.query(
       `INSERT INTO products
-         (tenant_id, category_id, name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (tenant_id, category_id, name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [tenantId, categoryId || null, name.trim(), description || null,
-       saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0]
+       saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0, featured ?? false]
     );
     return rows[0];
   }
 
   static async update(id, tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, alertThreshold, active } = data;
+    const { categoryId, name, description, saleType, costPrice, salePrice, alertThreshold, active, featured } = data;
     const { rows } = await dbClient.query(
       `UPDATE products
        SET category_id     = COALESCE($3, category_id),
@@ -85,10 +85,12 @@ class Product {
            sale_price      = COALESCE($8, sale_price),
            alert_threshold = COALESCE($9, alert_threshold),
            active          = COALESCE($10, active),
+           featured        = COALESCE($11, featured),
            updated_at      = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
-      [id, tenantId, categoryId, name?.trim(), description, saleType, costPrice, salePrice, alertThreshold, active]
+      [id, tenantId, categoryId, name?.trim(), description, saleType, costPrice, salePrice, alertThreshold, active,
+       featured !== undefined ? featured : null]
     );
     return rows[0] || null;
   }

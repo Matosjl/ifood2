@@ -25,6 +25,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     alertThreshold: product?.alert_threshold ?? '',
     description:    product?.description    ?? '',
     active:         product?.active         ?? true,
+    featured:       product?.featured       ?? false,
   });
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState(null);
@@ -57,6 +58,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         salePrice:      parseFloat(form.salePrice)      || 0,
         alertThreshold: parseFloat(form.alertThreshold) || 0,
         description:    form.description || undefined,
+        featured:       form.featured,
       };
       if (!isEdit) payload.stockQty = parseFloat(form.stockQty) || 0;
       else         payload.active   = form.active;
@@ -72,8 +74,8 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         try {
           const { data: imgData } = await uploadProductImage(savedProduct.id, imgFile);
           savedProduct = { ...savedProduct, image_url: imgData.data?.image_url ?? imgData.image_url };
-        } catch {
-          // image upload failure is non-fatal
+        } catch (uploadErr) {
+          setError(`Produto salvo, mas falha no upload da imagem: ${uploadErr.response?.data?.message ?? 'erro desconhecido'}. Tente editar e trocar a foto.`);
         }
       }
 
@@ -269,6 +271,17 @@ function ProductModal({ product, categories, onClose, onSaved }) {
               }}
             />
           </div>
+
+          {/* Destaque — aparece no carrossel do cardápio */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={form.featured}
+              onChange={(e) => set('featured', e.target.checked)}
+              className="w-4 h-4 accent-yellow-500 rounded"
+            />
+            <span className="text-sm text-gray-300">⭐ Produto em destaque <span className="text-gray-600 text-xs">(aparece no carrossel do cardápio)</span></span>
+          </label>
 
           {/* Ativo — edit only */}
           {isEdit && (
