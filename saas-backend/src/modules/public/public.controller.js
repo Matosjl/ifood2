@@ -7,7 +7,8 @@ const AppError       = require('../../utils/AppError');
 // GET /api/public/:slug  — menu público
 const getMenu = asyncHandler(async (req, res) => {
   const { rows: tenants } = await db.query(
-    `SELECT id, name, slug, whatsapp_number, address FROM tenants WHERE slug = $1 AND active = true`,
+    `SELECT id, name, slug, whatsapp_number, address, cover_url, description
+     FROM tenants WHERE slug = $1 AND active = true`,
     [req.params.slug]
   );
   const tenant = tenants[0];
@@ -15,13 +16,18 @@ const getMenu = asyncHandler(async (req, res) => {
 
   const { rows: products } = await db.query(
     `SELECT p.id, p.name, p.description, p.sale_type, p.sale_price,
-            p.stock_qty, p.image_url, c.name AS category_name
+            p.stock_qty, p.image_url, p.featured, p.sort_order, c.name AS category_name
      FROM   products p
      LEFT   JOIN categories c ON c.id = p.category_id
      WHERE  p.tenant_id = $1 AND p.active = true AND p.stock_qty > 0
-     ORDER  BY c.name NULLS LAST, p.name`,
+     ORDER  BY p.featured DESC, p.sort_order ASC, c.name NULLS LAST, p.name`,
     [tenant.id]
   );
+
+  // Destaques
+  const featured = products.filter(p => p.featured).slice(0, 8);
+  // Se não houver produtos marcados como featured, pega os 6 primeiros
+  const featuredFinal = featured.length > 0 ? featured : products.slice(0, 6);
 
   // Agrupar por categoria
   const grouped = {};
@@ -32,7 +38,7 @@ const getMenu = asyncHandler(async (req, res) => {
   }
   const categories = Object.entries(grouped).map(([name, items]) => ({ name, items }));
 
-  res.json({ success: true, data: { tenant, categories } });
+  res.json({ success: true, data: { tenant, categories, featured: featuredFinal } });
 });
 
 // POST /api/public/:slug/orders  — criar pedido (cliente)

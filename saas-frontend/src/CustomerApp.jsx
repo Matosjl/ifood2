@@ -280,6 +280,7 @@ export default function CustomerApp({ slug }) {
   const [cart,           setCart]           = useState(emptyCart());
   const [cartOpen,       setCartOpen]       = useState(false);
   const [activeCategory, setActiveCategory] = useState(null);
+  const [featured,       setFeatured]       = useState([]);
 
   const [page,    setPage]    = useState('menu'); // 'menu' | 'checkout' | 'tracking'
   const [order,   setOrder]   = useState(null);
@@ -308,6 +309,7 @@ export default function CustomerApp({ slug }) {
         const d = data.data ?? data;
         setMenuData(d);
         if (d.categories?.length > 0) setActiveCategory(d.categories[0].name);
+        if (d.featured) setFeatured(d.featured);
         // Check if customer has a recent order to track
         const saved = loadOrder(slug);
         if (saved) {
@@ -626,24 +628,78 @@ export default function CustomerApp({ slug }) {
 
   // ── PAGE: MENU ─────────────────────────────────────────────
 
-  const activeCat    = categories.find((c) => c.name === activeCategory);
-  const displayCats  = search ? filteredCategories : (activeCat ? [activeCat] : categories);
+  // Helpers para placeholder visual
+  const CATEGORY_GRADIENTS = [
+    'from-orange-400 to-red-500',
+    'from-purple-500 to-pink-500',
+    'from-green-400 to-teal-500',
+    'from-blue-400 to-indigo-500',
+    'from-yellow-400 to-orange-500',
+    'from-pink-400 to-rose-500',
+  ];
+
+  const getCategoryGradient = (name) => {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return CATEGORY_GRADIENTS[Math.abs(hash) % CATEGORY_GRADIENTS.length];
+  };
+
+  const getProductEmoji = (name) => {
+    const n = name.toLowerCase();
+    if (n.includes('burger') || n.includes('x-') || n.includes('hamb')) return '🍔';
+    if (n.includes('pizza')) return '🍕';
+    if (n.includes('frango')) return '🍗';
+    if (n.includes('batata') || n.includes('fritas')) return '🍟';
+    if (n.includes('salada')) return '🥗';
+    if (n.includes('suco') || n.includes('vitamina')) return '🥤';
+    if (n.includes('coca') || n.includes('refri') || n.includes('bebida') || n.includes('água')) return '🥤';
+    if (n.includes('milk') || n.includes('shake')) return '🥛';
+    if (n.includes('sorvete') || n.includes('açaí') || n.includes('acai')) return '🍨';
+    if (n.includes('bolo') || n.includes('torta') || n.includes('brownie')) return '🎂';
+    if (n.includes('peixe') || n.includes('salmão') || n.includes('atum')) return '🐟';
+    if (n.includes('carne') || n.includes('steak') || n.includes('picanha')) return '🥩';
+    if (n.includes('macarrão') || n.includes('massa') || n.includes('espaguete')) return '🍝';
+    if (n.includes('marmita') || n.includes('quentinha')) return '🍱';
+    if (n.includes('pastel') || n.includes('empanada') || n.includes('salgado')) return '🥟';
+    if (n.includes('taco') || n.includes('burrito') || n.includes('wrap')) return '🌮';
+    if (n.includes('camarão')) return '🦐';
+    if (n.includes('churrasco') || n.includes('espeto')) return '🍢';
+    if (n.includes('onion') || n.includes('cebola')) return '🧅';
+    if (n.includes('chocolate')) return '🍫';
+    if (n.includes('café') || n.includes('capuccino') || n.includes('latte')) return '☕';
+    if (n.includes('cerveja') || n.includes('chopp')) return '🍺';
+    if (n.includes('vinho')) return '🍷';
+    return '🍽️';
+  };
+
+  const activeCat   = categories.find((c) => c.name === activeCategory);
+  const displayCats = search ? filteredCategories : (activeCat ? [activeCat] : categories);
 
   return (
     <div className="min-h-screen bg-gray-50">
 
       {/* Hero header */}
-      <div className="bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 50%)' }} />
-        <div className="relative px-5 pt-8 pb-6 text-white">
+      <div className="relative overflow-hidden" style={{ minHeight: 180 }}>
+        {/* Cover image ou gradiente */}
+        {tenant.cover_url
+          ? <img src={tenant.cover_url} alt={tenant.name} className="absolute inset-0 w-full h-full object-cover" />
+          : <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500" />
+        }
+        {/* Overlay escuro */}
+        <div className="absolute inset-0 bg-black/40" />
+
+        <div className="relative px-4 pt-8 pb-5 text-white">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
-              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-3xl mb-3 shadow-lg">
+              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-3xl mb-3 shadow-lg border border-white/20">
                 🍽️
               </div>
-              <h1 className="text-2xl font-black leading-tight">{tenant.name ?? 'Restaurante'}</h1>
+              <h1 className="text-2xl font-black leading-tight drop-shadow">{tenant.name ?? 'Restaurante'}</h1>
+              {tenant.description && (
+                <p className="text-white/80 text-xs mt-1 leading-relaxed max-w-xs">{tenant.description}</p>
+              )}
               {tenant.address && (
-                <p className="text-orange-100 text-xs mt-1 flex items-center gap-1">
+                <p className="text-white/70 text-xs mt-1 flex items-center gap-1">
                   <span>📍</span>{tenant.address}
                 </p>
               )}
@@ -660,7 +716,7 @@ export default function CustomerApp({ slug }) {
 
           {/* Status badges */}
           <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <span className="flex items-center gap-1 bg-white/20 rounded-full px-2.5 py-1 text-xs font-semibold">
+            <span className="flex items-center gap-1 bg-white/20 backdrop-blur rounded-full px-2.5 py-1 text-xs font-semibold">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               Aberto agora
             </span>
@@ -668,7 +724,7 @@ export default function CustomerApp({ slug }) {
               <a
                 href={`https://wa.me/${tenant.whatsapp_number.replace(/\D/g,'')}?text=${encodeURIComponent(`Olá, vi o cardápio e gostaria de saber mais!`)}`}
                 target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1 bg-green-500/80 rounded-full px-2.5 py-1 text-xs font-semibold hover:bg-green-500 transition-colors">
+                className="flex items-center gap-1 bg-green-500/80 backdrop-blur rounded-full px-2.5 py-1 text-xs font-semibold hover:bg-green-500 transition-colors">
                 <IconWhatsApp />
                 WhatsApp
               </a>
@@ -677,7 +733,7 @@ export default function CustomerApp({ slug }) {
         </div>
 
         {/* Search bar */}
-        <div className="px-4 pb-4">
+        <div className="relative px-4 pb-4">
           <div className="relative">
             <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -712,6 +768,50 @@ export default function CustomerApp({ slug }) {
         </div>
       )}
 
+      {/* Seção Destaques */}
+      {featured.length > 0 && !search && (
+        <div className="px-4 pt-4 pb-2">
+          <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider mb-3">⭐ Destaques</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4">
+            {featured.map(product => {
+              const inCart = cart[product.id];
+              const emoji  = getProductEmoji(product.name);
+              const grad   = getCategoryGradient(product.category_name ?? product.name);
+              return (
+                <div key={product.id}
+                  className="shrink-0 w-40 bg-white rounded-2xl shadow-md overflow-hidden border border-gray-100 flex flex-col cursor-pointer active:scale-95 transition-transform"
+                  onClick={() => !inCart && setCart(c => addToCart(c, product))}
+                >
+                  {/* Imagem ou gradiente */}
+                  <div className={`h-28 relative ${!product.image_url ? `bg-gradient-to-br ${grad}` : ''}`}>
+                    {product.image_url
+                      ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                      : <div className="w-full h-full flex items-center justify-center text-5xl">{emoji}</div>
+                    }
+                    {inCart && (
+                      <div className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow">
+                        {inCart.qty}
+                      </div>
+                    )}
+                  </div>
+                  {/* Info */}
+                  <div className="p-2.5 flex-1 flex flex-col justify-between">
+                    <p className="text-xs font-bold text-gray-800 leading-tight line-clamp-2">{product.name}</p>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-orange-600 font-black text-sm">{fmtBRL(product.sale_price)}</span>
+                      {!inCart
+                        ? <span className="text-orange-500 text-lg leading-none font-black">+</span>
+                        : <span className="text-green-500 text-xs font-bold">✓</span>
+                      }
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Products */}
       <div className="max-w-3xl mx-auto px-4 pt-4 pb-32">
 
@@ -742,7 +842,7 @@ export default function CustomerApp({ slug }) {
 
             <div className="space-y-3">
               {(cat.items ?? []).map((product) => {
-                const inCart    = cart[product.id];
+                const inCart     = cart[product.id];
                 const outOfStock = product.stock_qty <= 0;
                 return (
                   <div key={product.id}
@@ -752,28 +852,23 @@ export default function CustomerApp({ slug }) {
                     <div className="flex gap-3 p-3">
                       {/* Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-gray-900 text-sm leading-tight">{product.name}</p>
-                            {product.description && (
-                              <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{product.description}</p>
-                            )}
-                          </div>
+                        <div className="flex items-start gap-1 flex-wrap mb-0.5">
+                          {product.featured && (
+                            <span className="text-[10px] bg-yellow-100 text-yellow-700 font-bold px-1.5 py-0.5 rounded-full">⭐ Destaque</span>
+                          )}
                           {outOfStock && (
-                            <span className="shrink-0 text-[10px] bg-red-100 text-red-500 font-bold px-2 py-0.5 rounded-full">
-                              Esgotado
-                            </span>
+                            <span className="text-[10px] bg-red-100 text-red-500 font-bold px-2 py-0.5 rounded-full">Esgotado</span>
                           )}
                         </div>
-
+                        <p className="font-bold text-gray-900 text-sm leading-tight">{product.name}</p>
+                        {product.description && (
+                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{product.description}</p>
+                        )}
                         <div className="flex items-center justify-between mt-2 gap-2">
                           <span className="text-orange-600 font-black text-base">
                             {fmtBRL(product.sale_price)}
-                            {product.sale_type === 'kg' && (
-                              <span className="text-xs font-semibold text-gray-400">/kg</span>
-                            )}
+                            {product.sale_type === 'kg' && <span className="text-xs font-semibold text-gray-400">/kg</span>}
                           </span>
-
                           {!outOfStock && (
                             product.sale_type === 'kg' ? (
                               <input type="number" min="0.1" step="0.1" placeholder="0.0 kg"
@@ -790,14 +885,10 @@ export default function CustomerApp({ slug }) {
                                     if (inCart.qty <= 1) setCart((c) => removeFromCart(c, product.id));
                                     else setQty(product.id, inCart.qty - 1);
                                   }}
-                                  className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 font-black text-lg flex items-center justify-center hover:bg-orange-200 transition-colors">
-                                  −
-                                </button>
+                                  className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 font-black text-lg flex items-center justify-center hover:bg-orange-200 transition-colors">−</button>
                                 <span className="w-6 text-center font-black text-gray-900 text-sm tabular-nums">{inCart.qty}</span>
                                 <button onClick={() => setQty(product.id, inCart.qty + 1)}
-                                  className="w-8 h-8 rounded-xl bg-orange-500 text-white font-black text-lg flex items-center justify-center hover:bg-orange-600 transition-colors">
-                                  +
-                                </button>
+                                  className="w-8 h-8 rounded-xl bg-orange-500 text-white font-black text-lg flex items-center justify-center hover:bg-orange-600 transition-colors">+</button>
                               </div>
                             ) : (
                               <button onClick={() => setCart((c) => addToCart(c, product))}
@@ -809,14 +900,15 @@ export default function CustomerApp({ slug }) {
                           )}
                         </div>
                       </div>
-
-                      {/* Image */}
-                      {product.image_url && (
-                        <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 shrink-0 self-start">
-                          <img src={product.image_url} alt={product.name}
-                            className="w-full h-full object-cover" loading="lazy" />
-                        </div>
-                      )}
+                      {/* Imagem ou placeholder colorido */}
+                      <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 shrink-0 self-start">
+                        {product.image_url
+                          ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                          : <div className={`w-full h-full bg-gradient-to-br ${getCategoryGradient(product.category_name ?? product.name)} flex items-center justify-center text-4xl`}>
+                              {getProductEmoji(product.name)}
+                            </div>
+                        }
+                      </div>
                     </div>
                   </div>
                 );
