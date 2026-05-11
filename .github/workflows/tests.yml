@@ -1,0 +1,80 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Jest tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: saas_restaurant_test
+          POSTGRES_USER: saas_user
+          POSTGRES_PASSWORD: saas_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U saas_user -d saas_restaurant_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-jwt-secret-not-for-production
+      JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME_TEST: saas_restaurant_test
+      DB_USER: saas_user
+      DB_PASSWORD: saas_pass
+      # Redis is not required for tests — queue is mocked. Provide a dummy URL so
+      # ioredis doesn't throw at module load time if it validates the URL eagerly.
+      REDIS_URL: redis://localhost:6379
+      SUPER_ADMIN_KEY: ci-admin-key
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: saas-backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: saas-backend
+        run: npm ci
+
+      - name: Apply database schema
+        run: |
+          PGPASSWORD=saas_pass psql \
+            -h localhost \
+            -U saas_user \
+            -d saas_restaurant_test \
+            -f saas-backend/src/database/schema.sql
+
+      - name: Run tests
+        working-directory: saas-backend
+        run: npm test
+
+      - name: Run tests with coverage
+        working-directory: saas-backend
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: saas-backend/coverage/
+          retention-days: 14
