@@ -143,29 +143,43 @@ const createOrder = async ({
 /**
  * Deletes all test data for a tenant in correct FK order.
  *
+ * Uses a safe wrapper so that tables added after the initial DB init
+ * (e.g. banco_transactions, fiado_*) don't crash cleanup on older DBs.
+ * The final DELETE on tenants cascades everything else automatically.
+ *
  * @param {string} tenantId
  */
 const cleanupTenant = async (tenantId) => {
-  await db.query(`DELETE FROM stock_movements WHERE tenant_id = $1`, [tenantId]);
-  await db.query(
+  // Ignores "relation does not exist" (42P01) — safe on DBs missing newer tables
+  const safeDel = (sql, params) =>
+    db.query(sql, params).catch((e) => { if (e.code !== '42P01') throw e; });
+
+  // Tables without a direct tenant_id FK must be cleaned first
+  await safeDel(
     `DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE tenant_id = $1)`,
     [tenantId]
   );
-  await db.query(`DELETE FROM fiado_compras WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM fiado_clientes WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM orders WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM products WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM categories WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM expenses WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM cash_registers WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM banco_transactions WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM order_counters WHERE tenant_id = $1`, [tenantId]);
-  await db.query(
+  await safeDel(
     `DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE tenant_id = $1)`,
     [tenantId]
   );
-  await db.query(`DELETE FROM users WHERE tenant_id = $1`, [tenantId]);
-  await db.query(`DELETE FROM tenants WHERE id = $1`, [tenantId]);
+
+  // Everything else cascades from tenant deletion — explicit deletes
+  // are belt-and-suspenders for tables that may not have cascade configured
+  await safeDel(`DELETE FROM stock_movements  WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM fiado_compras    WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM fiado_clientes   WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM orders           WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM products         WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM categories       WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM expenses         WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM cash_registers   WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM banco_transactions WHERE tenant_id = $1`, [tenantId]);
+  await safeDel(`DELETE FROM order_counters   WHERE tenant_id = $1`, [tenantId]);
+
+  // Tenant delete cascades users + anything still remaining
+  await db.query(`DELETE FROM users   WHERE tenant_id = $1`, [tenantId]);
+  await db.query(`DELETE FROM tenants WHERE id         = $1`, [tenantId]);
 };
 
 module.exports = { createTestTenant, openCashRegister, createOrder, cleanupTenant };
