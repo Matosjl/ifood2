@@ -28,6 +28,8 @@ router.get('/',                     ctrl.list);
 router.post('/',                    checkOrderLimit, itemRules, ctrl.create);
 router.get('/:id',                  ctrl.getOne);
 router.patch('/:id/status',         ctrl.updateStatus);
+router.patch('/:id/paid',           ctrl.setPaid);
+router.patch('/:id/items',          itemRules, ctrl.updateItems);
 router.delete('/:id',               authorize('owner', 'manager'), ctrl.cancel);
 
 module.exports = router;

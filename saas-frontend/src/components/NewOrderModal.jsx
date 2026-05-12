@@ -462,12 +462,15 @@ export default function NewOrderModal({ onClose, onCreated }) {
                   { value: 'voucher', label: '🎫 Vale'     },
                   { value: 'fiado',   label: '🤝 Fiado'    },
                   { value: 'other',   label: '🔖 Outro'    },
+                  { value: 'pending', label: '⏳ A cobrar' },
                 ].map(({ value, label }) => (
                   <button key={value} type="button" onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
                     className={`py-1.5 px-1 rounded-lg text-xs font-semibold transition-colors ${
                       paymentMethod === value
                         ? value === 'fiado'
                           ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                          : value === 'pending'
+                          ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40'
                           : 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
                         : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
                     }`}

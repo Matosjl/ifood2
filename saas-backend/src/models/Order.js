@@ -172,6 +172,14 @@ class Order {
       );
     }
 
+    // Bloqueia entrega se pagamento ainda não foi confirmado
+    if (newStatus === 'delivered' && current[0].payment_method === 'pending' && !current[0].paid_at) {
+      throw new AppError(
+        'Pagamento ainda não registrado. Use "Receber Pagamento" antes de entregar.',
+        400
+      );
+    }
+
     const { rows } = await dbClient.query(
       `UPDATE orders
        SET status = $3, updated_at = NOW()
@@ -185,6 +193,23 @@ class Order {
   /** Retorna as transições de status válidas a partir do estado atual. */
   static getValidTransitions(status) {
     return STATUS_TRANSITIONS[status] || [];
+  }
+
+  /**
+   * Registra pagamento de um pedido.
+   * Define paid_at = NOW() e atualiza payment_method.
+   */
+  static async markAsPaid(id, tenantId, paymentMethod, dbClient = db) {
+    const { rows } = await dbClient.query(
+      `UPDATE orders
+       SET paid_at = NOW(), payment_method = $3, updated_at = NOW()
+       WHERE  id = $1 AND tenant_id = $2
+         AND  status NOT IN ('cancelled')
+       RETURNING *`,
+      [id, tenantId, paymentMethod]
+    );
+    if (!rows[0]) throw new AppError('Pedido não encontrado ou cancelado.', 404);
+    return rows[0];
   }
 }
 

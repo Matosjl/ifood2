@@ -1,5 +1,7 @@
-import KanbanColumn from './KanbanColumn';
-import { COLUMNS }  from '../hooks/useOrders';
+import { useState } from 'react';
+import KanbanColumn    from './KanbanColumn';
+import EditOrderModal  from './EditOrderModal';
+import { COLUMNS }     from '../hooks/useOrders';
 
 // ── Channel columns ───────────────────────────────────────────
 
@@ -207,8 +209,11 @@ const DOT_COLOR = { yellow: 'bg-yellow-400', blue: 'bg-blue-400', green: 'bg-gre
 export default function OrdersBoard({
   loading, orders = [], getColumnOrders,
   changeStatus, doCancel, acknowledgeOrder,
+  markPaid, editItems,
   viewMode = 'default',
 }) {
+  const [editingOrder, setEditingOrder] = useState(null);
+
   const handleStatus = (id, status) => {
     if (status === 'cancelled') doCancel(id);
     else changeStatus(id, status);
@@ -219,17 +224,28 @@ export default function OrdersBoard({
   // ── Default: classic 4-column Kanban ─────────────────────────
   if (viewMode === 'default') {
     return (
-      <div className="flex-1 grid grid-cols-4 gap-3 p-4 min-h-0 overflow-hidden">
-        {COLUMNS.map((col) => (
-          <KanbanColumn
-            key={col.id}
-            column={col}
-            orders={getColumnOrders(col.statuses)}
-            onStatusChange={handleStatus}
-            onAcknowledge={acknowledgeOrder}
+      <>
+        <div className="flex-1 grid grid-cols-4 gap-3 p-4 min-h-0 overflow-hidden">
+          {COLUMNS.map((col) => (
+            <KanbanColumn
+              key={col.id}
+              column={col}
+              orders={getColumnOrders(col.statuses)}
+              onStatusChange={handleStatus}
+              onAcknowledge={acknowledgeOrder}
+              onMarkPaid={markPaid}
+              onEditItems={setEditingOrder}
+            />
+          ))}
+        </div>
+        {editingOrder && (
+          <EditOrderModal
+            order={editingOrder}
+            onClose={() => setEditingOrder(null)}
+            onSave={async (id, items) => { await editItems(id, items); setEditingOrder(null); }}
           />
-        ))}
-      </div>
+        )}
+      </>
     );
   }
 
