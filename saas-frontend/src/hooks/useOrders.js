@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import useSocket from './useSocket';
 import { playAlert, unlockAudio } from '../utils/sound';
 import { printOrder } from '../utils/print';
-import { getOrders, updateOrderStatus, cancelOrder } from '../api/orders';
+import { getOrders, updateOrderStatus, cancelOrder,
+         markOrderPaid as markOrderPaidApi,
+         editOrderItems as editOrderItemsApi } from '../api/orders';
 import { getApiError } from '../utils/apiError';
 
 // ── Column definitions ────────────────────────────────────────
@@ -70,6 +72,7 @@ const norm = (o) => ({
     total:       parseFloat(i.total ?? 0),
     notes:       i.notes ?? null,
   })),
+  paidAt:    o.paidAt    ?? o.paid_at    ?? null,
   createdAt: o.createdAt ?? o.created_at,
   updatedAt: o.updatedAt ?? o.updated_at,
 });
@@ -241,6 +244,36 @@ export default function useOrders() {
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
   }, []);
 
+  // ── Pagamento ────────────────────────────────────────────────
+
+  const markPaid = useCallback(async (id, paymentMethod) => {
+    const snapshot = orders.find((o) => o.id === id);
+    // Optimistic: marca como pago imediatamente
+    setOrders((prev) => prev.map((o) =>
+      o.id === id ? { ...o, paymentMethod, paidAt: new Date().toISOString() } : o
+    ));
+    try {
+      const { data } = await markOrderPaidApi(id, paymentMethod);
+      if (data.data) setOrders((prev) => prev.map((o) => o.id === id ? norm(data.data) : o));
+    } catch (err) {
+      if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao registrar pagamento')}`);
+    }
+  }, [orders]);
+
+  // ── Edição de itens ──────────────────────────────────────────
+
+  const editItems = useCallback(async (id, items) => {
+    try {
+      const { data } = await editOrderItemsApi(id, items);
+      if (data.data) setOrders((prev) => prev.map((o) => o.id === id ? norm(data.data) : o));
+    } catch (err) {
+      const snapshot = orders.find((o) => o.id === id);
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao editar itens')}`);
+      throw err; // re-throw para o modal exibir o erro
+    }
+  }, [orders]);
+
   // ── Column helper ────────────────────────────────────────────
 
   const getColumnOrders = useCallback((statuses) =>
@@ -257,5 +290,6 @@ export default function useOrders() {
     autoPrint, setAutoPrint,
     changeStatus, doCancel, addOrder,
     acknowledgeOrder, getColumnOrders,
+    markPaid, editItems,
   };
 }

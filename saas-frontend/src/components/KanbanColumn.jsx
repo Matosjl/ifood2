@@ -7,7 +7,7 @@ const DOT = {
   red:    'bg-red-400',
 };
 
-export default function KanbanColumn({ column, orders, onStatusChange, onAcknowledge }) {
+export default function KanbanColumn({ column, orders, onStatusChange, onAcknowledge, onMarkPaid, onEditItems }) {
   const { label, color, header, count } = column;
 
   return (
@@ -38,6 +38,8 @@ export default function KanbanColumn({ column, orders, onStatusChange, onAcknowl
               order={order}
               onStatusChange={onStatusChange}
               onAcknowledge={onAcknowledge}
+              onMarkPaid={onMarkPaid}
+              onEditItems={onEditItems}
             />
           ))
         )}

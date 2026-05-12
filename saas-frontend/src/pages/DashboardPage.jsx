@@ -56,7 +56,7 @@ export default function DashboardPage() {
     autoPrint, setAutoPrint,
     changeStatus, doCancel,
     acknowledgeOrder, getColumnOrders,
-    addOrder,
+    addOrder, markPaid, editItems,
   } = useOrders();
 
   // Count pending (non-confirmed yet) orders for badge
@@ -104,6 +104,8 @@ export default function DashboardPage() {
         changeStatus={changeStatus}
         doCancel={doCancel}
         acknowledgeOrder={acknowledgeOrder}
+        markPaid={markPaid}
+        editItems={editItems}
         viewMode={viewMode}
       />
 

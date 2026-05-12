@@ -283,7 +283,12 @@ CREATE INDEX IF NOT EXISTS idx_fiado_compras_cliente ON fiado_compras(tenant_id,
 CREATE INDEX IF NOT EXISTS idx_fiado_compras_order   ON fiado_compras(order_id);
 
 -- Adiciona payment_method 'fiado' aos pedidos (já existe a coluna, só documenta)
--- payment_method aceita: 'cash'|'pix'|'credit'|'debit'|'fiado'
+-- payment_method aceita: 'cash'|'pix'|'credit'|'debit'|'fiado'|'pending'
+
+-- ── Pagamento ─────────────────────────────────────────────────
+-- paid_at: NULL = não pago ainda; preenchido = data/hora em que o pagamento foi registrado
+-- Obrigatório ter paid_at preenchido para transição → delivered quando payment_method='pending'
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
 
 -- ── Migração: colunas de contagem física no fechamento de caixa ──
 -- (idempotente — ADD COLUMN IF NOT EXISTS é seguro re-executar)

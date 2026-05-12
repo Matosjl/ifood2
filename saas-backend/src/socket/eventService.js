@@ -10,14 +10,18 @@ const logger = createLogger('EventService');
  * Sensitive internals (tenant_id, raw DB columns) are excluded.
  */
 const buildOrderPayload = (order) => ({
-  id:           order.id,
-  orderNumber:  order.order_number,
-  status:       order.status,
-  channel:      order.channel,
-  total:        parseFloat(order.total),
-  notes:        order.notes  || null,
-  customerName:  order.customer_name  || null,
-  customerPhone: order.customer_phone || null,
+  id:              order.id,
+  orderNumber:     order.order_number,
+  status:          order.status,
+  channel:         order.channel,
+  total:           parseFloat(order.total),
+  notes:           order.notes           || null,
+  deliveryType:    order.delivery_type   || 'pickup',
+  paymentMethod:   order.payment_method  || 'cash',
+  paidAt:          order.paid_at         || null,
+  customerName:    order.customer_name   || null,
+  customerPhone:   order.customer_phone  || null,
+  customerAddress: order.customer_address || null,
   items: (order.items || []).map((i) => ({
     id:          i.id,
     productId:   i.product_id,

@@ -187,4 +187,134 @@ const cancelOrder = async (id, tenantId) => {
   return updated;
 };
 
-module.exports = { listOrders, getOrder, createOrder, updateStatus, cancelOrder };
+// ── Pagamento ─────────────────────────────────────────────────
+
+/**
+ * Registra o pagamento de um pedido (payment_method + paid_at).
+ * Aceita qualquer forma exceto 'pending' (que significa "ainda não pago").
+ */
+const markAsPaid = async (id, tenantId, paymentMethod) => {
+  await Order.markAsPaid(id, tenantId, paymentMethod);
+  return Order.findById(id, tenantId);
+};
+
+// ── Edição de itens ───────────────────────────────────────────
+
+/**
+ * Substitui os itens de um pedido ainda editável (pending/confirmed/preparing).
+ * Devolve o estoque dos itens antigos e desconta o dos novos.
+ * Atualiza order.total.
+ */
+const editOrderItems = async (id, tenantId, newItemsPayload) => {
+  const order = await Order.findById(id, tenantId);
+  if (!order) throw new AppError('Pedido não encontrado.', 404);
+
+  const editableStatuses = ['pending', 'confirmed', 'preparing'];
+  if (!editableStatuses.includes(order.status)) {
+    throw new AppError(
+      `Itens só podem ser editados em pedidos Pendentes ou Em Preparo (status atual: ${order.status}).`,
+      400
+    );
+  }
+  if (!newItemsPayload?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Devolve estoque dos itens atuais
+    for (const item of (order.items ?? [])) {
+      if (!item.product_id) continue;
+      const qty = parseFloat(item.weight_kg ?? item.quantity);
+      await Product.addStock(item.product_id, tenantId, qty, client);
+      await Product.createMovement({
+        tenantId,
+        productId:   item.product_id,
+        productName: item.product_name,
+        quantity:    qty,
+        type:        'in',
+        reason:      `Edição do pedido #${order.order_number} (devolução)`,
+        orderId:     id,
+      }, client);
+    }
+
+    // 2. Carrega produtos solicitados
+    const productIds = [...new Set(newItemsPayload.map((i) => i.productId))];
+    const { rows: products } = await client.query(
+      `SELECT id, name, sale_type, sale_price, stock_qty, active
+       FROM products WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
+      [productIds, tenantId]
+    );
+    const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
+
+    // 3. Valida e calcula totais
+    let orderTotal = 0;
+    const resolvedItems = [];
+    for (const item of newItemsPayload) {
+      const product = productMap[item.productId];
+      if (!product) throw new AppError(`Produto ${item.productId} não encontrado.`, 404);
+      if (!product.active) throw new AppError(`Produto "${product.name}" está inativo.`, 400);
+
+      let qty, lineTotal;
+      if (product.sale_type === 'kg') {
+        if (!item.weightKg || item.weightKg <= 0)
+          throw new AppError(`Produto "${product.name}" é vendido por kg. Informe weightKg.`, 400);
+        qty       = parseFloat(item.weightKg);
+        lineTotal = parseFloat(product.sale_price) * qty;
+      } else {
+        if (!item.quantity || item.quantity <= 0)
+          throw new AppError(`Produto "${product.name}": quantity inválido.`, 400);
+        qty       = item.quantity;
+        lineTotal = parseFloat(product.sale_price) * qty;
+      }
+      orderTotal += lineTotal;
+      resolvedItems.push({ ...item, product, qty, lineTotal });
+    }
+
+    // 4. Desconta estoque dos novos itens
+    for (const item of resolvedItems) {
+      await Product.deductStock(item.product.id, tenantId, item.qty, client);
+      await Product.createMovement({
+        tenantId,
+        productId:   item.product.id,
+        productName: item.product.name,
+        quantity:    -item.qty,
+        type:        'out',
+        reason:      `Edição do pedido #${order.order_number}`,
+        orderId:     id,
+      }, client);
+    }
+
+    // 5. Substitui itens no banco
+    await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
+    for (const item of resolvedItems) {
+      await Order.createItem({
+        orderId:     id,
+        productId:   item.product.id,
+        productName: item.product.name,
+        quantity:    item.product.sale_type === 'unit' ? item.quantity : 1,
+        weightKg:    item.product.sale_type === 'kg'   ? item.weightKg : null,
+        unitPrice:   parseFloat(item.product.sale_price),
+        total:       parseFloat(item.lineTotal.toFixed(2)),
+        notes:       item.notes ?? null,
+      }, client);
+    }
+
+    // 6. Atualiza total do pedido
+    await client.query(
+      `UPDATE orders SET total = $2, updated_at = NOW() WHERE id = $1`,
+      [id, parseFloat(orderTotal.toFixed(2))]
+    );
+
+    await client.query('COMMIT');
+    return Order.findById(id, tenantId);
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { listOrders, getOrder, createOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems };

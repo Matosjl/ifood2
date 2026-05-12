@@ -6,6 +6,7 @@ const Order                = require('../../models/Order');
 const asyncHandler         = require('../../utils/asyncHandler');
 const AppError             = require('../../utils/AppError');
 const db                   = require('../../config/database');
+const eventService         = require('../../socket/eventService');
 
 const handleValidation = (req) => {
   const errors = validationResult(req);
@@ -117,6 +118,35 @@ const cancel = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order, message: 'Pedido cancelado. Estoque devolvido.' });
 });
 
+/**
+ * PATCH /api/orders/:id/paid
+ * Body: { paymentMethod }
+ * Registra pagamento do pedido (paid_at + payment_method).
+ */
+const setPaid = asyncHandler(async (req, res) => {
+  const { paymentMethod } = req.body;
+  const validMethods = ['cash', 'pix', 'credit', 'debit', 'voucher', 'fiado', 'other'];
+  if (!paymentMethod || !validMethods.includes(paymentMethod)) {
+    throw new AppError(`Forma de pagamento inválida. Use: ${validMethods.join(', ')}.`, 400);
+  }
+  const order = await service.markAsPaid(req.params.id, req.user.tenantId, paymentMethod);
+  eventService.orderUpdated(req.user.tenantId, order);
+  res.json({ success: true, data: order });
+});
+
+/**
+ * PATCH /api/orders/:id/items
+ * Body: { items }
+ * Substitui os itens de um pedido editável (pending/confirmed/preparing).
+ * Reconcilia estoque automaticamente.
+ */
+const updateItems = asyncHandler(async (req, res) => {
+  handleValidation(req);
+  const order = await service.editOrderItems(req.params.id, req.user.tenantId, req.body.items);
+  eventService.orderUpdated(req.user.tenantId, order);
+  res.json({ success: true, data: order });
+});
+
 /** GET /api/orders/customers?q=... — busca clientes pelo histórico */
 const searchCustomers = asyncHandler(async (req, res) => {
   const q = (req.query.q ?? '').trim();
@@ -136,4 +166,4 @@ const searchCustomers = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers };
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, setPaid, updateItems };

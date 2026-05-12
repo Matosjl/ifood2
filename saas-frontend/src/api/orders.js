@@ -19,5 +19,17 @@ export const cancelOrder = (id) =>
 export const searchCustomers = (q) =>
   api.get('/orders/customers', { params: { q } });
 
+/** Registra pagamento de um pedido (paid_at + payment_method). */
+export const markOrderPaid = (id, paymentMethod) =>
+  api.patch(`/orders/${id}/paid`, { paymentMethod });
+
+/**
+ * Substitui os itens de um pedido editável.
+ * @param {string} id
+ * @param {Array<{productId, quantity?, weightKg?, notes?}>} items
+ */
+export const editOrderItems = (id, items) =>
+  api.patch(`/orders/${id}/items`, { items });
+
 export const login = (email, password) =>
   api.post('/auth/login', { email, password });
