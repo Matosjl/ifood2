@@ -6,10 +6,10 @@ import DashboardPage     from './pages/DashboardPage';
 import ProductsPage      from './pages/ProductsPage';
 import StockPage         from './pages/StockPage';
 import FinanceiroPage    from './pages/FinanceiroPage';
-import HistoricoPage     from './pages/HistoricoPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
 import FiadoPage         from './pages/FiadoPage';
 import RelatoriosPage    from './pages/RelatoriosPage';
+import EntregasPage      from './pages/EntregasPage';
 import PlansPage         from './pages/PlansPage';
 import Sidebar           from './components/Sidebar';
 import TrialBanner       from './components/TrialBanner';
@@ -146,8 +146,8 @@ export default function App() {
               {page === 'stock'      && <StockPage />}
               {page === 'financial'  && <FinanceiroPage />}
               {page === 'relatorios' && <RelatoriosPage />}
-              {page === 'historico'  && <HistoricoPage />}
               {page === 'fiado'      && <FiadoPage />}
+              {page === 'entregas'   && <EntregasPage />}
               {page === 'settings'   && <ConfiguracoesPage />}
             </>
           )}

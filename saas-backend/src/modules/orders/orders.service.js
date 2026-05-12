@@ -29,7 +29,7 @@ const getOrder = async (id, tenantId) => {
 const createOrder = async (tenantId, {
   customerName, customerPhone, customerAddress,
   channel = 'manual', notes, items, deliveryType = 'pickup', paymentMethod = 'cash',
-  initialStatus = 'pending', idempotencyKey,
+  deliveryFee = 0, initialStatus = 'pending', idempotencyKey,
 }) => {
   if (!items?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
 
@@ -57,7 +57,7 @@ const createOrder = async (tenantId, {
     const productMap = Object.fromEntries(products.map(p => [p.id, p]));
 
     // Valida e calcula totais
-    let orderTotal = 0;
+    let orderTotal = parseFloat(deliveryFee) || 0;
     const resolvedItems = [];
 
     for (const item of items) {
@@ -93,7 +93,8 @@ const createOrder = async (tenantId, {
       tenantId, orderNumber,
       customerName, customerPhone, customerAddress,
       channel, total: parseFloat(orderTotal.toFixed(2)), notes,
-      deliveryType, paymentMethod, initialStatus, idempotencyKey,
+      deliveryType, paymentMethod, deliveryFee: parseFloat(deliveryFee) || 0,
+      initialStatus, idempotencyKey,
     }, client);
 
     for (const item of resolvedItems) {

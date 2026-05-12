@@ -72,6 +72,7 @@ const norm = (o) => ({
     total:       parseFloat(i.total ?? 0),
     notes:       i.notes ?? null,
   })),
+  deliveryFee: parseFloat(o.deliveryFee ?? o.delivery_fee ?? 0),
   paidAt:    o.paidAt    ?? o.paid_at    ?? null,
   createdAt: o.createdAt ?? o.created_at,
   updatedAt: o.updatedAt ?? o.updated_at,

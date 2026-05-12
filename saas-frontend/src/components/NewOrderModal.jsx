@@ -147,6 +147,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [channel,       setChannel]       = useState('manual');
   const [deliveryType,  setDeliveryType]  = useState('pickup');
   const [address,       setAddress]       = useState('');
+  const [deliveryFee,   setDeliveryFee]   = useState(
+    () => localStorage.getItem('defaultDeliveryFee') ?? ''
+  );
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [needsChange,   setNeedsChange]   = useState(false);
   const [changeFor,     setChangeFor]     = useState('');
@@ -253,12 +256,14 @@ export default function NewOrderModal({ onClose, onCreated }) {
     ].filter(Boolean).join(' | ');
 
     try {
+      const fee = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
       const { data } = await createOrder({
         customerName:    name.trim(),
         customerPhone:   phone.trim()   || undefined,
         customerAddress: address.trim() || undefined,
         deliveryType,
         paymentMethod,
+        deliveryFee:     fee,
         channel,
         notes: fullNotes || undefined,
         items,
@@ -448,8 +453,19 @@ export default function NewOrderModal({ onClose, onCreated }) {
                 ))}
               </div>
               {deliveryType === 'delivery' && (
-                <input type="text" placeholder="Endereço de entrega *" value={address}
-                  onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+                <>
+                  <input type="text" placeholder="Endereço de entrega *" value={address}
+                    onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-400 whitespace-nowrap shrink-0">Taxa de entrega (R$)</label>
+                    <input
+                      type="number" min="0" step="0.50" placeholder="0,00"
+                      value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(e.target.value)}
+                      className="input flex-1 text-sm text-right"
+                    />
+                  </div>
+                </>
               )}
 
               {/* Pagamento */}
@@ -584,7 +600,16 @@ export default function NewOrderModal({ onClose, onCreated }) {
               {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
 
               <div className="flex items-center justify-between pt-1">
-                <span className="text-xl font-black text-white">{fmt(total)}</span>
+                <div>
+                  <span className="text-xl font-black text-white">
+                    {fmt(total + (deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0))}
+                  </span>
+                  {deliveryType === 'delivery' && parseFloat(deliveryFee) > 0 && (
+                    <p className="text-[10px] text-gray-500">
+                      itens {fmt(total)} + frete {fmt(parseFloat(deliveryFee))}
+                    </p>
+                  )}
+                </div>
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || cartEntries.length === 0}

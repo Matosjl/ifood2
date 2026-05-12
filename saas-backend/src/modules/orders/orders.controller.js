@@ -88,7 +88,7 @@ const updateStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
   if (!status) throw new AppError('Status e obrigatorio.', 400);
 
-  const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'];
+  const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'delivered', 'cancelled'];
   if (!validStatuses.includes(status)) {
     throw new AppError(`Status invalido. Use: ${validStatuses.join(', ')}.`, 400);
   }

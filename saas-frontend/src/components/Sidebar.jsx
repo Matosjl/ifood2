@@ -6,8 +6,8 @@ const NAV_ITEMS = [
   { key: 'stock',     emoji: '📊', label: 'Estoque' },
   { key: 'financial', emoji: '💰', label: 'Financeiro' },
   { key: 'relatorios',emoji: '📈', label: 'Relatórios' },
-  { key: 'historico', emoji: '📋', label: 'Histórico' },
-  { key: 'fiado',     emoji: '🤝', label: 'Fiado' },
+{ key: 'fiado',     emoji: '🤝', label: 'Fiado' },
+  { key: 'entregas',  emoji: '🛵',  label: 'Entregas' },
   { key: 'settings',  emoji: '⚙️',  label: 'Configurações' },
   { key: 'plans',     emoji: '💎', label: 'Planos' },
 ];

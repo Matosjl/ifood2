@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── MapLibre GL popup reset (mapcn dark theme) ──────────────── */
+.maplibregl-popup-content {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+.maplibregl-popup-tip { display: none !important; }
+.maplibregl-ctrl-attrib { font-size: 10px; }
+
 @layer base {
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }

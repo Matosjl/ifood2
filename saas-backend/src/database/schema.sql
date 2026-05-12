@@ -290,6 +290,10 @@ CREATE INDEX IF NOT EXISTS idx_fiado_compras_order   ON fiado_compras(order_id);
 -- Obrigatório ter paid_at preenchido para transição → delivered quando payment_method='pending'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
 
+-- ── Taxa de entrega ───────────────────────────────────────────
+-- delivery_fee: valor cobrado pela entrega (0 para retirada/sem taxa)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee DECIMAL(10,2) NOT NULL DEFAULT 0;
+
 -- ── Migração: colunas de contagem física no fechamento de caixa ──
 -- (idempotente — ADD COLUMN IF NOT EXISTS é seguro re-executar)
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS cash_counted  DECIMAL(10,2);

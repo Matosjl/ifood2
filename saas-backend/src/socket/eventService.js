@@ -18,6 +18,7 @@ const buildOrderPayload = (order) => ({
   notes:           order.notes           || null,
   deliveryType:    order.delivery_type   || 'pickup',
   paymentMethod:   order.payment_method  || 'cash',
+  deliveryFee:     parseFloat(order.delivery_fee) || 0,
   paidAt:          order.paid_at         || null,
   customerName:    order.customer_name   || null,
   customerPhone:   order.customer_phone  || null,

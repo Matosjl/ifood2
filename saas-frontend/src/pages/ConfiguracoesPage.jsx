@@ -142,11 +142,14 @@ function QrCodeTab({ currentUser }) {
 // ─────────────────────────────────────────────────────────────
 
 function RestauranteTab({ currentUser, onToast }) {
-  const [name,      setName]      = useState('');
-  const [whatsapp,  setWhatsapp]  = useState('');
-  const [address,   setAddress]   = useState('');
-  const [saving,    setSaving]    = useState(false);
-  const [tenant,    setTenant]    = useState(null);
+  const [name,         setName]         = useState('');
+  const [whatsapp,     setWhatsapp]     = useState('');
+  const [address,      setAddress]      = useState('');
+  const [defaultFee,   setDefaultFee]   = useState(
+    () => localStorage.getItem('defaultDeliveryFee') ?? ''
+  );
+  const [saving,       setSaving]       = useState(false);
+  const [tenant,       setTenant]       = useState(null);
 
   useEffect(() => {
     getTenantInfo()
@@ -179,6 +182,10 @@ function RestauranteTab({ currentUser, onToast }) {
         u.tenant.name = name.trim();
         localStorage.setItem('user', JSON.stringify(u));
       }
+      // Persiste taxa padrão de entrega localmente
+      const feeVal = parseFloat(defaultFee);
+      if (feeVal > 0) localStorage.setItem('defaultDeliveryFee', String(feeVal));
+      else localStorage.removeItem('defaultDeliveryFee');
       onToast('Dados do restaurante atualizados!');
     } catch (err) {
       onToast(err.response?.data?.message ?? 'Erro ao atualizar.', 'error');
@@ -219,6 +226,17 @@ function RestauranteTab({ currentUser, onToast }) {
           </label>
           <input value={address} onChange={(e) => setAddress(e.target.value)}
             className="input w-full" placeholder="Rua, número — Bairro, Cidade" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">
+            Taxa de entrega padrão <span className="text-gray-600 font-normal">(R$ — pré-preenche novos pedidos delivery)</span>
+          </label>
+          <input
+            type="number" min="0" step="0.50" placeholder="0,00"
+            value={defaultFee}
+            onChange={(e) => setDefaultFee(e.target.value)}
+            className="input w-40"
+          />
         </div>
         <button type="submit" disabled={saving || !name.trim()}
           className="btn-green px-6 disabled:opacity-50">
