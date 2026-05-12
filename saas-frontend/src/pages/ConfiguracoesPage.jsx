@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import Toast from '../components/Toast';
 import {
   updateProfile, updateTenantProfile, getTenantInfo,
   listUsers, createUser, updateUser, deactivateUser,
@@ -30,21 +31,6 @@ function Tab({ active, onClick, children }) {
     >
       {children}
     </button>
-  );
-}
-
-// ── Toast ─────────────────────────────────────────────────────
-
-function Toast({ msg, type = 'success', onDone }) {
-  useEffect(() => {
-    const t = setTimeout(onDone, 3000);
-    return () => clearTimeout(t);
-  }, [onDone]);
-  return (
-    <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-2xl text-sm font-semibold transition-all
-      ${type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-      {type === 'success' ? '✓' : '✕'} {msg}
-    </div>
   );
 }
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Header        from '../components/Header';
 import OrdersBoard   from '../components/OrdersBoard';
 import NewOrderModal from '../components/NewOrderModal';
+import Toast         from '../components/Toast';
 import useOrders     from '../hooks/useOrders';
 
 const VIEW_MODES = [
@@ -73,19 +74,14 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
 
-      {/* Toast de erro nas ações de pedido */}
       {statusError && (
-        <div
-          role="alert"
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 bg-red-900/95 border border-red-500/50 rounded-xl shadow-2xl text-sm text-red-200 max-w-sm w-full mx-4 animate-fade-in"
-        >
-          <span className="text-lg shrink-0">⚠️</span>
-          <span className="flex-1">{statusError}</span>
-          <button
-            onClick={() => setStatusError(null)}
-            className="text-red-400 hover:text-red-200 shrink-0 text-lg leading-none"
-          >×</button>
-        </div>
+        <Toast
+          msg={statusError}
+          type="error"
+          position="top-center"
+          duration={4_000}
+          onDone={() => setStatusError(null)}
+        />
       )}
 
       <Header

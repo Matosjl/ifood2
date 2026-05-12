@@ -3,6 +3,7 @@ import useSocket from './useSocket';
 import { playAlert, unlockAudio } from '../utils/sound';
 import { printOrder } from '../utils/print';
 import { getOrders, updateOrderStatus, cancelOrder } from '../api/orders';
+import { getApiError } from '../utils/apiError';
 
 // ── Column definitions ────────────────────────────────────────
 
@@ -78,12 +79,14 @@ const norm = (o) => ({
 export default function useOrders() {
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
-  const [statusError,  setStatusError]  = useState(null); // feedback de erro nas ações
+  const [statusError,  setStatusError]  = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [autoPrint,    setAutoPrintState] = useState(
-    () => localStorage.getItem('autoPrint') !== 'false'  // padrão: ligado
+    () => localStorage.getItem('autoPrint') !== 'false'
   );
 
+  // Refs mantidos sincronizados a cada render para uso em callbacks e intervals
+  // (mesmo padrão de soundRef e autoPrintRef — evita recriação de closures)
   const autoPrintRef = useRef(autoPrint);
   autoPrintRef.current = autoPrint;
 
@@ -92,10 +95,10 @@ export default function useOrders() {
     localStorage.setItem('autoPrint', String(val));
   }, []);
 
-  const unackRef     = useRef(new Set()); // orders waiting for acknowledgement
-  const alertRef     = useRef(null);      // continuous-alert interval
-  const soundRef     = useRef(soundEnabled);
-  soundRef.current   = soundEnabled;
+  const unackRef   = useRef(new Set()); // pedidos aguardando reconhecimento
+  const alertRef   = useRef(null);      // intervalo do alerta contínuo
+  const soundRef   = useRef(soundEnabled);
+  soundRef.current = soundEnabled;
 
   // ── Continuous alert ────────────────────────────────────────
 
@@ -117,15 +120,11 @@ export default function useOrders() {
 
   // ── Socket handlers ────────────────────────────────────────
 
-  // Socket snapshot: MERGE active orders, preserve all REST-loaded orders
   const handleActiveOrders = useCallback((list) => {
     const active = list.map(norm);
     const activeIds = new Set(active.map((o) => o.id));
     setOrders((prev) => {
-      // Se Redis veio vazio mas já temos pedidos carregados via REST, não apaga
       if (active.length === 0 && prev.length > 0) return prev;
-      // Preserva TODOS os pedidos do prev que não estão na lista do socket
-      // (não apenas delivered/cancelled) para evitar perda ao recarregar
       const preserved = prev.filter((o) => !activeIds.has(o.id));
       return [...active, ...preserved];
     });
@@ -136,9 +135,8 @@ export default function useOrders() {
     unlockAudio();
     const o = norm(order);
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
-    if (soundRef.current) { playAlert(); }
-    if (autoPrintRef.current) { printOrder(o); }
-    // Browser notification (works even if tab is in background)
+    if (soundRef.current) playAlert();
+    if (autoPrintRef.current) printOrder(o);
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(`🍽️ Pedido #${o.orderNumber}`, {
         body: `${o.channel !== 'manual' ? o.channel.toUpperCase() + ' · ' : ''}${o.items?.length ?? 0} item(s) · R$ ${o.total.toFixed(2)}`,
@@ -168,52 +166,49 @@ export default function useOrders() {
     onOrderDeleted: handleOrderDeleted,
   });
 
-  // ── Load ALL of today's orders immediately on mount ──────────
-  // This is the primary source of data. The socket snapshot only has
-  // active orders; this ensures delivered/cancelled persist after F5.
+  // Ref para usar socketConnected dentro do interval sem recriar o effect
+  const socketConnectedRef = useRef(false);
+  socketConnectedRef.current = socketConnected;
+
+  // ── Carga inicial de todos os pedidos do dia ─────────────────
+  // Fonte primária de dados. O snapshot do socket só tem pedidos ativos;
+  // isso garante que delivered/cancelled persistam após F5.
+  //
+  // isFetchingRef evita fetches paralelos (inflight lock).
+
+  const isFetchingRef = useRef(false);
 
   const fetchToday = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const { data } = await getOrders({ limit: 500, startDate: today.toISOString() });
-      const all = (data.data ?? []).map(norm);
-      setOrders(all);
+      setOrders((data.data ?? []).map(norm));
     } catch {
-      // non-fatal — socket will still deliver active orders
+      // non-fatal — socket continua entregando pedidos ativos
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
     }
   }, []);
 
+  // Carga inicial: chama fetchToday e libera o spinner.
+  // O flag `alive` impede setLoading(false) se o componente desmontar antes do fetch terminar.
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => { if (!cancelled) await fetchToday(); };
-    run();
-    return () => { cancelled = true; };
+    let alive = true;
+    fetchToday().then(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [fetchToday]);
 
-  // ── Polling de fallback quando WebSocket está desconectado ───
-  // Garante que pedidos novos apareçam mesmo sem socket (rede instável)
-  const socketConnectedRef = useRef(false);
-  socketConnectedRef.current = socketConnected;
-
+  // Polling de fallback: ativa apenas quando o WebSocket está desconectado.
+  // Intervalo de 15s — menor que o timeout padrão da API (15s), evitando sobreposição.
   useEffect(() => {
-    const POLL_INTERVAL = 12_000; // 12s — dentro do TTL do cache do prompt
     const id = setInterval(() => {
-      if (!socketConnectedRef.current) {
-        fetchToday();
-      }
-    }, POLL_INTERVAL);
+      if (!socketConnectedRef.current) fetchToday();
+    }, 15_000);
     return () => clearInterval(id);
   }, [fetchToday]);
-
-  // ── Limpa erro após 4 segundos ──────────────────────────────
-  useEffect(() => {
-    if (!statusError) return;
-    const t = setTimeout(() => setStatusError(null), 4_000);
-    return () => clearTimeout(t);
-  }, [statusError]);
 
   // ── Actions (optimistic) ────────────────────────────────────
 
@@ -224,11 +219,8 @@ export default function useOrders() {
     try {
       await updateOrderStatus(id, status);
     } catch (err) {
-      // Rollback otimista
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
-      // Feedback visual de erro
-      const msg = err?.response?.data?.message ?? err?.message ?? 'Erro ao atualizar pedido';
-      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${msg}`);
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao atualizar pedido')}`);
     }
   }, [orders, acknowledgeOrder]);
 
@@ -240,8 +232,7 @@ export default function useOrders() {
       await cancelOrder(id);
     } catch (err) {
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
-      const msg = err?.response?.data?.message ?? err?.message ?? 'Erro ao cancelar pedido';
-      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${msg}`);
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao cancelar pedido')}`);
     }
   }, [orders, acknowledgeOrder]);
 

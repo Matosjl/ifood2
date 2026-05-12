@@ -32,23 +32,25 @@
   .animate-fade-in {
     animation: fadeIn 0.2s ease-out;
   }
-}
 
-@keyframes slideIn {
-  0%   { opacity: 0; transform: translateY(-14px) scale(0.97); }
-  100% { opacity: 1; transform: translateY(0)     scale(1); }
-}
+  /* Bell shake */
+  .bell-ring { animation: ring 0.25s ease-in-out 4; }
 
-@keyframes fadeIn {
-  0%   { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-  100% { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
+  @keyframes slideIn {
+    0%   { opacity: 0; transform: translateY(-14px) scale(0.97); }
+    100% { opacity: 1; transform: translateY(0)     scale(1); }
+  }
 
-@keyframes ring {
-  0%, 100% { transform: rotate(-8deg); }
-  50%       { transform: rotate(8deg); }
+  @keyframes fadeIn {
+    0%   { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+    100% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  @keyframes ring {
+    0%, 100% { transform: rotate(-8deg); }
+    50%       { transform: rotate(8deg); }
+  }
 }
-.bell-ring { animation: ring 0.25s ease-in-out 4; }
 
 /* ── Shared button base ─────────────────────────────────────── */
 @layer components {

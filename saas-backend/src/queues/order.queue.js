@@ -3,7 +3,7 @@ const { createRedisClient } = require('../config/redis');
 const AppError = require('../utils/AppError');
 
 const QUEUE_NAME = 'orders';
-const JOB_TIMEOUT_MS = 15_000;
+const JOB_TIMEOUT_MS = 30_000;
 
 let _queue = null;
 let _events = null;
