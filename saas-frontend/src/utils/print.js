@@ -240,8 +240,11 @@ export function printOrder(order) {
   doc.write(html);
   doc.close();
 
-  // Aguarda renderização antes de imprimir
-  iframe.onload = () => {
+  let printed = false; // guard: evita dupla impressão (onload + setTimeout)
+
+  const doPrint = () => {
+    if (printed) return;
+    printed = true;
     try {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
@@ -250,21 +253,14 @@ export function printOrder(order) {
     }
     setTimeout(() => {
       if (document.body.contains(iframe)) document.body.removeChild(iframe);
-    }, 3000);
+    }, 3_000);
   };
 
-  // Fallback: se onload não disparar (alguns browsers)
-  setTimeout(() => {
-    try {
-      if (iframe.contentWindow) {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      }
-    } catch (e) { /* silencioso */ }
-    setTimeout(() => {
-      if (document.body.contains(iframe)) document.body.removeChild(iframe);
-    }, 3000);
-  }, 600);
+  // Aguarda renderização antes de imprimir
+  iframe.onload = () => doPrint();
+
+  // Fallback: se onload não disparar (alguns browsers — ex: Firefox em modo quirks)
+  setTimeout(doPrint, 700);
 
   return true;
 }

@@ -3,10 +3,10 @@ const AppError = require('../utils/AppError');
 
 // Máquina de estados: status → próximos estados válidos
 const STATUS_TRANSITIONS = {
-  pending:   ['confirmed', 'cancelled'],
+  pending:   ['confirmed', 'preparing', 'cancelled'], // aceitar + já iniciar preparo (atalho)
   confirmed: ['preparing', 'cancelled'],
   preparing: ['ready',     'cancelled'],
-  ready:     ['delivered'],
+  ready:     ['delivered', 'cancelled'],              // permite cancelar mesmo pronto
   delivered: [],
   cancelled: [],
 };

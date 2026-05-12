@@ -78,6 +78,7 @@ const norm = (o) => ({
 export default function useOrders() {
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
+  const [statusError,  setStatusError]  = useState(null); // feedback de erro nas ações
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [autoPrint,    setAutoPrintState] = useState(
     () => localStorage.getItem('autoPrint') !== 'false'  // padrão: ligado
@@ -171,25 +172,48 @@ export default function useOrders() {
   // This is the primary source of data. The socket snapshot only has
   // active orders; this ensures delivered/cancelled persist after F5.
 
+  const fetchToday = useCallback(async () => {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { data } = await getOrders({ limit: 500, startDate: today.toISOString() });
+      const all = (data.data ?? []).map(norm);
+      setOrders(all);
+    } catch {
+      // non-fatal — socket will still deliver active orders
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    const fetchToday = async () => {
-      try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const { data } = await getOrders({ limit: 500, startDate: today.toISOString() });
-        if (cancelled) return;
-        const all = (data.data ?? []).map(norm);
-        setOrders(all);
-      } catch {
-        // non-fatal — socket will still deliver active orders
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    fetchToday();
+    const run = async () => { if (!cancelled) await fetchToday(); };
+    run();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchToday]);
+
+  // ── Polling de fallback quando WebSocket está desconectado ───
+  // Garante que pedidos novos apareçam mesmo sem socket (rede instável)
+  const socketConnectedRef = useRef(false);
+  socketConnectedRef.current = socketConnected;
+
+  useEffect(() => {
+    const POLL_INTERVAL = 12_000; // 12s — dentro do TTL do cache do prompt
+    const id = setInterval(() => {
+      if (!socketConnectedRef.current) {
+        fetchToday();
+      }
+    }, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchToday]);
+
+  // ── Limpa erro após 4 segundos ──────────────────────────────
+  useEffect(() => {
+    if (!statusError) return;
+    const t = setTimeout(() => setStatusError(null), 4_000);
+    return () => clearTimeout(t);
+  }, [statusError]);
 
   // ── Actions (optimistic) ────────────────────────────────────
 
@@ -199,8 +223,12 @@ export default function useOrders() {
     acknowledgeOrder(id);
     try {
       await updateOrderStatus(id, status);
-    } catch {
+    } catch (err) {
+      // Rollback otimista
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
+      // Feedback visual de erro
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Erro ao atualizar pedido';
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${msg}`);
     }
   }, [orders, acknowledgeOrder]);
 
@@ -210,8 +238,10 @@ export default function useOrders() {
     acknowledgeOrder(id);
     try {
       await cancelOrder(id);
-    } catch {
+    } catch (err) {
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Erro ao cancelar pedido';
+      setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${msg}`);
     }
   }, [orders, acknowledgeOrder]);
 
@@ -231,6 +261,7 @@ export default function useOrders() {
 
   return {
     orders, loading, socketConnected,
+    statusError, setStatusError,
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
     changeStatus, doCancel, addOrder,

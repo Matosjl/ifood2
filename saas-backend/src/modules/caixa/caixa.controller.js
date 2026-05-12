@@ -32,7 +32,7 @@ const openCaixa = asyncHandler(async (req, res) => {
     `INSERT INTO cash_registers (tenant_id, opened_by, opening_balance, notes)
      VALUES ($1, $2, $3, $4)
      RETURNING *`,
-    [req.user.tenantId, req.user.id, openingBalance, notes ?? null]
+    [req.user.tenantId, req.user.userId, openingBalance, notes ?? null]
   );
   res.status(201).json({ success: true, data: rows[0] });
 });
@@ -125,7 +125,7 @@ const closeCaixa = asyncHandler(async (req, res) => {
          discrepancy     = $11
      WHERE id = $1
      RETURNING *`,
-    [caixa.id, req.user.id, s.total_revenue, s.total_orders,
+    [caixa.id, req.user.userId, s.total_revenue, s.total_orders,
      JSON.stringify(paymentSummary), closingBalance, notes ?? null,
      cashC, cardC, pixC, discrepancy]
   );

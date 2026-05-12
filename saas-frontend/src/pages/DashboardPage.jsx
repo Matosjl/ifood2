@@ -50,6 +50,7 @@ export default function DashboardPage() {
 
   const {
     orders, loading, socketConnected,
+    statusError, setStatusError,
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
     changeStatus, doCancel,
@@ -71,6 +72,22 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
+
+      {/* Toast de erro nas ações de pedido */}
+      {statusError && (
+        <div
+          role="alert"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 bg-red-900/95 border border-red-500/50 rounded-xl shadow-2xl text-sm text-red-200 max-w-sm w-full mx-4 animate-fade-in"
+        >
+          <span className="text-lg shrink-0">⚠️</span>
+          <span className="flex-1">{statusError}</span>
+          <button
+            onClick={() => setStatusError(null)}
+            className="text-red-400 hover:text-red-200 shrink-0 text-lg leading-none"
+          >×</button>
+        </div>
+      )}
+
       <Header
         connected={socketConnected}
         soundEnabled={soundEnabled}
