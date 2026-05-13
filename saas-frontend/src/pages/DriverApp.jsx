@@ -12,8 +12,15 @@ const http = async (method, path, body, token) => {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const json = await r.json();
-  if (!r.ok) throw new Error(json.message || json.error || 'Erro na requisição');
+  const text = await r.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // Servidor retornou HTML (502/504) — backend fora do ar ou não deployado
+    throw new Error(`Erro de servidor (${r.status}). Verifique se o deploy foi aplicado no VPS.`);
+  }
+  if (!r.ok) throw new Error(json.message || json.error || `Erro ${r.status}`);
   return json.data;
 };
 
