@@ -166,4 +166,25 @@ const searchCustomers = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, setPaid, updateItems };
+/**
+ * PATCH /api/orders/:id/info
+ * Atualiza entrega, endereço, taxa e aplica desconto/acréscimo.
+ */
+const updateInfo = asyncHandler(async (req, res) => {
+  const { deliveryType, neighborhood, customerAddress, deliveryFee,
+          notes, adjustmentType, adjustmentValue, adjustmentReason } = req.body;
+
+  if (adjustmentType && !['discount', 'surcharge'].includes(adjustmentType)) {
+    throw new AppError('adjustmentType deve ser "discount" ou "surcharge".', 400);
+  }
+
+  const order = await service.updateOrderInfo(req.params.id, req.user.tenantId, {
+    deliveryType, neighborhood, customerAddress, deliveryFee,
+    notes, adjustmentType, adjustmentValue, adjustmentReason,
+  });
+
+  eventService.orderUpdated(req.user.tenantId, order);
+  res.json({ success: true, data: order });
+});
+
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, setPaid, updateItems, updateInfo };

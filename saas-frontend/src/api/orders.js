@@ -31,5 +31,14 @@ export const markOrderPaid = (id, paymentMethod) =>
 export const editOrderItems = (id, items) =>
   api.patch(`/orders/${id}/items`, { items });
 
+/**
+ * Atualiza entrega, endereço, taxa e aplica desconto/acréscimo de valor.
+ * @param {string} id
+ * @param {{ deliveryType?, neighborhood?, customerAddress?, deliveryFee?,
+ *           notes?, adjustmentType?, adjustmentValue?, adjustmentReason? }} payload
+ */
+export const updateOrderInfo = (id, payload) =>
+  api.patch(`/orders/${id}/info`, payload);
+
 export const login = (email, password) =>
   api.post('/auth/login', { email, password });

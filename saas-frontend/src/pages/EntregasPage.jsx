@@ -308,7 +308,12 @@ export default function EntregasPage() {
       const deliveries = (data.data ?? []).filter(
         (o) => o.delivery_type === 'delivery' && o.status !== 'cancelled'
       );
-      setOrders(deliveries);
+      // Só atualiza se algo mudou — evita re-renders desnecessários no polling
+      setOrders((prev) => {
+        const prevSig = prev.map((o) => `${o.id}:${o.status}`).join(',');
+        const nextSig = deliveries.map((o) => `${o.id}:${o.status}`).join(',');
+        return prevSig === nextSig ? prev : deliveries;
+      });
     } catch { /* non-fatal */ }
     finally { setLoading(false); }
   }, []);

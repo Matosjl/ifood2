@@ -9,8 +9,8 @@ const DOT = {
 
 export default function KanbanColumn({ column, orders, onStatusChange, onAcknowledge, onMarkPaid, onEditItems }) {
   const { label, color, header, count } = column;
-  // Contador ativo: exclui entregues e cancelados (pedidos já finalizados)
   const activeCount = orders.filter((o) => !['delivered','cancelled'].includes(o.status)).length;
+  const borderCls   = header.split(' ').find((c) => c.startsWith('border-')) ?? 'border-white/10';
 
   return (
     <div className="flex flex-col min-w-0 h-full">
@@ -35,7 +35,7 @@ export default function KanbanColumn({ column, orders, onStatusChange, onAcknowl
       </div>
 
       {/* Cards — scroll vertical quando há muitos pedidos */}
-      <div className={`col-scroll flex-1 p-2 space-y-2 rounded-b-xl border border-t-0 bg-gray-900/60 ${header.replace('bg-', 'border-').split(' ')[0]}`}>
+      <div className={`col-scroll flex-1 p-2 space-y-2 rounded-b-xl border border-t-0 bg-gray-900/60 ${borderCls}`}>
         {orders.length === 0 ? (
           <div className="flex items-center justify-center h-24 text-gray-600 text-sm italic select-none">
             Sem pedidos

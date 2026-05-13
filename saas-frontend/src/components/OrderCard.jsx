@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { printOrder } from '../utils/print';
+import { PAY_ICONS, PAY_LABELS } from '../constants/orders';
 
 // ── Status config ─────────────────────────────────────────────
 
@@ -22,8 +23,6 @@ const PAY_OPTIONS = [
   { value: 'other',   label: '🔖 Outro'    },
 ];
 
-const PAY_ICONS = { cash: '💵', pix: '📱', credit: '💳', debit: '💳', voucher: '🎫', fiado: '🤝', pending: '⏳', other: '🔖' };
-const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito', voucher: 'Vale', fiado: 'Fiado', pending: 'A cobrar', other: 'Outro' };
 
 // Statuses onde edição de itens é permitida
 const EDITABLE_STATUSES = new Set(['pending', 'confirmed', 'preparing']);

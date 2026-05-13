@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Stress test em massa: cria N restaurantes via DB + M pedidos via HTTP
- * Uso: node stress-test-mass.js <db_url> <api_url> [restaurantes=50] [pedidos=100]
- * Ex:  DB_URL="postgres://user:pass@localhost:5432/db" node stress-test-mass.js http://localhost 50 100
+ * Uso: node stress-test-mass.js <api_url> [restaurantes=50] [pedidos=100]
+ * Ex:  JWT_SECRET=xxx DB_CONTAINER=saas_postgres node stress-test-mass.js http://localhost 10 25
  */
 
 const https  = require('https');
@@ -14,13 +14,13 @@ const bcrypt = require('bcryptjs');
 
 const [,, API_URL_RAW, R_STR, P_STR] = process.argv;
 if (!API_URL_RAW) {
-  console.error('Uso: DB_URL="postgres://..." node stress-test-mass.js <api_url> [rest=50] [pedidos=100]');
+  console.error('Uso: JWT_SECRET="..." node stress-test-mass.js <api_url> [rest=50] [pedidos=100]');
   process.exit(1);
 }
 
-const API_URL   = API_URL_RAW.replace(/\/$/, '') + '/api';
-const N_REST    = parseInt(R_STR  ?? '50',  10);
-const N_PEDIDOS = parseInt(P_STR  ?? '100', 10);
+const API_URL      = API_URL_RAW.replace(/\/$/, '') + '/api';
+const N_REST       = parseInt(R_STR  ?? '50',  10);
+const N_PEDIDOS    = parseInt(P_STR  ?? '100', 10);
 const DB_CONTAINER = process.env.DB_CONTAINER ?? 'saas_postgres';
 const DB_USER_ENV  = process.env.DB_USER  ?? 'postgres';
 const DB_NAME_ENV  = process.env.DB_NAME  ?? 'saas_db';
@@ -62,11 +62,27 @@ function req(method, path, body, token) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const rnd   = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// ── Retry em caso de 429 ou 503 ──────────────────────────────
+
+async function withRetry(fn, { maxRetries = 5, retryAfterMs = 3000, label = '' } = {}) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const result = await fn();
+    // 429 = rate limit, 503 = servidoo sobrecarregado — ambos sao transitorios
+    if (result.status !== 429 && result.status !== 503) return result;
+    const waitMs = retryAfterMs * attempt;
+    if (attempt < maxRetries) {
+      const code = result.status;
+      process.stdout.write(`\n    [${code}] ${code === 429 ? 'Rate limit' : 'Servidor ocupado'} em ${label} - aguardando ${(waitMs/1000).toFixed(1)}s (${attempt}/${maxRetries})...`);
+      await sleep(waitMs);
+    }
+  }
+  return fn();
+}
+
 // ── Seed via docker exec psql ─────────────────────────────────
 
 function psql(sql) {
   try {
-    // Sempre usa docker exec — postgres não está exposto no host
     const cmd = `docker exec ${DB_CONTAINER} psql -U ${DB_USER_ENV} -d ${DB_NAME_ENV} -t -c "${sql.replace(/"/g, '\\"')}"`;
     return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   } catch (e) {
@@ -75,9 +91,8 @@ function psql(sql) {
 }
 
 async function seedRestaurantes(n) {
-  process.stdout.write(`  🌱 Criando ${n} restaurantes no banco...`);
+  process.stdout.write(`  [seed] Criando ${n} restaurantes no banco...`);
 
-  // Limpar dados de testes anteriores (cascata cuida de users, products, etc.)
   psql(`DELETE FROM orders WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
   psql(`DELETE FROM cash_registers WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
   psql(`DELETE FROM products WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE 'Load Test %')`);
@@ -85,53 +100,55 @@ async function seedRestaurantes(n) {
   psql(`DELETE FROM users WHERE email LIKE 'stressteste%@load.test'`);
   psql(`DELETE FROM tenants WHERE name LIKE 'Load Test %'`);
 
-  // Gerar hash bcrypt real
   const hash = bcrypt.hashSync('Senha1234', 10);
-
   const tenants = [];
+
   for (let i = 1; i <= n; i++) {
-    const tenantId = psql(`SELECT gen_random_uuid()`);
-    const userId   = psql(`SELECT gen_random_uuid()`);
+    const tenantId = psql(`SELECT gen_random_uuid()`).trim();
+    const userId   = psql(`SELECT gen_random_uuid()`).trim();
     const email    = `stressteste${i}@load.test`;
+    const slug     = `load-test-${i}-${Date.now()}`;
 
-    psql(`INSERT INTO tenants (id, name, slug, plan, subscription_status, trial_ends_at)
-          VALUES ('${tenantId}', 'Load Test ${i}', 'load-test-${i}-${Date.now()}', 'basic', 'trialing', NOW() + INTERVAL '14 days')`);
-
+    psql(`INSERT INTO tenants (id, name, slug, plan, subscription_status, trial_ends_at) VALUES ('${tenantId}', 'Load Test ${i}', '${slug}', 'basic', 'trialing', NOW() + INTERVAL '14 days')`);
     psql(`INSERT INTO order_counters (tenant_id) VALUES ('${tenantId}')`);
-
-    psql(`INSERT INTO users (id, tenant_id, name, email, password_hash, role)
-          VALUES ('${userId}', '${tenantId}', 'Admin ${i}', '${email}', '${hash}', 'owner')`);
-
-    psql(`INSERT INTO products (tenant_id, name, sale_type, sale_price, active)
-          VALUES ('${tenantId}', 'Item Teste', 'unit', 10.00, true)`);
-
-    psql(`INSERT INTO cash_registers (tenant_id, opened_by, opening_balance)
-          VALUES ('${tenantId}', '${userId}', 0)`);
+    psql(`INSERT INTO users (id, tenant_id, name, email, password_hash, role) VALUES ('${userId}', '${tenantId}', 'Admin ${i}', '${email}', '${hash}', 'owner')`);
+    psql(`INSERT INTO products (tenant_id, name, sale_type, sale_price, active) VALUES ('${tenantId}', 'Item Teste', 'unit', 10.00, true)`);
+    psql(`INSERT INTO cash_registers (tenant_id, opened_by, opening_balance) VALUES ('${tenantId}', '${userId}', 0)`);
 
     tenants.push({ idx: i, tenantId, userId, email });
+    if (i % 10 === 0) process.stdout.write(` ${i}...`);
   }
 
-  console.log(' ✅');
+  console.log(' OK');
   return tenants;
 }
 
 // ── Pedidos para um restaurante ───────────────────────────────
 
 async function criarPedidos(tenantInfo) {
-  // Assina JWT diretamente — sem chamar /auth/login (evita rate limit)
   let token = jwt.sign(
     { sub: tenantInfo.userId, tenantId: tenantInfo.tenantId, role: 'owner' },
     JWT_SECRET,
     { expiresIn: '2h' }
   );
 
-  const prodRes  = await req('GET', '/products?active=true&limit=5', null, token);
+  // Busca produtos com retry em caso de 429
+  const prodRes = await withRetry(
+    () => req('GET', '/products?active=true&limit=5', null, token),
+    { maxRetries: 6, retryAfterMs: 2000, label: `Rest #${tenantInfo.idx} produtos` }
+  );
+
+  if (prodRes.status !== 200) {
+    return { ok: 0, fail: N_PEDIDOS, error: `produtos HTTP ${prodRes.status}` };
+  }
+
   const products = (prodRes.body?.data?.data ?? prodRes.body?.data ?? []).filter(p => p.active);
-  if (!products.length) return { ok: 0, fail: N_PEDIDOS, error: 'sem produtos' };
+  if (!products.length) {
+    return { ok: 0, fail: N_PEDIDOS, error: `sem produtos (HTTP ${prodRes.status})` };
+  }
 
   const PAYMENT  = ['cash', 'pix', 'credit', 'debit'];
   const DELIVERY = ['pickup', 'delivery'];
-
   let ok = 0, fail = 0;
 
   for (let i = 0; i < N_PEDIDOS; i++) {
@@ -146,10 +163,12 @@ async function criarPedidos(tenantInfo) {
       items:           [{ productId: prod.id, quantity: 1 }],
     };
 
-    const res = await req('POST', '/orders', body, token);
+    const res = await withRetry(
+      () => req('POST', '/orders', body, token),
+      { maxRetries: 4, retryAfterMs: 2500, label: `Rest #${tenantInfo.idx} pedido ${i+1}` }
+    );
 
     if (res.status === 401) {
-      // Re-assina token se expirou
       token = jwt.sign(
         { sub: tenantInfo.userId, tenantId: tenantInfo.tenantId, role: 'owner' },
         JWT_SECRET, { expiresIn: '2h' }
@@ -160,9 +179,12 @@ async function criarPedidos(tenantInfo) {
       ok++;
     } else {
       fail++;
+      if (fail <= 2) {
+        process.stdout.write(`\n     Pedido ${i+1} falhou: HTTP ${res.status} - ${res.body?.message ?? ''}\n`);
+      }
     }
 
-    await sleep(220); // 220ms = ~4 req/s = 240 req/min (abaixo do limite de 300)
+    await sleep(220);
   }
 
   return { ok, fail, error: null };
@@ -171,43 +193,40 @@ async function criarPedidos(tenantInfo) {
 // ── Main ──────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`\n🚀 Stress test em massa`);
-  console.log(`   ${N_REST} restaurantes × ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos`);
-  console.log(`   Modo: sequencial com 220ms entre requests (respeita rate limit 300 req/min)\n`);
+  console.log(`\nStress test em massa`);
+  console.log(`   ${N_REST} restaurantes x ${N_PEDIDOS} pedidos = ${N_REST * N_PEDIDOS} pedidos`);
+  console.log(`   Modo: sequencial - 220ms entre pedidos - retry em 429 - 2s entre restaurantes\n`);
 
   const tenants = await seedRestaurantes(N_REST);
-
-  console.log(`  🍽️  Criando pedidos (1 restaurante por vez)...\n`);
+  console.log(`  Criando pedidos (1 restaurante por vez)...\n`);
 
   const startTime   = Date.now();
   let totalOk = 0, totalFail = 0, restOk = 0, restFail = 0;
 
-  // Sequencial para respeitar rate limit de IP único
   for (let i = 0; i < tenants.length; i++) {
-    const results = [await criarPedidos(tenants[i]).then(r => ({ ...r, idx: tenants[i].idx }))];
+    if (i > 0) await sleep(2000);
 
-    for (const r of results) {
-      totalOk   += r.ok;
-      totalFail += r.fail;
-      const icon = (r.ok === N_PEDIDOS) ? '✅' : r.ok > 0 ? '⚠️ ' : '❌';
-      process.stdout.write(`  ${icon} Rest #${r.idx}: ${r.ok}/${N_PEDIDOS}${r.error ? ` — ${r.error}` : ''}\n`);
-      r.ok === N_PEDIDOS ? restOk++ : restFail++;
-    }
+    const r = await criarPedidos(tenants[i]);
+    totalOk   += r.ok;
+    totalFail += r.fail;
+    const icon = (r.ok === N_PEDIDOS) ? '[OK]' : r.ok > 0 ? '[PARCIAL]' : '[FALHA]';
+    process.stdout.write(`  ${icon} Rest #${tenants[i].idx}: ${r.ok}/${N_PEDIDOS}${r.error ? ` - ${r.error}` : ''}\n`);
+    r.ok === N_PEDIDOS ? restOk++ : restFail++;
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   const taxa    = ((totalOk / (N_REST * N_PEDIDOS)) * 100).toFixed(1);
 
-  console.log('\n' + '─'.repeat(50));
-  console.log(`📊 RESULTADO FINAL`);
+  console.log('\n' + '-'.repeat(50));
+  console.log(`RESULTADO FINAL`);
   console.log(`   Tempo:              ${elapsed}s`);
   console.log(`   Restaurantes OK:    ${restOk}/${N_REST}`);
   console.log(`   Pedidos criados:    ${totalOk}/${N_REST * N_PEDIDOS} (${taxa}%)`);
   console.log(`   Pedidos com erro:   ${totalFail}`);
   console.log(parseFloat(taxa) >= 95
-    ? `\n   ✅ SISTEMA ESTÁVEL — ${taxa}% de sucesso\n`
-    : `\n   ⚠️  Taxa abaixo do esperado: ${taxa}%\n`
+    ? `\n   SISTEMA ESTAVEL - ${taxa}% de sucesso\n`
+    : `\n   Taxa abaixo do esperado: ${taxa}%\n`
   );
 }
 
-main().catch(e => { console.error('\n❌', e.message); process.exit(1); });
+main().catch(e => { console.error('\nERRO FATAL:', e.message); process.exit(1); });

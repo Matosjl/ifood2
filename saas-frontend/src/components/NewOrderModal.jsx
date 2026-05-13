@@ -8,6 +8,8 @@ import { getProducts, createOrder, searchCustomers } from '../api/orders';
 import { getCurrentCaixa } from '../api/caixa';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
+import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
+import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
 
 // Reverse-geocode [lng, lat] → { road, suburb } via Nominatim
 async function reverseGeocode(lng, lat) {
@@ -95,27 +97,6 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
   );
 }
 
-const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
-
-// ── Cart helpers ──────────────────────────────────────────────
-
-const emptyCart = () => ({});
-
-const addToCart = (cart, product) => {
-  const prev = cart[product.id];
-  if (prev) return { ...cart, [product.id]: { ...prev, qty: prev.qty + 1 } };
-  return { ...cart, [product.id]: { product, qty: 1, weightKg: '' } };
-};
-
-const removeFromCart = (cart, id) => { const n = { ...cart }; delete n[id]; return n; };
-
-const cartTotal = (cart) =>
-  Object.values(cart).reduce((sum, { product, qty, weightKg }) => {
-    const amount = product.sale_type === 'kg'
-      ? parseFloat(product.sale_price) * parseFloat(weightKg || 0)
-      : parseFloat(product.sale_price) * (qty || 0);
-    return sum + amount;
-  }, 0);
 
 // ── Animation variants ────────────────────────────────────────
 
@@ -132,34 +113,6 @@ const STEPS = [
   { id: 'review',   label: 'Revisão',    icon: '✅' },
 ];
 
-// ── Bairros e taxas de entrega ────────────────────────────────
-
-const NEIGHBORHOODS = [
-  { bairro: 'Itapeva',              taxa: 6  },
-  { bairro: 'Itapeva Norte',        taxa: 6  },
-  { bairro: 'Tupinambá',            taxa: 8  },
-  { bairro: 'Praia Gaúcha',         taxa: 8  },
-  { bairro: 'Praia Yara',           taxa: 8  },
-  { bairro: 'Praia Recreio',        taxa: 10 },
-  { bairro: 'Praia Santa Helena',   taxa: 10 },
-  { bairro: 'Praia Estrela',        taxa: 10 },
-  { bairro: 'Praia Real',           taxa: 10 },
-  { bairro: 'Praia Paraíso',        taxa: 15 },
-  { bairro: 'São Brás',             taxa: 15 },
-  { bairro: 'Campo Bonito',         taxa: 17 },
-  { bairro: 'Torres',               taxa: 20 },
-];
-
-const PAY_OPTIONS = [
-  { value: 'cash',    label: '💵 Dinheiro', color: 'green' },
-  { value: 'pix',     label: '📱 Pix',     color: 'blue'  },
-  { value: 'credit',  label: '💳 Crédito', color: 'purple' },
-  { value: 'debit',   label: '💳 Débito',  color: 'indigo' },
-  { value: 'voucher', label: '🎫 Vale',    color: 'yellow' },
-  { value: 'fiado',   label: '🤝 Fiado',   color: 'purple' },
-  { value: 'other',   label: '🔖 Outro',   color: 'gray'  },
-  { value: 'pending', label: '⏳ A cobrar',color: 'orange' },
-];
 
 // ── Category accordion ────────────────────────────────────────
 
@@ -254,8 +207,6 @@ function StepCustomer({ name, setName, phone, setPhone, fetchSuggestions, showSu
         <input
           type="text" placeholder="Nome do cliente" value={name} autoFocus
           onChange={(e) => { setName(e.target.value); fetchSuggestions(e.target.value); }}
-          onBlur={() => setTimeout(() => {}, 150)}
-          onFocus={() => {}}
           className="input w-full"
         />
         <AnimatePresence>
@@ -288,15 +239,7 @@ function StepCustomer({ name, setName, phone, setPhone, fetchSuggestions, showSu
 }
 
 function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, onWeight, onRemove }) {
-  const categories = (() => {
-    const map = {};
-    for (const p of products) {
-      const cat = p.category_name ?? 'Sem categoria';
-      if (!map[cat]) map[cat] = [];
-      map[cat].push(p);
-    }
-    return Object.entries(map).map(([name, items]) => ({ name, items }));
-  })();
+  const categories = groupByCategory(products);
 
   const searchResults = search
     ? products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
@@ -750,7 +693,7 @@ function StepReview({ name, phone, cart, deliveryType, street, streetNumber, com
 export default function NewOrderModal({ onClose, onCreated }) {
   const [products,    setProducts]    = useState([]);
   const [search,      setSearch]      = useState('');
-  const [cart,        setCart]        = useState(emptyCart());
+  const [cart,        setCart]        = useState({});
   const [loading,     setLoading]     = useState(true);
   const [submitting,  setSubmitting]  = useState(false);
   const [error,       setError]       = useState(null);
@@ -765,7 +708,8 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [phone,         setPhone]         = useState('');
   const [suggestions,   setSuggestions]   = useState([]);
   const [showSug,       setShowSug]       = useState(false);
-  const sugTimer = useRef(null);
+  const sugTimer   = useRef(null);
+  const fiadoTimer = useRef(null);
 
   // Step 3 — Payment/Delivery
   const [channel,          setChannel]          = useState('manual');
@@ -800,9 +744,12 @@ export default function NewOrderModal({ onClose, onCreated }) {
 
   useEffect(() => {
     if (paymentMethod !== 'fiado') return;
-    listFiadoClientes({ search: fiadoClienteSearch })
-      .then(({ data }) => setFiadoClientes(data.data ?? []))
-      .catch(() => {});
+    clearTimeout(fiadoTimer.current);
+    fiadoTimer.current = setTimeout(() => {
+      listFiadoClientes({ search: fiadoClienteSearch })
+        .then(({ data }) => setFiadoClientes(data.data ?? []))
+        .catch(() => {});
+    }, 300);
   }, [paymentMethod, fiadoClienteSearch]);
 
   useEffect(() => {

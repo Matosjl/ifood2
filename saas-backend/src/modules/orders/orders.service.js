@@ -319,4 +319,59 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
   }
 };
 
-module.exports = { listOrders, getOrder, createOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems };
+// ── Atualização de informações do pedido ──────────────────────
+
+/**
+ * Atualiza campos de entrega/pagamento e aplica ajuste de valor (desconto/acréscimo).
+ * Não altera itens nem estoque — apenas metadados e total.
+ */
+const updateOrderInfo = async (id, tenantId, {
+  deliveryType, neighborhood, customerAddress, deliveryFee,
+  notes, adjustmentType, adjustmentValue, adjustmentReason,
+}) => {
+  const order = await Order.findById(id, tenantId);
+  if (!order) throw new AppError('Pedido não encontrado.', 404);
+
+  const setClauses = [];
+  const params     = [id, tenantId];
+
+  const push = (val) => { params.push(val); return `$${params.length}`; };
+
+  if (deliveryType    !== undefined) setClauses.push(`delivery_type = ${push(deliveryType)}`);
+  if (neighborhood    !== undefined) setClauses.push(`neighborhood  = ${push(neighborhood || null)}`);
+  if (customerAddress !== undefined) setClauses.push(`customer_address = ${push(customerAddress || null)}`);
+  if (deliveryFee     !== undefined) setClauses.push(`delivery_fee  = ${push(parseFloat(deliveryFee) || 0)}`);
+
+  // Ajuste de valor
+  let newTotal = parseFloat(order.total);
+  if (adjustmentValue && parseFloat(adjustmentValue) > 0) {
+    const delta = parseFloat(adjustmentValue);
+    newTotal = adjustmentType === 'discount'
+      ? Math.max(0, newTotal - delta)
+      : newTotal + delta;
+    setClauses.push(`total = ${push(parseFloat(newTotal.toFixed(2)))}`);
+  }
+
+  // Mescla observações
+  const adjNote = adjustmentValue && parseFloat(adjustmentValue) > 0
+    ? `[${adjustmentType === 'discount' ? 'Desconto' : 'Acréscimo'}: ${
+        adjustmentType === 'discount' ? '-' : '+'
+      }R$${parseFloat(adjustmentValue).toFixed(2)}${adjustmentReason ? ' — ' + adjustmentReason : ''}]`
+    : '';
+
+  const existingNotes = order.notes ?? '';
+  const updatedNotes  = notes !== undefined ? notes : existingNotes;
+  const finalNotes    = [updatedNotes, adjNote].filter(Boolean).join(' | ') || null;
+  setClauses.push(`notes = ${push(finalNotes)}`);
+
+  if (setClauses.length === 0) return order;
+
+  setClauses.push(`updated_at = NOW()`);
+  await db.query(
+    `UPDATE orders SET ${setClauses.join(', ')} WHERE id = $1 AND tenant_id = $2`,
+    params
+  );
+  return Order.findById(id, tenantId);
+};
+
+module.exports = { listOrders, getOrder, createOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems, updateOrderInfo };
