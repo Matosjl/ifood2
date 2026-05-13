@@ -26,7 +26,7 @@ async function reverseGeocode(lng, lat) {
 
 // ── Map address picker (overlay dentro do modal) ──────────────
 
-const CITY_CENTER = [-49.7198, -29.3612]; // Itapeva, Torres RS
+const CITY_CENTER = [-49.7802, -29.3965]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
 
 function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
   const [markerPos, setMarkerPos] = useState(CITY_CENTER);
