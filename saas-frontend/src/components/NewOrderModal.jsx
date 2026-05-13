@@ -802,7 +802,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
         {/* Step content */}
         {caixaOpen !== false && (
           <>
-            <div className={`flex-1 overflow-hidden relative ${stepIndex === 1 ? 'p-4' : 'p-5'}`}>
+            <div className={`flex-1 relative ${stepIndex === 1 ? 'overflow-hidden p-4' : 'overflow-y-auto p-5'}`}>
               <AnimatePresence mode="wait" custom={direction}>
                 <motion.div
                   key={currentStep.id}
