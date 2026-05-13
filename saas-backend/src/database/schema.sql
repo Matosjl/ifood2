@@ -356,3 +356,50 @@ CREATE TABLE IF NOT EXISTS fiado_compras (
 CREATE INDEX IF NOT EXISTS idx_fiado_clientes_tenant2 ON fiado_clientes(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_fiado_compras_cliente2 ON fiado_compras(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_fiado_compras_tenant2  ON fiado_compras(tenant_id);
+
+-- ── Motoboy / Driver ─────────────────────────────────────────────
+
+-- Token de conexão por restaurante (6 chars maiúsculo, ex: "AB12CD")
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS driver_token VARCHAR(10) DEFAULT upper(substr(md5(random()::text), 1, 6));
+
+CREATE TABLE IF NOT EXISTS drivers (
+  id            UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name          VARCHAR(200)  NOT NULL,
+  phone         VARCHAR(30),
+  email         VARCHAR(200)  UNIQUE NOT NULL,
+  password_hash VARCHAR(200)  NOT NULL,
+  status        VARCHAR(20)   NOT NULL DEFAULT 'offline',
+  current_lat   DECIMAL(10,8),
+  current_lng   DECIMAL(11,8),
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS driver_tenant_connections (
+  id           UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  driver_id    UUID        NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+  tenant_id    UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(driver_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+  id           UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id     UUID          NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  driver_id    UUID          REFERENCES drivers(id),
+  tenant_id    UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  status       VARCHAR(20)   NOT NULL DEFAULT 'pending',
+  driver_fee   DECIMAL(10,2) DEFAULT 0,
+  accepted_at  TIMESTAMPTZ,
+  picked_up_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  UNIQUE(order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_drivers_email          ON drivers(email);
+CREATE INDEX IF NOT EXISTS idx_dtc_driver             ON driver_tenant_connections(driver_id);
+CREATE INDEX IF NOT EXISTS idx_dtc_tenant             ON driver_tenant_connections(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_driver      ON deliveries(driver_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_order       ON deliveries(order_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_tenant      ON deliveries(tenant_id);

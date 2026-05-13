@@ -16,6 +16,7 @@ import TrialBanner       from './components/TrialBanner';
 import PlanWall          from './components/PlanWall';
 import CustomerApp       from './CustomerApp';
 import AdminApp          from './AdminApp';
+import DriverApp         from './pages/DriverApp';
 
 // ── Routing helper ────────────────────────────────────────────
 const getRoute = () => window.location.pathname;
@@ -80,6 +81,9 @@ export default function App() {
   };
 
   const handleShowPlans = useCallback(() => setShowPlansPage(true), []);
+
+  // ── Driver app (mobile PWA) ───────────────────────────────
+  if (route.startsWith('/driver')) return <DriverApp />;
 
   // ── Admin panel ───────────────────────────────────────────
   if (route.startsWith('/admin')) return <AdminApp />;
