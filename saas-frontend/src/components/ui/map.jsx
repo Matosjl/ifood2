@@ -490,7 +490,7 @@ export function MapControls({
   const resetNorth= useCallback(() => map?.resetNorthPitch({ duration: 300 }), [map]);
   const locate    = useCallback(() => {
     // Estrada dos Cunhas 1203, Sala N2, Itapeva, Torres RS — fallback sem HTTPS
-    const CITY_FALLBACK = { longitude: -49.7802, latitude: -29.3965 }; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
+    const CITY_FALLBACK = { longitude: -49.77948745767169, latitude: -29.38731801148806 }; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
     setWaiting(true);
     if (!navigator.geolocation) {
       map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 14, duration: 1500 });
