@@ -1,27 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
 
-// ── API base ──────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || '/api';
+// ── API — usa a mesma BASE do axios do projeto (resolve VITE_API_URL) ──
+import baseApi from '../api/axios';
+
+// Cliente separado para motoboy (token diferente do restaurante)
+const driverApi = axios.create({
+  baseURL: baseApi.defaults.baseURL, // herda a BASE já resolvida
+  timeout: 15_000,
+  headers: { 'Content-Type': 'application/json' },
+});
 
 const http = async (method, path, body, token) => {
-  const r = await fetch(`${API}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await r.text();
-  let json;
   try {
-    json = JSON.parse(text);
-  } catch {
-    // Servidor retornou HTML (502/504) — backend fora do ar ou não deployado
-    throw new Error(`Erro de servidor (${r.status}). Verifique se o deploy foi aplicado no VPS.`);
+    const res = await driverApi.request({
+      method,
+      url: `/driver${path}`,
+      data: body,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return res.data.data;
+  } catch (err) {
+    const msg = err.response?.data?.message || err.response?.data?.error || err.message;
+    throw new Error(msg || `Erro ${err.response?.status ?? 'de rede'}`);
   }
-  if (!r.ok) throw new Error(json.message || json.error || `Erro ${r.status}`);
-  return json.data;
 };
 
 // ── Icons (inline SVG simples) ────────────────────────────────
@@ -75,7 +77,7 @@ function AuthScreen({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const data = await http('POST', `/driver/${mode}`, form);
+      const data = await http('POST', `/${mode}`, form);
       localStorage.setItem('driverToken', data.token);
       localStorage.setItem('driverUser', JSON.stringify(data.driver));
       onLogin(data.token, data.driver);
@@ -352,8 +354,8 @@ export default function DriverApp() {
     if (!token) return;
     try {
       const [av, ac] = await Promise.all([
-        http('GET', '/driver/deliveries/available', null, token),
-        http('GET', '/driver/deliveries/active',    null, token),
+        http('GET', '/deliveries/available', null, token),
+        http('GET', '/deliveries/active',    null, token),
       ]);
       setAvailable(av);
       setActive(ac);
@@ -367,8 +369,8 @@ export default function DriverApp() {
     if (!token) return;
     try {
       const [s, h] = await Promise.all([
-        http('GET', '/driver/stats',   null, token),
-        http('GET', '/driver/history', null, token),
+        http('GET', '/stats',   null, token),
+        http('GET', '/history', null, token),
       ]);
       setStats(s);
       setHistory(h);
@@ -378,7 +380,7 @@ export default function DriverApp() {
   const fetchProfile = useCallback(async () => {
     if (!token) return;
     try {
-      const p = await http('GET', '/driver/profile', null, token);
+      const p = await http('GET', '/profile', null, token);
       setProfile(p);
     } catch {}
   }, [token]);
@@ -403,7 +405,7 @@ export default function DriverApp() {
   const toggleOnline = async () => {
     const newStatus = online ? 'offline' : 'available';
     try {
-      await http('PUT', '/driver/status', { status: newStatus }, token);
+      await http('PUT', '/status', { status: newStatus }, token);
       setOnline(!online);
       if (!online) fetchDeliveries();
     } catch (e) { setError(e.message); }
@@ -412,7 +414,7 @@ export default function DriverApp() {
   const handleAccept = async (orderId) => {
     setLoading(true);
     try {
-      await http('POST', `/driver/deliveries/${orderId}/accept`, {}, token);
+      await http('POST', `/deliveries/${orderId}/accept`, {}, token);
       await fetchDeliveries();
       setSubTab('active');
     } catch (e) { setError(e.message); }
@@ -422,7 +424,7 @@ export default function DriverApp() {
   const handlePickup = async (deliveryId) => {
     setLoading(true);
     try {
-      await http('POST', `/driver/deliveries/${deliveryId}/pickup`, {}, token);
+      await http('POST', `/deliveries/${deliveryId}/pickup`, {}, token);
       await fetchDeliveries();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -430,7 +432,7 @@ export default function DriverApp() {
 
   const handlePay = async (deliveryId, paymentMethod) => {
     try {
-      await http('POST', `/driver/deliveries/${deliveryId}/pay`, { paymentMethod }, token);
+      await http('POST', `/deliveries/${deliveryId}/pay`, { paymentMethod }, token);
       await fetchDeliveries();
     } catch (e) { setError(e.message); }
   };
@@ -438,7 +440,7 @@ export default function DriverApp() {
   const handleComplete = async (deliveryId) => {
     setLoading(true);
     try {
-      await http('POST', `/driver/deliveries/${deliveryId}/complete`, {}, token);
+      await http('POST', `/deliveries/${deliveryId}/complete`, {}, token);
       await fetchDeliveries();
       await fetchStats();
     } catch (e) { setError(e.message); }
@@ -449,7 +451,7 @@ export default function DriverApp() {
     e.preventDefault();
     setConnectMsg('');
     try {
-      const data = await http('POST', '/driver/connect', { token: connectToken }, token);
+      const data = await http('POST', '/connect', { token: connectToken }, token);
       setConnectMsg(`✅ Conectado a: ${data.restaurantName}`);
       setConnectToken('');
       fetchProfile();
