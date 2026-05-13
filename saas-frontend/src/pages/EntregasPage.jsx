@@ -273,8 +273,9 @@ export default function EntregasPage() {
   }, [loadOrders]);
 
   // ── GPS tracking ──────────────────────────────────────────
-  // Coordenadas do centro da cidade (fallback quando GPS bloqueado — ex: HTTP sem HTTPS)
-  const CITY_FALLBACK = [-49.7264, -29.3388]; // Torres, RS
+  // Coordenadas fixas do estabelecimento (fallback quando GPS bloqueado — ex: HTTP sem HTTPS)
+  // Estrada dos Cunhas 1203, Sala N2, Itapeva, Torres RS
+  const CITY_FALLBACK = [-49.7198, -29.3612]; // Itapeva, Torres RS
 
   useEffect(() => {
     const useFallback = (msg) => {

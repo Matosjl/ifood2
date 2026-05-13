@@ -489,8 +489,8 @@ export function MapControls({
   const zoomOut   = useCallback(() => map?.zoomTo(map.getZoom() - 1, { duration: 300 }), [map]);
   const resetNorth= useCallback(() => map?.resetNorthPitch({ duration: 300 }), [map]);
   const locate    = useCallback(() => {
-    // Coordenadas de Torres, RS — fallback quando GPS bloqueado (sem HTTPS)
-    const CITY_FALLBACK = { longitude: -49.7264, latitude: -29.3388 };
+    // Estrada dos Cunhas 1203, Sala N2, Itapeva, Torres RS — fallback sem HTTPS
+    const CITY_FALLBACK = { longitude: -49.7198, latitude: -29.3612 };
     setWaiting(true);
     if (!navigator.geolocation) {
       map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 14, duration: 1500 });
