@@ -1,5 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getProducts } from '../api/orders';
+import { getProducts, updateOrderStatus } from '../api/orders';
+import { markOrderPaid as markOrderPaidApi } from '../api/orders';
+
+const NEIGHBORHOODS = [
+  { bairro: 'Itapeva',            taxa: 6  }, { bairro: 'Itapeva Norte',      taxa: 6  },
+  { bairro: 'Tupinambá',          taxa: 8  }, { bairro: 'Praia Gaúcha',       taxa: 8  },
+  { bairro: 'Praia Yara',         taxa: 8  }, { bairro: 'Praia Recreio',      taxa: 10 },
+  { bairro: 'Praia Santa Helena', taxa: 10 }, { bairro: 'Praia Estrela',      taxa: 10 },
+  { bairro: 'Praia Real',         taxa: 10 }, { bairro: 'Praia Paraíso',      taxa: 15 },
+  { bairro: 'São Brás',           taxa: 15 }, { bairro: 'Campo Bonito',       taxa: 17 },
+  { bairro: 'Torres',             taxa: 20 },
+];
+
+const PAY_OPTIONS = [
+  { value: 'cash',    label: '💵 Dinheiro' }, { value: 'pix',     label: '📱 Pix'     },
+  { value: 'credit',  label: '💳 Crédito'  }, { value: 'debit',   label: '💳 Débito'  },
+  { value: 'voucher', label: '🎫 Vale'      }, { value: 'other',   label: '🔖 Outro'   },
+  { value: 'pending', label: '⏳ A cobrar'  },
+];
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
@@ -44,13 +62,24 @@ const buildInitialCart = (orderItems, products) => {
 
 // ── Main component ────────────────────────────────────────────
 
-export default function EditOrderModal({ order, onClose, onSave }) {
+export default function EditOrderModal({ order, onClose, onSave, onOrderChanged }) {
+  const [tab,        setTab]        = useState('items'); // 'items' | 'order'
   const [products,   setProducts]   = useState([]);
   const [cart,       setCart]       = useState({});
   const [search,     setSearch]     = useState('');
   const [loading,    setLoading]    = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState(null);
+
+  // Aba "Pedido" — campos editáveis
+  const [deliveryType,  setDeliveryType]  = useState(order.deliveryType ?? 'pickup');
+  const [neighborhood,  setNeighborhood]  = useState(order.neighborhood ?? '');
+  const [address,       setAddress]       = useState(order.customerAddress ?? '');
+  const [deliveryFee,   setDeliveryFee]   = useState(String(order.deliveryFee ?? 0));
+  const [payMethod,     setPayMethod]     = useState(order.paymentMethod ?? 'cash');
+  const [adjType,       setAdjType]       = useState('discount'); // 'discount' | 'surcharge'
+  const [adjValue,      setAdjValue]      = useState('');
+  const [adjReason,     setAdjReason]     = useState('');
 
   // Carrega produtos e pré-monta o cart com os itens atuais
   useEffect(() => {
@@ -98,17 +127,13 @@ export default function EditOrderModal({ order, onClose, onSave }) {
   const cartEntries = Object.values(cart);
   const total       = cartTotal(cart);
 
-  // ── Submit ───────────────────────────────────────────────────
+  // ── Submit itens ─────────────────────────────────────────────
   const handleSubmit = async () => {
     if (cartEntries.length === 0) return setError('Adicione pelo menos 1 item.');
-
     const items = cartEntries.map(({ product, qty, weightKg }) => ({
       productId: product.id,
-      ...(product.sale_type === 'kg'
-        ? { weightKg: parseFloat(weightKg) }
-        : { quantity: qty }),
+      ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
     }));
-
     setError(null);
     setSubmitting(true);
     try {
@@ -116,6 +141,42 @@ export default function EditOrderModal({ order, onClose, onSave }) {
       onClose();
     } catch {
       setError('Erro ao salvar. Verifique o estoque disponível.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ── Submit informações do pedido ─────────────────────────────
+  const handleSaveOrder = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      // 1. Atualiza tipo de entrega (muda de pickup → delivery ou vice-versa)
+      // A API só aceita transições de status; para delivery_type usamos a rota de update info
+      // Por enquanto: chama onOrderChanged com os novos dados para o pai atualizar o estado local
+      const updates = {
+        deliveryType,
+        neighborhood: neighborhood || null,
+        customerAddress: address || null,
+        deliveryFee: parseFloat(deliveryFee) || 0,
+      };
+
+      // 2. Atualiza pagamento se mudou
+      if (payMethod !== order.paymentMethod) {
+        await markOrderPaidApi(order.id, payMethod);
+      }
+
+      // 3. Ajuste de valor (desconto/acréscimo) — adiciona nas observações como registro
+      let adjNote = '';
+      if (parseFloat(adjValue) > 0) {
+        const sign  = adjType === 'discount' ? '-' : '+';
+        adjNote = `[${adjType === 'discount' ? 'Desconto' : 'Acréscimo'}: ${sign}R$${parseFloat(adjValue).toFixed(2)}${adjReason ? ' — ' + adjReason : ''}]`;
+      }
+
+      onOrderChanged?.({ ...order, ...updates, _adjNote: adjNote });
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Erro ao salvar alterações.');
     } finally {
       setSubmitting(false);
     }
@@ -130,7 +191,7 @@ export default function EditOrderModal({ order, onClose, onSave }) {
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 shrink-0">
           <div>
             <h2 className="text-lg font-black text-white">Editar Pedido #{order.orderNumber}</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Altere os itens — o estoque será reconciliado automaticamente</p>
+            <p className="text-xs text-gray-500 mt-0.5">Altere itens, entrega, pagamento ou aplique desconto</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -139,7 +200,110 @@ export default function EditOrderModal({ order, onClose, onSave }) {
           </button>
         </div>
 
-        <div className="flex flex-1 min-h-0 divide-x divide-white/10">
+        {/* Tabs */}
+        <div className="flex border-b border-white/10 shrink-0">
+          {[{ id: 'items', label: '🛒 Itens' }, { id: 'order', label: '⚙️ Pedido' }].map(({ id, label }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-5 py-2.5 text-sm font-semibold transition-colors border-b-2 ${
+                tab === id ? 'border-orange-500 text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── ABA PEDIDO ─────────────────────────────────────── */}
+        {tab === 'order' && (
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+            {/* Tipo de entrega */}
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Tipo de pedido</label>
+              <div className="flex gap-2">
+                {[{ v: 'pickup', label: '🏪 Retirada' }, { v: 'delivery', label: '🛵 Entrega' }].map(({ v, label }) => (
+                  <button key={v} type="button" onClick={() => setDeliveryType(v)}
+                    className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
+                      deliveryType === v ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/40' : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                    }`}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {deliveryType === 'delivery' && (
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Bairro</label>
+                  <select value={neighborhood}
+                    onChange={(e) => {
+                      const b = e.target.value;
+                      setNeighborhood(b);
+                      const f = NEIGHBORHOODS.find((n) => n.bairro === b);
+                      if (f) setDeliveryFee(String(f.taxa));
+                    }}
+                    className="input w-full text-sm">
+                    <option value="">— Selecione —</option>
+                    {NEIGHBORHOODS.map(({ bairro, taxa }) => (
+                      <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
+                    ))}
+                    <option value="outro">Outro</option>
+                  </select>
+                </div>
+                <input type="text" placeholder="Endereço completo..." value={address}
+                  onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-400 shrink-0">Taxa (R$)</label>
+                  <input type="number" min="0" step="0.5" value={deliveryFee}
+                    onChange={(e) => setDeliveryFee(e.target.value)} className="input flex-1 text-sm text-right" />
+                </div>
+              </div>
+            )}
+
+            {/* Forma de pagamento */}
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Forma de pagamento</label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {PAY_OPTIONS.map(({ value, label }) => (
+                  <button key={value} type="button" onClick={() => setPayMethod(value)}
+                    className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
+                      payMethod === value ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40' : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                    }`}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Desconto / Acréscimo */}
+            <div className="bg-gray-800/40 rounded-xl p-3 space-y-2">
+              <label className="text-xs text-gray-400 font-semibold block">Ajuste de valor</label>
+              <div className="flex gap-2">
+                {[{ v: 'discount', l: '🔻 Desconto' }, { v: 'surcharge', l: '🔺 Acréscimo' }].map(({ v, l }) => (
+                  <button key={v} type="button" onClick={() => setAdjType(v)}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      adjType === v ? v === 'discount' ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/30' : 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
+                      : 'bg-gray-700/60 text-gray-500 hover:bg-gray-700'
+                    }`}>{l}</button>
+                ))}
+              </div>
+              <input type="number" min="0" step="0.01" placeholder="Valor (R$)"
+                value={adjValue} onChange={(e) => setAdjValue(e.target.value)} className="input w-full text-sm" />
+              <input type="text" placeholder="Motivo (ex: cortesia, frete errado...)"
+                value={adjReason} onChange={(e) => setAdjReason(e.target.value)} className="input w-full text-sm" />
+              {parseFloat(adjValue) > 0 && (
+                <p className="text-xs text-gray-400 bg-gray-700/40 rounded px-2 py-1">
+                  {adjType === 'discount' ? '🔻 Desconto' : '🔺 Acréscimo'} de <b>R$ {parseFloat(adjValue).toFixed(2)}</b> será registrado nas observações
+                </p>
+              )}
+            </div>
+
+            {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
+
+            <button onClick={handleSaveOrder} disabled={submitting}
+              className="w-full btn-green py-2.5 disabled:opacity-50">
+              {submitting ? 'Salvando...' : '✓ Salvar Alterações do Pedido'}
+            </button>
+          </div>
+        )}
+
+        {tab === 'items' && <div className="flex flex-1 min-h-0 divide-x divide-white/10">
 
           {/* ── LEFT — Catálogo ───────────────────────────── */}
           <div className="flex flex-col w-1/2 min-h-0">
@@ -257,7 +421,8 @@ export default function EditOrderModal({ order, onClose, onSave }) {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
+
       </div>
     </div>
   );

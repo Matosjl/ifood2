@@ -7,6 +7,93 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getProducts, createOrder, searchCustomers } from '../api/orders';
 import { getCurrentCaixa } from '../api/caixa';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
+import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
+
+// Reverse-geocode [lng, lat] → { road, suburb } via Nominatim
+async function reverseGeocode(lng, lat) {
+  try {
+    const res  = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt-BR`,
+      { headers: { 'Accept-Language': 'pt-BR' } }
+    );
+    const data = await res.json();
+    return {
+      road:   data.address?.road ?? data.address?.pedestrian ?? data.address?.path ?? '',
+      suburb: data.address?.suburb ?? data.address?.neighbourhood ?? data.address?.quarter ?? '',
+    };
+  } catch { return { road: '', suburb: '' }; }
+}
+
+// ── Map address picker (overlay dentro do modal) ──────────────
+
+const CITY_CENTER = [-49.7198, -29.3612]; // Itapeva, Torres RS
+
+function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
+  const [markerPos, setMarkerPos] = useState(CITY_CENTER);
+  const [loading,   setLoading]   = useState(false);
+  const [preview,   setPreview]   = useState(initialStreet || '');
+  const mapRef = useRef(null);
+
+  const handleDragEnd = useCallback(async (lngLat) => {
+    setMarkerPos([lngLat.lng, lngLat.lat]);
+    setLoading(true);
+    const { road } = await reverseGeocode(lngLat.lng, lngLat.lat);
+    setPreview(road);
+    setLoading(false);
+  }, []);
+
+  const handleConfirm = async () => {
+    setLoading(true);
+    const { road } = await reverseGeocode(markerPos[0], markerPos[1]);
+    onConfirm({ street: road || preview, coords: markerPos });
+  };
+
+  return (
+    <div className="absolute inset-0 z-30 flex flex-col bg-gray-950 rounded-2xl overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-white/10 shrink-0">
+        <div>
+          <p className="text-sm font-black text-white">📍 Escolher localização</p>
+          <p className="text-xs text-gray-400">Arraste o alfinete até o endereço do cliente</p>
+        </div>
+        <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10">✕</button>
+      </div>
+
+      {/* Map */}
+      <div className="flex-1 relative min-h-0">
+        <Map ref={mapRef} center={CITY_CENTER} zoom={14} theme="dark" className="h-full w-full">
+          <MapControls position="top-right" showZoom showLocate
+            onLocate={({ longitude, latitude }) => setMarkerPos([longitude, latitude])} />
+          <MapMarker longitude={markerPos[0]} latitude={markerPos[1]} draggable
+            onDragEnd={(e) => handleDragEnd(e.target.getLngLat())}>
+            <MarkerContent>
+              <div className="flex flex-col items-center -mt-8">
+                <div className="bg-orange-500 text-white rounded-full px-2 py-1 text-xs font-black shadow-lg shadow-orange-500/40">
+                  📍
+                </div>
+                <div className="w-0.5 h-3 bg-orange-500" />
+              </div>
+            </MarkerContent>
+          </MapMarker>
+        </Map>
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 bg-gray-900 border-t border-white/10 shrink-0 flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-gray-400 mb-0.5">Rua identificada:</p>
+          <p className="text-sm font-semibold text-white truncate">
+            {loading ? <span className="animate-pulse text-gray-500">Identificando...</span> : (preview || '— arraste o alfinete —')}
+          </p>
+        </div>
+        <button onClick={handleConfirm} disabled={loading}
+          className="shrink-0 px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-50">
+          Confirmar
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
@@ -305,21 +392,44 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
   );
 }
 
+const MAX_SPLITS = 3;
+const PAY_OPTIONS_SPLIT = PAY_OPTIONS.filter((p) => !['fiado','pending'].includes(p.value));
+
 function StepPayment({
   channel, setChannel,
   deliveryType, setDeliveryType,
-  address, setAddress,
   neighborhood, setNeighborhood,
+  street, setStreet,
+  streetNumber, setStreetNumber,
+  complement, setComplement,
   deliveryFee, setDeliveryFee,
   paymentMethod, setPaymentMethod,
+  splitMode, setSplitMode,
+  splitPayments, setSplitPayments,
   needsChange, setNeedsChange,
   changeFor, setChangeFor,
   notes, setNotes,
+  scheduledFor, setScheduledFor,
   fiadoClientes, fiadoClienteId, setFiadoClienteId,
   fiadoClienteSearch, setFiadoClienteSearch,
+  showMapPicker, setShowMapPicker,
+  orderTotal,
 }) {
+  const splitTotal    = splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const splitRemain   = Math.max(0, (parseFloat(orderTotal) || 0) - splitTotal);
+  const splitOk       = Math.abs(splitRemain) < 0.01;
+
+  const addSplit = () => {
+    if (splitPayments.length >= MAX_SPLITS) return;
+    setSplitPayments((p) => [...p, { method: 'cash', amount: '' }]);
+  };
+  const removeSplit = (i) => setSplitPayments((p) => p.filter((_, idx) => idx !== i));
+  const updateSplit = (i, key, val) =>
+    setSplitPayments((p) => p.map((s, idx) => idx === i ? { ...s, [key]: val } : s));
+
   return (
     <div className="space-y-4 max-w-md">
+
       {/* Canal */}
       <div>
         <label className="text-xs text-gray-400 font-semibold mb-1 block">Canal do pedido</label>
@@ -330,6 +440,15 @@ function StepPayment({
           <option value="mesa">Mesa</option>
           <option value="telefone">Telefone</option>
         </select>
+      </div>
+
+      {/* Agendamento */}
+      <div>
+        <label className="text-xs text-gray-400 font-semibold mb-1 block">
+          🕐 Agendamento <span className="text-gray-600 font-normal">(opcional)</span>
+        </label>
+        <input type="text" placeholder="Ex: 20:30, amanhã 12:00..." value={scheduledFor}
+          onChange={(e) => setScheduledFor(e.target.value)} className="input w-full text-sm" />
       </div>
 
       {/* Tipo entrega */}
@@ -352,47 +471,66 @@ function StepPayment({
             </button>
           ))}
         </div>
+
         <AnimatePresence>
           {deliveryType === 'delivery' && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
               className="mt-2 space-y-2 overflow-hidden">
 
-              {/* Bairro — auto-preenche a taxa */}
+              {/* Bairro */}
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Bairro *</label>
-                <select
-                  value={neighborhood}
+                <select value={neighborhood}
                   onChange={(e) => {
-                    const bairro = e.target.value;
-                    setNeighborhood(bairro);
-                    const found = NEIGHBORHOODS.find((n) => n.bairro === bairro);
-                    if (found) setDeliveryFee(String(found.taxa));
-                    else setDeliveryFee('');
+                    const b = e.target.value;
+                    setNeighborhood(b);
+                    const found = NEIGHBORHOODS.find((n) => n.bairro === b);
+                    setDeliveryFee(found ? String(found.taxa) : '');
                   }}
-                  className="input w-full text-sm"
-                >
+                  className="input w-full text-sm">
                   <option value="">— Selecione o bairro —</option>
                   {NEIGHBORHOODS.map(({ bairro, taxa }) => (
-                    <option key={bairro} value={bairro}>
-                      {bairro} — R$ {taxa.toFixed(2)}
-                    </option>
+                    <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
                   ))}
                   <option value="outro">Outro (taxa manual)</option>
                 </select>
               </div>
 
-              {/* Endereço (rua/número) */}
-              <input type="text" placeholder="Rua, número, complemento..." value={address}
-                onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+              {/* Rua */}
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Rua</label>
+                <div className="flex gap-1.5">
+                  <input type="text" placeholder="Nome da rua..." value={street}
+                    onChange={(e) => setStreet(e.target.value)} className="input flex-1 text-sm" />
+                  <button type="button" onClick={() => setShowMapPicker(true)}
+                    title="Escolher no mapa"
+                    className="px-3 py-2 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 text-sm font-bold transition-colors border border-orange-500/20 shrink-0">
+                    🗺️
+                  </button>
+                </div>
+              </div>
 
-              {/* Taxa — editável (auto-preenchida pelo bairro) */}
+              {/* Número + Complemento */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs text-gray-400 mb-1 block">Número</label>
+                  <input type="text" placeholder="123" value={streetNumber}
+                    onChange={(e) => setStreetNumber(e.target.value)} className="input w-full text-sm" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-gray-400 mb-1 block">Complemento</label>
+                  <input type="text" placeholder="Apto, casa..." value={complement}
+                    onChange={(e) => setComplement(e.target.value)} className="input w-full text-sm" />
+                </div>
+              </div>
+
+              {/* Taxa */}
               <div className="flex items-center gap-2">
                 <label className="text-xs text-gray-400 whitespace-nowrap shrink-0">Taxa de entrega (R$)</label>
                 <input type="number" min="0" step="0.50" placeholder="0,00" value={deliveryFee}
                   onChange={(e) => setDeliveryFee(e.target.value)} className="input flex-1 text-sm text-right" />
               </div>
 
-              {/* Badge de confirmação da taxa */}
               {neighborhood && neighborhood !== 'outro' && parseFloat(deliveryFee) > 0 && (
                 <p className="text-xs text-blue-400 bg-blue-500/10 rounded-lg px-2.5 py-1.5">
                   🛵 Taxa para <b>{neighborhood}</b>: R$ {parseFloat(deliveryFee).toFixed(2)}
@@ -405,68 +543,115 @@ function StepPayment({
 
       {/* Pagamento */}
       <div>
-        <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Forma de pagamento</label>
-        <div className="grid grid-cols-4 gap-1.5">
-          {PAY_OPTIONS.map(({ value, label }) => (
-            <button key={value} type="button" onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
-              className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
-                paymentMethod === value
-                  ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40 scale-[1.03]'
-                  : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
-              } ${paymentMethod === value && value === 'fiado' ? '!bg-purple-500/20 !text-purple-300 !ring-purple-500/40' : ''}
-              ${paymentMethod === value && value === 'pending' ? '!bg-orange-500/20 !text-orange-300 !ring-orange-500/40' : ''}`}>
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs text-gray-400 font-semibold">Forma de pagamento</label>
+          <button type="button" onClick={() => { setSplitMode((v) => !v); setSplitPayments([{ method: 'cash', amount: '' }]); }}
+            className={`text-xs px-2 py-0.5 rounded-lg font-semibold transition-colors ${
+              splitMode ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-700/60 text-gray-400 hover:text-gray-200'
+            }`}>
+            {splitMode ? '✕ Cancelar divisão' : '⊕ Dividir pagamento'}
+          </button>
         </div>
 
-        {/* Fiado */}
-        <AnimatePresence>
-          {paymentMethod === 'fiado' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className="mt-2 space-y-1.5 overflow-hidden">
-              <input type="text" placeholder="Buscar cliente do fiado..."
-                value={fiadoClienteSearch}
-                onChange={(e) => { setFiadoClienteSearch(e.target.value); setFiadoClienteId(''); }}
-                className="input w-full text-sm" />
-              {fiadoClientes.length > 0 && (
-                <div className="max-h-28 overflow-y-auto rounded-xl border border-white/10 bg-gray-800 divide-y divide-white/[0.04]">
-                  {fiadoClientes.filter((c) => !c.bloqueado).map((c) => (
-                    <button key={c.id} type="button"
-                      onClick={() => { setFiadoClienteId(c.id); setFiadoClienteSearch(c.name); }}
-                      className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                        fiadoClienteId === c.id ? 'bg-purple-500/20 text-purple-300' : 'text-gray-300 hover:bg-gray-700'
-                      }`}>
-                      <span className="font-semibold">{c.name}</span>
-                      {parseFloat(c.total_aberto) > 0 && (
-                        <span className="ml-2 text-yellow-400">Deve {fmt(c.total_aberto)}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Modo simples */}
+        {!splitMode && (
+          <>
+            <div className="grid grid-cols-4 gap-1.5">
+              {PAY_OPTIONS.map(({ value, label }) => (
+                <button key={value} type="button"
+                  onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
+                  className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
+                    paymentMethod === value
+                      ? value === 'fiado'   ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40 scale-[1.03]'
+                      : value === 'pending' ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40 scale-[1.03]'
+                      :                      'bg-green-500/20 text-green-300 ring-1 ring-green-500/40 scale-[1.03]'
+                      : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
 
-        {/* Troco */}
-        <AnimatePresence>
-          {paymentMethod === 'cash' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className="mt-2 space-y-1.5 overflow-hidden">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={needsChange} onChange={(e) => setNeedsChange(e.target.checked)}
-                  className="w-4 h-4 rounded accent-orange-500" />
-                <span className="text-xs text-gray-400">Precisa de troco?</span>
-              </label>
-              {needsChange && (
-                <input type="number" min="0" step="0.01" placeholder="Troco para R$..."
-                  value={changeFor} onChange={(e) => setChangeFor(e.target.value)}
-                  className="input w-full text-sm" />
+            <AnimatePresence>
+              {paymentMethod === 'fiado' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                  className="mt-2 space-y-1.5 overflow-hidden">
+                  <input type="text" placeholder="Buscar cliente do fiado..."
+                    value={fiadoClienteSearch}
+                    onChange={(e) => { setFiadoClienteSearch(e.target.value); setFiadoClienteId(''); }}
+                    className="input w-full text-sm" />
+                  {fiadoClientes.length > 0 && (
+                    <div className="max-h-28 overflow-y-auto rounded-xl border border-white/10 bg-gray-800 divide-y divide-white/[0.04]">
+                      {fiadoClientes.filter((c) => !c.bloqueado).map((c) => (
+                        <button key={c.id} type="button"
+                          onClick={() => { setFiadoClienteId(c.id); setFiadoClienteSearch(c.name); }}
+                          className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                            fiadoClienteId === c.id ? 'bg-purple-500/20 text-purple-300' : 'text-gray-300 hover:bg-gray-700'
+                          }`}>
+                          <span className="font-semibold">{c.name}</span>
+                          {parseFloat(c.total_aberto) > 0 && (
+                            <span className="ml-2 text-yellow-400">Deve {fmt(c.total_aberto)}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
               )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {paymentMethod === 'cash' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                  className="mt-2 space-y-1.5 overflow-hidden">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={needsChange} onChange={(e) => setNeedsChange(e.target.checked)}
+                      className="w-4 h-4 rounded accent-orange-500" />
+                    <span className="text-xs text-gray-400">Precisa de troco?</span>
+                  </label>
+                  {needsChange && (
+                    <input type="number" min="0" step="0.01" placeholder="Troco para R$..."
+                      value={changeFor} onChange={(e) => setChangeFor(e.target.value)}
+                      className="input w-full text-sm" />
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+
+        {/* Modo dividido */}
+        {splitMode && (
+          <div className="space-y-2 bg-purple-500/5 border border-purple-500/20 rounded-xl p-3">
+            {splitPayments.map((sp, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <select value={sp.method} onChange={(e) => updateSplit(i, 'method', e.target.value)}
+                  className="input flex-1 text-xs">
+                  {PAY_OPTIONS_SPLIT.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <input type="number" min="0" step="0.01" placeholder="R$ 0,00"
+                  value={sp.amount} onChange={(e) => updateSplit(i, 'amount', e.target.value)}
+                  className="input w-24 text-sm text-right" />
+                {splitPayments.length > 1 && (
+                  <button type="button" onClick={() => removeSplit(i)}
+                    className="text-gray-500 hover:text-red-400 transition-colors text-lg leading-none">×</button>
+                )}
+              </div>
+            ))}
+
+            <div className="flex items-center justify-between pt-1">
+              {splitPayments.length < MAX_SPLITS && (
+                <button type="button" onClick={addSplit}
+                  className="text-xs text-purple-400 hover:text-purple-300 font-semibold">+ Adicionar forma</button>
+              )}
+              <span className={`text-xs font-semibold ml-auto ${splitOk ? 'text-green-400' : 'text-yellow-400'}`}>
+                {splitOk ? '✓ Valores ok' : `Restante: R$ ${splitRemain.toFixed(2)}`}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Observações */}
@@ -479,14 +664,20 @@ function StepPayment({
   );
 }
 
-function StepReview({ name, phone, cart, deliveryType, address, neighborhood, deliveryFee, paymentMethod, channel, notes, fiadoClientes, fiadoClienteId }) {
-  const items = Object.values(cart);
+function StepReview({ name, phone, cart, deliveryType, street, streetNumber, complement, neighborhood, deliveryFee,
+  paymentMethod, splitMode, splitPayments, channel, notes, scheduledFor, fiadoClientes, fiadoClienteId }) {
+  const items    = Object.values(cart);
   const subtotal = cartTotal(cart);
   const fee      = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
   const total    = subtotal + fee;
+  const address  = [street, streetNumber, complement].filter(Boolean).join(', ');
 
-  const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito', voucher: 'Vale', fiado: 'Fiado', pending: 'A cobrar', other: 'Outro' };
+  const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito', voucher: 'Vale', fiado: 'Fiado', pending: 'A cobrar', other: 'Outro', split: 'Dividido' };
   const fiadoClient = fiadoClientes.find((c) => c.id === fiadoClienteId);
+  const payDisplay = splitMode
+    ? splitPayments.filter((s) => parseFloat(s.amount) > 0)
+        .map((s) => `${PAY_LABELS[s.method] ?? s.method} R$${parseFloat(s.amount).toFixed(2)}`).join(' + ')
+    : PAY_LABELS[paymentMethod] ?? paymentMethod;
 
   return (
     <div className="space-y-4 max-w-md">
@@ -533,7 +724,7 @@ function StepReview({ name, phone, cart, deliveryType, address, neighborhood, de
           </div>
           <div className="flex-1">
             <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-1">Pagamento</p>
-            <p className="text-sm text-white">{PAY_LABELS[paymentMethod] ?? paymentMethod}</p>
+            <p className="text-sm text-white">{payDisplay}</p>
             {fiadoClient && <p className="text-xs text-purple-400">{fiadoClient.name}</p>}
           </div>
         </div>
@@ -579,13 +770,19 @@ export default function NewOrderModal({ onClose, onCreated }) {
   // Step 3 — Payment/Delivery
   const [channel,          setChannel]          = useState('manual');
   const [deliveryType,     setDeliveryType]     = useState('pickup');
-  const [address,          setAddress]          = useState('');
   const [neighborhood,     setNeighborhood]     = useState('');
+  const [street,           setStreet]           = useState('');
+  const [streetNumber,     setStreetNumber]     = useState('');
+  const [complement,       setComplement]       = useState('');
   const [deliveryFee,      setDeliveryFee]      = useState('');
   const [paymentMethod,    setPaymentMethod]    = useState('cash');
+  const [splitMode,        setSplitMode]        = useState(false);
+  const [splitPayments,    setSplitPayments]    = useState([{ method: 'cash', amount: '' }]);
   const [needsChange,      setNeedsChange]      = useState(false);
   const [changeFor,        setChangeFor]        = useState('');
   const [notes,            setNotes]            = useState('');
+  const [scheduledFor,     setScheduledFor]     = useState('');
+  const [showMapPicker,    setShowMapPicker]    = useState(false);
   const [fiadoClientes,    setFiadoClientes]    = useState([]);
   const [fiadoClienteId,   setFiadoClienteId]   = useState('');
   const [fiadoClienteSearch, setFiadoClienteSearch] = useState('');
@@ -639,7 +836,13 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const applySuggestion = (s) => {
     setName(s.customer_name ?? '');
     setPhone(s.customer_phone ?? '');
-    if (s.customer_address) setAddress(s.customer_address);
+    if (s.customer_address) {
+      // Tenta separar "Rua X, 123, Complemento" em partes
+      const parts = s.customer_address.split(',').map((p) => p.trim());
+      setStreet(parts[0] ?? '');
+      setStreetNumber(parts[1] ?? '');
+      setComplement(parts.slice(2).join(', '));
+    }
     setShowSug(false);
     setSuggestions([]);
   };
@@ -650,7 +853,12 @@ export default function NewOrderModal({ onClose, onCreated }) {
     if (stepIndex === 1) return Object.keys(cart).length > 0;
     if (stepIndex === 2) {
       if (deliveryType === 'delivery' && !neighborhood) return false;
-      if (paymentMethod === 'fiado' && !fiadoClienteId) return false;
+      if (!splitMode && paymentMethod === 'fiado' && !fiadoClienteId) return false;
+      if (splitMode) {
+        const total = splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+        const orderTot = cartTotal(cart) + (deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0);
+        if (Math.abs(total - orderTot) > 0.01) return false;
+      }
       return true;
     }
     return true;
@@ -687,21 +895,35 @@ export default function NewOrderModal({ onClose, onCreated }) {
       ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
     }));
 
+    const customerAddress = [street, streetNumber, complement].filter(Boolean).join(', ');
+
+    const splitNote = splitMode && splitPayments.length > 1
+      ? '💰 Dividido: ' + splitPayments
+          .filter((s) => parseFloat(s.amount) > 0)
+          .map((s) => {
+            const lbl = PAY_OPTIONS.find((p) => p.value === s.method)?.label ?? s.method;
+            return `${lbl} R$${parseFloat(s.amount).toFixed(2)}`;
+          }).join(' + ')
+      : '';
+
     const fullNotes = [
       notes.trim(),
+      scheduledFor.trim() ? `📅 Agendado: ${scheduledFor.trim()}` : '',
       needsChange && changeFor ? `Troco para R$ ${changeFor}` : needsChange ? 'Precisa de troco' : '',
+      splitNote,
     ].filter(Boolean).join(' | ');
 
     const fee = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
+    const finalPayMethod = splitMode ? splitPayments[0]?.method ?? 'cash' : paymentMethod;
 
     try {
       const { data } = await createOrder({
         customerName:    name.trim(),
-        customerPhone:   phone.trim()   || undefined,
-        customerAddress: address.trim() || undefined,
+        customerPhone:   phone.trim()         || undefined,
+        customerAddress: customerAddress       || undefined,
         neighborhood:    (neighborhood && neighborhood !== 'outro') ? neighborhood : undefined,
         deliveryType,
-        paymentMethod,
+        paymentMethod:   finalPayMethod,
         deliveryFee:     fee,
         channel,
         notes: fullNotes || undefined,
@@ -748,6 +970,14 @@ export default function NewOrderModal({ onClose, onCreated }) {
         transition={{ type: 'spring', damping: 28, stiffness: 320 }}
         className="relative w-full max-w-3xl max-h-[88vh] bg-gray-900 rounded-2xl shadow-2xl flex flex-col border border-white/10 overflow-hidden z-10"
       >
+        {/* Map picker overlay — cobre o modal inteiro */}
+        {showMapPicker && (
+          <MapAddressPicker
+            initialStreet={street}
+            onClose={() => setShowMapPicker(false)}
+            onConfirm={({ street: s }) => { setStreet(s); setShowMapPicker(false); }}
+          />
+        )}
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
@@ -824,23 +1054,34 @@ export default function NewOrderModal({ onClose, onCreated }) {
                       cart={cart} onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} onRemove={handleRemove} />
                   )}
                   {stepIndex === 2 && (
-                    <StepPayment channel={channel} setChannel={setChannel}
+                    <StepPayment
+                      channel={channel} setChannel={setChannel}
                       deliveryType={deliveryType} setDeliveryType={setDeliveryType}
-                      address={address} setAddress={setAddress}
                       neighborhood={neighborhood} setNeighborhood={setNeighborhood}
+                      street={street} setStreet={setStreet}
+                      streetNumber={streetNumber} setStreetNumber={setStreetNumber}
+                      complement={complement} setComplement={setComplement}
                       deliveryFee={deliveryFee} setDeliveryFee={setDeliveryFee}
                       paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
+                      splitMode={splitMode} setSplitMode={setSplitMode}
+                      splitPayments={splitPayments} setSplitPayments={setSplitPayments}
                       needsChange={needsChange} setNeedsChange={setNeedsChange}
                       changeFor={changeFor} setChangeFor={setChangeFor}
                       notes={notes} setNotes={setNotes}
+                      scheduledFor={scheduledFor} setScheduledFor={setScheduledFor}
+                      showMapPicker={showMapPicker} setShowMapPicker={setShowMapPicker}
+                      orderTotal={cartTotal(cart) + (deliveryType === 'delivery' ? parseFloat(deliveryFee)||0 : 0)}
                       fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId}
                       setFiadoClienteId={setFiadoClienteId}
                       fiadoClienteSearch={fiadoClienteSearch} setFiadoClienteSearch={setFiadoClienteSearch} />
                   )}
                   {stepIndex === 3 && (
                     <StepReview name={name} phone={phone} cart={cart} deliveryType={deliveryType}
-                      address={address} neighborhood={neighborhood} deliveryFee={deliveryFee} paymentMethod={paymentMethod}
-                      channel={channel} notes={notes} fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId} />
+                      street={street} streetNumber={streetNumber} complement={complement}
+                      neighborhood={neighborhood} deliveryFee={deliveryFee}
+                      paymentMethod={paymentMethod} splitMode={splitMode} splitPayments={splitPayments}
+                      channel={channel} notes={notes} scheduledFor={scheduledFor}
+                      fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId} />
                   )}
                 </motion.div>
               </AnimatePresence>

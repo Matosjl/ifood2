@@ -30,22 +30,28 @@ const EDITABLE_STATUSES = new Set(['pending', 'confirmed', 'preparing']);
 
 // ── Timer ─────────────────────────────────────────────────────
 
-function Timer({ createdAt }) {
+function Timer({ createdAt, endAt }) {
   const [secs, setSecs] = useState(0);
 
   useEffect(() => {
     const origin = new Date(createdAt).getTime();
-    const tick   = () => setSecs(Math.max(0, Math.floor((Date.now() - origin) / 1_000)));
+    const end    = endAt ? new Date(endAt).getTime() : null;
+    const tick   = () => {
+      const ref = end ?? Date.now();
+      setSecs(Math.max(0, Math.floor((ref - origin) / 1_000)));
+    };
     tick();
+    if (end) return; // pedido finalizado — não precisa de interval
     const id = setInterval(tick, 1_000);
     return () => clearInterval(id);
-  }, [createdAt]);
+  }, [createdAt, endAt]);
 
   const m   = Math.floor(secs / 60);
   const s   = secs % 60;
-  const cls = m >= 20 ? 'text-red-400 animate-pulse-slow'
-            : m >= 10 ? 'text-yellow-400'
-            :           'text-gray-400';
+  const cls = endAt          ? 'text-gray-500'
+            : m >= 20        ? 'text-red-400 animate-pulse-slow'
+            : m >= 10        ? 'text-yellow-400'
+            :                  'text-gray-400';
 
   return (
     <span className={`font-mono text-xs font-semibold tabular-nums ${cls}`}>
@@ -135,7 +141,8 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <Timer createdAt={order.createdAt} />
+          <Timer createdAt={order.createdAt}
+            endAt={['delivered','cancelled'].includes(order.status) ? order.updatedAt : null} />
 
           {/* Editar itens (só em statuses editáveis) */}
           {isEditable && onEditItems && (
