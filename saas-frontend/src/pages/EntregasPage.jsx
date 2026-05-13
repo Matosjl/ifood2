@@ -31,12 +31,21 @@ const STATUS_LABELS = {
   delivered:  'Entregue',
 };
 
+// Torres RS bounding box (viewbox para Nominatim priorizar resultados locais)
+const TORRES_VIEWBOX = '-49.80,-29.45,-49.65,-29.28';
+
 // Geocode an address string → [lng, lat] or null
-async function geocodeAddress(address) {
+// Sempre injeta "Torres RS" se o endereço não mencionar a cidade
+async function geocodeAddress(address, neighborhood = '') {
   if (!address) return null;
+  const hasCity = /torres|rs\b/i.test(address);
+  const query   = hasCity
+    ? address
+    : [address, neighborhood, 'Torres RS'].filter(Boolean).join(', ');
   try {
-    const url = `${NOMINATIM}?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=br`;
-    const res = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } });
+    const url = `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1` +
+                `&countrycodes=br&viewbox=${TORRES_VIEWBOX}&bounded=0`;
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } });
     const data = await res.json();
     if (data?.[0]) return [parseFloat(data[0].lon), parseFloat(data[0].lat)];
   } catch { /* non-fatal */ }
@@ -93,7 +102,7 @@ const PAYMENT_LABELS = {
   debit: 'Débito', voucher: 'Vale-Ref.', other: 'Outro',
 };
 
-function OrderPopup({ order, delivering, onDeliver, onRoute }) {
+function OrderPopup({ order, delivering, onDeliver, onRoute, onPin, isPinning }) {
   const items     = order.items ?? [];
   const payment   = PAYMENT_LABELS[order.payment_method] ?? order.payment_method ?? '—';
   const address   = order.customer_address ?? '';
@@ -157,6 +166,17 @@ function OrderPopup({ order, delivering, onDeliver, onRoute }) {
         <span className="text-xs text-gray-400">{payment}</span>
       </div>
 
+      {/* Fixar localização manualmente */}
+      <button onClick={onPin}
+        className={[
+          'w-full py-1.5 rounded-lg text-xs font-bold transition-colors',
+          isPinning
+            ? 'bg-purple-500 text-white animate-pulse'
+            : 'bg-gray-700 hover:bg-gray-600 text-gray-200',
+        ].join(' ')}>
+        {isPinning ? '🎯 Clique no mapa para fixar…' : '📍 Fixar localização no mapa'}
+      </button>
+
       {/* Ações de navegação */}
       {address && (
         <div className="flex gap-1.5">
@@ -190,7 +210,7 @@ function OrderPopup({ order, delivering, onDeliver, onRoute }) {
 
 // ── Order card (sidebar) ───────────────────────────────────────
 
-function OrderCard({ order, active, onSelect, onDeliver, delivering }) {
+function OrderCard({ order, active, onSelect, onDeliver, delivering, onPin, isPinning, hasCoords }) {
   return (
     <button
       onClick={() => onSelect(order)}
@@ -224,20 +244,39 @@ function OrderCard({ order, active, onSelect, onDeliver, delivering }) {
         </p>
       )}
 
-      <div className="flex items-center justify-between mt-2">
+      <div className="flex items-center justify-between mt-2 gap-1">
         <span className="text-sm font-semibold text-white">{fmt(order.total)}</span>
-        {order.status !== 'delivered' && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onDeliver(order.id); }}
-            disabled={delivering === order.id}
-            className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
-          >
-            {delivering === order.id ? '...' : '✓ Entregue'}
-          </button>
-        )}
-        {order.status === 'delivered' && (
-          <span className="text-xs text-green-400 font-semibold">✓ Entregue</span>
-        )}
+        <div className="flex gap-1">
+          {/* Botão fixar pin — aparece para pedidos sem coords ou quando coords erradas */}
+          {onPin && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onPin(); }}
+              title="Fixar localização no mapa"
+              className={[
+                'px-2 py-1 rounded-lg text-xs font-semibold transition-colors',
+                isPinning
+                  ? 'bg-purple-500 text-white animate-pulse'
+                  : hasCoords
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+                    : 'bg-purple-600/30 hover:bg-purple-600/60 text-purple-300',
+              ].join(' ')}
+            >
+              📍
+            </button>
+          )}
+          {order.status !== 'delivered' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDeliver(order.id); }}
+              disabled={delivering === order.id}
+              className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              {delivering === order.id ? '...' : '✓ Entregue'}
+            </button>
+          )}
+          {order.status === 'delivered' && (
+            <span className="text-xs text-green-400 font-semibold self-center">✓ Entregue</span>
+          )}
+        </div>
       </div>
     </button>
   );
@@ -257,7 +296,9 @@ export default function EntregasPage() {
   const [delivering,     setDelivering]     = useState(null);   // orderId being updated
   const [mapCenter,      setMapCenter]      = useState(BRAZIL_CENTER);
   const [mapZoom,        setMapZoom]        = useState(12);
+  const [pinningOrderId, setPinningOrderId] = useState(null); // orderId aguardando pin manual
   const watchIdRef = useRef(null);
+  const mapRef     = useRef(null);
 
   // ── Load delivery orders ──────────────────────────────────
   const loadOrders = useCallback(async () => {
@@ -321,10 +362,29 @@ export default function EntregasPage() {
       (o) => o.customer_address && !coords[o.id]
     );
     pending.forEach(async (o) => {
-      const c = await geocodeAddress(o.customer_address);
+      const c = await geocodeAddress(o.customer_address, o.neighborhood);
       if (c) setCoords((prev) => ({ ...prev, [o.id]: c }));
     });
   }, [orders]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Pin manual: clique no mapa fixa a localização do pedido ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!pinningOrderId) {
+      map.getCanvas().style.cursor = '';
+      return;
+    }
+    map.getCanvas().style.cursor = 'crosshair';
+    const handleClick = (e) => {
+      const { lng, lat } = e.lngLat;
+      setCoords((prev) => ({ ...prev, [pinningOrderId]: [lng, lat] }));
+      setPinningOrderId(null);
+      map.getCanvas().style.cursor = '';
+    };
+    map.on('click', handleClick);
+    return () => { map.off('click', handleClick); map.getCanvas().style.cursor = ''; };
+  }, [pinningOrderId]);
 
   // ── Select order → show route ─────────────────────────────
   const handleSelect = useCallback(async (order) => {
@@ -406,15 +466,17 @@ export default function EntregasPage() {
               </div>
             )}
 
-            {activeDeliveries.map((order, i) => (
+            {activeDeliveries.map((order) => (
               <OrderCard
                 key={order.id}
                 order={order}
-                num={i + 1}
                 active={activeOrder?.id === order.id}
                 onSelect={handleSelect}
                 onDeliver={handleDeliver}
                 delivering={delivering}
+                onPin={() => { setPinningOrderId((p) => p === order.id ? null : order.id); setActiveOrder(order); }}
+                isPinning={pinningOrderId === order.id}
+                hasCoords={!!coords[order.id]}
               />
             ))}
 
@@ -467,7 +529,15 @@ export default function EntregasPage() {
 
         {/* Map */}
         <div className="flex-1 min-w-0 relative">
+          {/* Banner modo pin */}
+          {pinningOrderId && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-bold shadow-xl flex items-center gap-2">
+              🎯 Clique no mapa para fixar a localização do pedido
+              <button onClick={() => setPinningOrderId(null)} className="ml-1 text-purple-200 hover:text-white">✕</button>
+            </div>
+          )}
           <Map
+            ref={mapRef}
             center={mapCenter}
             zoom={mapZoom}
             theme="dark"
@@ -517,6 +587,8 @@ export default function EntregasPage() {
                         delivering={delivering}
                         onDeliver={handleDeliver}
                         onRoute={() => handleSelect(order)}
+                        onPin={() => { setPinningOrderId((p) => p === order.id ? null : order.id); }}
+                        isPinning={pinningOrderId === order.id}
                       />
                     </MarkerPopup>
                   )}
