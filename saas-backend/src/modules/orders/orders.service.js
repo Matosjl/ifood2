@@ -1,8 +1,9 @@
-const db       = require('../../config/database');
-const Order    = require('../../models/Order');
-const Product  = require('../../models/Product');
-const Tenant   = require('../../models/Tenant');
-const AppError = require('../../utils/AppError');
+const db           = require('../../config/database');
+const Order        = require('../../models/Order');
+const Product      = require('../../models/Product');
+const Tenant       = require('../../models/Tenant');
+const AppError     = require('../../utils/AppError');
+const eventService = require('../../socket/eventService');
 
 // ── Leitura ───────────────────────────────────────────────────
 
@@ -148,7 +149,16 @@ const createOrder = async (tenantId, {
 
 // ── Status ────────────────────────────────────────────────────
 
-const updateStatus = async (id, tenantId, status) => Order.updateStatus(id, tenantId, status);
+const updateStatus = async (id, tenantId, status) => {
+  const updatedOrder = await Order.updateStatus(id, tenantId, status);
+
+  // When an order is ready for delivery, notify connected drivers
+  if (status === 'ready' && updatedOrder?.delivery_type === 'delivery') {
+    eventService.newDeliveryAvailable(tenantId, updatedOrder).catch(() => {});
+  }
+
+  return updatedOrder;
+};
 
 /**
  * Cancela o pedido e devolve estoque se ja estava em producao.

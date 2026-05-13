@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 
 // ── API — usa a mesma BASE do axios do projeto (resolve VITE_API_URL) ──
 import baseApi from '../api/axios';
+import { Map, MapMarker, MarkerContent, MarkerTooltip, MapRoute } from '../components/ui/map';
 
 // Cliente separado para motoboy (token diferente do restaurante)
 const driverApi = axios.create({
@@ -25,6 +27,40 @@ const http = async (method, path, body, token) => {
     throw new Error(msg || `Erro ${err.response?.status ?? 'de rede'}`);
   }
 };
+
+// ── Socket URL ───────────────────────────────────────────────
+const SOCKET_URL = baseApi.defaults.baseURL?.replace('/api', '') || '';
+
+// ── Nominatim geocoding (for mini map) ───────────────────────
+const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
+async function geocode(address) {
+  if (!address) return null;
+  const hasCity = /torres|rs\b/i.test(address);
+  const query   = hasCity ? address : `${address}, Torres RS`;
+  try {
+    const res  = await fetch(
+      `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=br`,
+      { headers: { 'Accept-Language': 'pt-BR' } }
+    );
+    const data = await res.json();
+    if (data?.[0]) return [parseFloat(data[0].lon), parseFloat(data[0].lat)];
+  } catch { /* non-fatal */ }
+  return null;
+}
+
+// OSRM route
+const OSRM = 'https://router.project-osrm.org/route/v1/driving';
+async function fetchRoute(from, to) {
+  if (!from || !to) return null;
+  try {
+    const res  = await fetch(`${OSRM}/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson`);
+    const data = await res.json();
+    return data?.routes?.[0]?.geometry?.coordinates ?? null;
+  } catch { return null; }
+}
+
+// Torres RS center fallback
+const TORRES_CENTER = [-49.7295, -29.3377];
 
 // ── Icons (inline SVG simples) ────────────────────────────────
 const Icon = ({ d, size = 20, cls = '' }) => (
@@ -144,6 +180,93 @@ function AuthScreen({ onLogin }) {
 // DELIVERY CARD
 // ─────────────────────────────────────────────────────────────
 
+function MiniMap({ delivery }) {
+  const [showMap,    setShowMap]    = useState(false);
+  const [customerCoords, setCustomerCoords] = useState(null);
+  const [route,      setRoute]      = useState(null);
+
+  // Restaurant fallback coords (Torres RS center)
+  const restaurantCoords = TORRES_CENTER;
+
+  useEffect(() => {
+    if (!showMap) return;
+    if (customerCoords) return; // already loaded
+    geocode((delivery.customer_address || '') + (delivery.neighborhood ? ', ' + delivery.neighborhood : ''))
+      .then((coords) => {
+        if (coords) setCustomerCoords(coords);
+      });
+  }, [showMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!showMap || !customerCoords) return;
+    fetchRoute(restaurantCoords, customerCoords).then((r) => {
+      if (r) setRoute(r);
+    });
+  }, [showMap, customerCoords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const destQuery = (delivery.customer_address || delivery.restaurant_name || '') + ', Torres RS';
+  const mapsUrl   = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}`;
+  const wazeUrl   = `https://waze.com/ul?q=${encodeURIComponent(destQuery)}&navigate=yes`;
+
+  return (
+    <div>
+      <button
+        onClick={() => setShowMap((v) => !v)}
+        className="flex items-center gap-1 text-xs text-blue-600 font-medium py-1"
+      >
+        🗺️ {showMap ? 'Ocultar mapa' : 'Ver no mapa'}
+      </button>
+
+      {showMap && (
+        <div className="rounded-xl overflow-hidden border border-gray-200 mt-1" style={{ height: 200 }}>
+          <Map
+            center={customerCoords ?? restaurantCoords}
+            zoom={customerCoords ? 14 : 12}
+            theme="light"
+            className="h-full w-full"
+          >
+            {/* Restaurant marker */}
+            <MapMarker longitude={restaurantCoords[0]} latitude={restaurantCoords[1]}>
+              <MarkerContent>
+                <div className="w-7 h-7 rounded-full bg-orange-500 border-2 border-white shadow flex items-center justify-center text-sm">🏪</div>
+              </MarkerContent>
+              <MarkerTooltip>{delivery.restaurant_name}</MarkerTooltip>
+            </MapMarker>
+
+            {/* Customer marker */}
+            {customerCoords && (
+              <MapMarker longitude={customerCoords[0]} latitude={customerCoords[1]}>
+                <MarkerContent>
+                  <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow flex items-center justify-center text-sm">📍</div>
+                </MarkerContent>
+                <MarkerTooltip>{delivery.customer_name}</MarkerTooltip>
+              </MapMarker>
+            )}
+
+            {/* Route */}
+            {route && route.length >= 2 && (
+              <MapRoute coordinates={route} color="#2563eb" width={3} opacity={0.8} />
+            )}
+          </Map>
+        </div>
+      )}
+
+      {showMap && (
+        <div className="flex gap-2 mt-2">
+          <a href={wazeUrl} target="_blank" rel="noreferrer"
+            className="flex-1 py-1.5 rounded-xl text-xs font-bold bg-cyan-500 text-white text-center">
+            🔵 Waze
+          </a>
+          <a href={mapsUrl} target="_blank" rel="noreferrer"
+            className="flex-1 py-1.5 rounded-xl text-xs font-bold bg-blue-600 text-white text-center">
+            🗺️ Maps
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, loading }) {
   const [expanded, setExpanded] = useState(false);
   const [payPicker, setPayPicker] = useState(false);
@@ -228,6 +351,11 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
           <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1">
             💬 {delivery.notes}
           </p>
+        )}
+
+        {/* Mini map — show for active deliveries (accepted or picked_up) */}
+        {type === 'active' && (dstatus === 'accepted' || dstatus === 'picked_up') && (
+          <MiniMap delivery={delivery} />
         )}
 
         {/* Items toggle */}
@@ -346,7 +474,9 @@ export default function DriverApp() {
   const [connectToken, setConnectToken] = useState('');
   const [connectMsg,   setConnectMsg]   = useState('');
   const [error,    setError]    = useState('');
-  const pollRef = useRef(null);
+  const pollRef           = useRef(null);
+  const socketRef         = useRef(null);
+  const locationWatchRef  = useRef(null);
 
   // ── Fetch ───────────────────────────────────────────────────
 
@@ -400,14 +530,74 @@ export default function DriverApp() {
     if (tab === 'profile')  fetchProfile();
   }, [tab, fetchStats, fetchProfile]);
 
+  // ── Socket.io connection ─────────────────────────────────────
+  useEffect(() => {
+    if (!token) return;
+
+    const socket = io(SOCKET_URL, {
+      auth:       { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      // No-op — driver is already in their own room via server auth
+    });
+
+    socket.on('delivery:new', (order) => {
+      // Prepend to available list, dedup by id
+      setAvailable((prev) => {
+        if (prev.some((d) => d.id === order.id)) return prev;
+        return [order, ...prev];
+      });
+    });
+
+    socket.on('disconnect', () => {
+      // Will reconnect automatically
+    });
+
+    socketRef.current = socket;
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Actions ─────────────────────────────────────────────────
 
   const toggleOnline = async () => {
-    const newStatus = online ? 'offline' : 'available';
+    const goingOnline = !online;
+    const newStatus   = goingOnline ? 'available' : 'offline';
     try {
       await http('PUT', '/status', { status: newStatus }, token);
-      setOnline(!online);
-      if (!online) fetchDeliveries();
+      setOnline(goingOnline);
+
+      if (goingOnline) {
+        // Start GPS watch
+        if ('geolocation' in navigator) {
+          locationWatchRef.current = navigator.geolocation.watchPosition(
+            (pos) => {
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              // Emit via socket for real-time
+              if (socketRef.current?.connected) {
+                socketRef.current.emit('driver:location', { lat, lng });
+              }
+              // Also persist to DB
+              http('PUT', '/location', { lat, lng }, token).catch(() => {});
+            },
+            () => { /* GPS error — non-fatal */ },
+            { enableHighAccuracy: true, maximumAge: 5_000 },
+          );
+        }
+        fetchDeliveries();
+      } else {
+        // Stop GPS watch
+        if (locationWatchRef.current != null) {
+          navigator.geolocation.clearWatch(locationWatchRef.current);
+          locationWatchRef.current = null;
+        }
+      }
     } catch (e) { setError(e.message); }
   };
 
@@ -466,6 +656,11 @@ export default function DriverApp() {
   };
 
   const handleLogout = () => {
+    // Stop GPS if active
+    if (locationWatchRef.current != null) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+      locationWatchRef.current = null;
+    }
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driverUser');
     setToken(null);

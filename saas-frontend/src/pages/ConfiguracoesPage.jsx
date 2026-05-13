@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Toast from '../components/Toast';
+import api from '../api/axios';
 import {
   updateProfile, updateTenantProfile, getTenantInfo,
   listUsers, createUser, updateUser, deactivateUser,
@@ -532,6 +533,140 @@ function EquipeTab({ currentUser, onToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Tab 4 — Motoboys
+// ─────────────────────────────────────────────────────────────
+
+const DRIVER_STATUS_ICON  = { available: '🟢', busy: '🟡', offline: '⚫' };
+const DRIVER_STATUS_LABEL = { available: 'Disponível', busy: 'Em entrega', offline: 'Offline' };
+
+function MotoboyTab({ currentUser, onToast }) {
+  const [token,   setToken]   = useState('');
+  const [drivers, setDrivers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [tkRes, drRes] = await Promise.all([
+        api.get('/driver/restaurant/token'),
+        api.get('/driver/restaurant/drivers'),
+      ]);
+      setToken(tkRes.data.data ?? '');
+      setDrivers(drRes.data.data ?? []);
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao carregar dados de motoboys.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [onToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const qrData = token ? `ZAPFOME:${token}` : '';
+  const qrSrc  = qrData
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`
+    : null;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 max-w-md">
+
+      {/* Token display */}
+      <div className="bg-gray-800/60 rounded-2xl p-5 border border-white/[0.06] space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-300">Código de Conexão</h3>
+          <button
+            onClick={load}
+            className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Atualizar
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-500">
+          Compartilhe este código com seus motoboys para que eles se conectem ao restaurante.
+        </p>
+
+        {/* Large monospace token */}
+        <div className="flex items-center justify-center">
+          <span className="text-4xl font-mono font-black tracking-[0.3em] text-white bg-gray-700/80 px-6 py-3 rounded-xl border border-white/10 select-all">
+            {token || '——'}
+          </span>
+        </div>
+
+        {/* QR Code */}
+        {qrSrc && (
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <img
+              src={qrSrc}
+              alt="QR Code para motoboys"
+              className="w-40 h-40 rounded-xl shadow-lg bg-white p-2"
+            />
+            <p className="text-[11px] text-gray-500 text-center">
+              Motoboys também podem escanear este QR Code no app ZapFome Driver.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Connected drivers */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-300">
+            Motoboys Conectados
+            <span className="ml-2 text-xs font-normal text-gray-500">({drivers.length})</span>
+          </h3>
+        </div>
+
+        {drivers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-24 gap-2 text-gray-600 bg-gray-800/40 rounded-xl border border-white/[0.04]">
+            <span className="text-2xl">🛵</span>
+            <p className="text-xs italic">Nenhum motoboy conectado ainda</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {drivers.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-3 px-4 py-3 bg-gray-800/60 rounded-xl border border-white/[0.06]"
+              >
+                <span className="text-xl shrink-0">
+                  {DRIVER_STATUS_ICON[d.status] ?? '⚫'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-200 truncate">{d.name}</p>
+                  {d.phone && (
+                    <p className="text-xs text-gray-500 truncate">📞 {d.phone}</p>
+                  )}
+                </div>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                  d.status === 'available' ? 'bg-green-500/20 text-green-300' :
+                  d.status === 'busy'      ? 'bg-yellow-500/20 text-yellow-300' :
+                                             'bg-gray-700/60 text-gray-500'
+                }`}>
+                  {DRIVER_STATUS_LABEL[d.status] ?? d.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────
 
@@ -559,6 +694,9 @@ export default function ConfiguracoesPage() {
           {isOwner && (
             <Tab active={tab === 'qrcode'} onClick={() => setTab('qrcode')}>📱 QR Code</Tab>
           )}
+          {isOwner && (
+            <Tab active={tab === 'motoboys'} onClick={() => setTab('motoboys')}>🛵 Motoboys</Tab>
+          )}
         </div>
       </div>
 
@@ -568,6 +706,7 @@ export default function ConfiguracoesPage() {
         {tab === 'restaurante' && <RestauranteTab currentUser={currentUser} onToast={showToast} />}
         {tab === 'equipe'      && <EquipeTab      currentUser={currentUser} onToast={showToast} />}
         {tab === 'qrcode'      && <QrCodeTab      currentUser={currentUser} />}
+        {tab === 'motoboys'   && <MotoboyTab     currentUser={currentUser} onToast={showToast} />}
       </div>
 
       {toast && (

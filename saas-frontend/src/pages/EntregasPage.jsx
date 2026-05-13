@@ -5,6 +5,7 @@ import {
   MapRoute,
 } from '../components/ui/map';
 import { getOrders, updateOrderStatus } from '../api/orders';
+import api from '../api/axios';
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -286,6 +287,7 @@ function OrderCard({ order, active, onSelect, onDeliver, delivering, onPin, isPi
 
 export default function EntregasPage() {
   const [orders,         setOrders]         = useState([]);
+  const [drivers,        setDrivers]        = useState([]);
   const [loading,        setLoading]        = useState(true);
   const [driverPos,      setDriverPos]      = useState(null);   // [lng, lat]
   const [geoError,       setGeoError]       = useState(null);
@@ -325,6 +327,20 @@ export default function EntregasPage() {
     const id = setInterval(loadOrders, 30_000);
     return () => clearInterval(id);
   }, [loadOrders]);
+
+  // ── Load connected drivers ────────────────────────────────
+  const loadDrivers = useCallback(async () => {
+    try {
+      const { data } = await api.get('/driver/restaurant/drivers');
+      setDrivers(data.data ?? []);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    loadDrivers();
+    const id = setInterval(loadDrivers, 30_000);
+    return () => clearInterval(id);
+  }, [loadDrivers]);
 
   // ── GPS tracking ──────────────────────────────────────────
   // Coordenadas fixas do estabelecimento (fallback quando GPS bloqueado — ex: HTTP sem HTTPS)
@@ -569,6 +585,31 @@ export default function EntregasPage() {
                 <MarkerTooltip>Você está aqui</MarkerTooltip>
               </MapMarker>
             )}
+
+            {/* Connected motoboy markers */}
+            {drivers
+              .filter((d) => d.status !== 'offline' && d.current_lng != null && d.current_lat != null)
+              .map((d) => (
+                <MapMarker key={`driver-${d.id}`} longitude={parseFloat(d.current_lng)} latitude={parseFloat(d.current_lat)}>
+                  <MarkerContent>
+                    <div className="relative">
+                      {d.status === 'available' && (
+                        <span className="absolute inset-0 rounded-full bg-green-500/30 animate-ping" style={{ animationDuration: '2s' }} />
+                      )}
+                      <div className={`relative h-7 w-7 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-sm ${
+                        d.status === 'available' ? 'bg-green-500' : 'bg-yellow-500'
+                      }`}>
+                        🛵
+                      </div>
+                    </div>
+                  </MarkerContent>
+                  <MarkerTooltip>
+                    {d.name} · {d.status === 'available' ? 'Disponível' : 'Em entrega'}
+                    {d.phone ? ` · ${d.phone}` : ''}
+                  </MarkerTooltip>
+                </MapMarker>
+              ))
+            }
 
             {/* Delivery markers */}
             {activeDeliveries.map((order) => {

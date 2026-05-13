@@ -1,5 +1,6 @@
 const { getEmitter }   = require('./emitter');
 const { createLogger } = require('../utils/logger');
+const db               = require('../config/database');
 
 const logger = createLogger('EventService');
 
@@ -81,4 +82,31 @@ const orderDeleted = (tenantId, orderId) =>
     timestamp: new Date().toISOString(),
   });
 
-module.exports = { orderCreated, orderUpdated, orderDeleted };
+/**
+ * Notify all drivers connected to a tenant that a new delivery is available.
+ * Emits 'delivery:new' to each driver's personal room (driver:{driverId}).
+ */
+const newDeliveryAvailable = async (tenantId, order) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT driver_id FROM driver_tenant_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+    const emitter = getEmitter();
+    const payload = buildOrderPayload(order);
+    for (const { driver_id } of rows) {
+      emitter.to(`driver:${driver_id}`).emit('delivery:new', payload);
+    }
+    logger.debug('delivery:new emitido', { tenantId, driverCount: rows.length, orderId: order.id });
+  } catch (err) {
+    logger.error('Falha ao emitir delivery:new', { tenantId, error: err.message });
+  }
+};
+
+/**
+ * Notify restaurant about a driver location update.
+ */
+const driverLocationUpdated = (tenantId, driverData) =>
+  emit(tenantId, 'driver:location', { ...driverData, timestamp: new Date().toISOString() });
+
+module.exports = { orderCreated, orderUpdated, orderDeleted, newDeliveryAvailable, driverLocationUpdated };

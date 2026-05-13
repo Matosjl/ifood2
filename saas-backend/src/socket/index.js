@@ -5,6 +5,7 @@ const env                = require('../config/env');
 const { createRedisClient } = require('../config/redis');
 const { createLogger }   = require('../utils/logger');
 const orderCache         = require('../cache/orderCache');
+const db                 = require('../config/database');
 
 const logger = createLogger('Socket');
 
@@ -64,6 +65,72 @@ const initSocket = (httpServer) => {
     logger.info('Cliente conectado', {
       socketId: socket.id, tenantId, userId, role,
     });
+
+    // ── Driver connection ────────────────────────────────────
+    if (role === 'driver') {
+      const driverId = userId;
+
+      // Driver joins their own personal room
+      socket.join(`driver:${driverId}`);
+
+      // Fetch all tenant IDs this driver is connected to
+      const getTenantIds = async () => {
+        try {
+          const { rows } = await db.query(
+            'SELECT tenant_id FROM driver_tenant_connections WHERE driver_id = $1',
+            [driverId]
+          );
+          return rows.map((r) => r.tenant_id);
+        } catch (err) {
+          logger.warn('Falha ao buscar tenants do driver', { driverId, error: err.message });
+          return [];
+        }
+      };
+
+      // Location update from driver
+      socket.on('driver:location', async ({ lat, lng }) => {
+        if (lat == null || lng == null) return;
+
+        // Persist to DB (fire-and-forget)
+        db.query(
+          'UPDATE drivers SET current_lat = $1, current_lng = $2, updated_at = NOW() WHERE id = $3',
+          [lat, lng, driverId]
+        ).catch((err) => logger.warn('Falha ao persistir localização do driver', { driverId, error: err.message }));
+
+        // Broadcast location to all restaurant tenant rooms this driver serves
+        const tenantIds = await getTenantIds();
+        for (const tid of tenantIds) {
+          io.to(`tenant:${tid}`).emit('driver:location', {
+            driverId,
+            lat,
+            lng,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      socket.on('disconnect', async (reason) => {
+        logger.info('Driver desconectado', { socketId: socket.id, driverId, reason });
+
+        // Mark driver offline and notify tenant rooms
+        db.query(
+          "UPDATE drivers SET status = 'offline', updated_at = NOW() WHERE id = $1",
+          [driverId]
+        ).catch(() => {});
+
+        const tenantIds = await getTenantIds();
+        for (const tid of tenantIds) {
+          io.to(`tenant:${tid}`).emit('driver:offline', {
+            driverId,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      return; // Skip restaurant staff logic for drivers
+    }
+
+    // ── Restaurant staff connection ───────────────────────────
 
     // Every client joins its own tenant room — events are scoped per restaurant
     socket.join(`tenant:${tenantId}`);
