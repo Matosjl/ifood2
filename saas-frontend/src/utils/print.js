@@ -54,8 +54,11 @@ export function printOrder(order) {
   const troco       = extractTroco(order.notes);
   const cleanNotes  = notesWithoutTroco(order.notes);
 
-  // Delivery info
-  const isDelivery  = order.deliveryType === 'delivery' || order.delivery_type === 'delivery';
+  // Delivery info — checa camelCase, snake_case e taxa > 0 como sinal extra
+  const delivType   = order.deliveryType ?? order.delivery_type ?? '';
+  const isDelivery  = delivType === 'delivery' ||
+                      (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
+  const neighborhood = order.neighborhood ?? null;
   const address     = order.customerAddress ?? order.customer_address ?? '';
   const payment     = PAYMENT_LABELS[order.paymentMethod ?? order.payment_method] ?? 'Dinheiro';
   const channel     = order.channel && order.channel !== 'manual'
@@ -216,9 +219,13 @@ export function printOrder(order) {
 
   <hr>
 
-  <!-- Tipo + endereço + pagamento -->
+  <!-- Tipo + bairro + endereço + pagamento -->
   <p class="tipo-label">${isDelivery ? '🛵 Entrega' : '🏪 Retirada no Local'}</p>
+  ${isDelivery && neighborhood ? `<p class="endereco" style="font-size:14px;font-weight:900">📌 ${neighborhood}</p>` : ''}
   ${isDelivery && address ? `<p class="endereco">📍 ${address}</p>` : ''}
+  ${isDelivery && parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0
+    ? `<p style="font-size:12px;font-weight:bold;margin-top:2px">🛵 Taxa: R$ ${parseFloat(order.deliveryFee ?? order.delivery_fee).toFixed(2)}</p>`
+    : ''}
   <p style="margin-top:4px;font-size:12px">💳 ${payment}</p>
 
   <hr class="solid">

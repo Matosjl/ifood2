@@ -6,6 +6,16 @@ const rateLimit  = require('express-rate-limit');
 const env        = require('./config/env');
 const errorHandler = require('./middleware/errorHandler.middleware');
 
+// ── Sentry (opcional — só ativa se SENTRY_DSN estiver definido) ──
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn:              process.env.SENTRY_DSN,
+    environment:      process.env.NODE_ENV || 'development',
+    tracesSampleRate: 0.1,
+  });
+}
+
 // Rotas
 const publicRoutes   = require('./modules/public/public.routes');
 const authRoutes     = require('./modules/auth/auth.routes');
@@ -106,6 +116,11 @@ app.use('/api/public', publicRoutes);
 app.use((req, res) =>
   res.status(404).json({ success: false, message: `Rota não encontrada: ${req.method} ${req.path}` })
 );
+
+// ── Sentry error handler (antes do nosso errorHandler) ───────
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ── Error Handler (deve ser o último) ────────────────────────
 app.use(errorHandler);

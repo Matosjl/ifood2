@@ -29,7 +29,10 @@ const errorHandler = (err, req, res, next) => {
     }
   }
 
-  // Erro inesperado de programação
+  // Erro inesperado de programação — captura no Sentry se disponível
+  if (process.env.SENTRY_DSN) {
+    try { require('@sentry/node').captureException(err); } catch (_) {}
+  }
   console.error(`[ERROR] ${req.method} ${req.path}:`, err);
 
   res.status(500).json({

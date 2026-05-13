@@ -290,9 +290,36 @@ CREATE INDEX IF NOT EXISTS idx_fiado_compras_order   ON fiado_compras(order_id);
 -- Obrigatório ter paid_at preenchido para transição → delivered quando payment_method='pending'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
 
--- ── Taxa de entrega ───────────────────────────────────────────
--- delivery_fee: valor cobrado pela entrega (0 para retirada/sem taxa)
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee DECIMAL(10,2) NOT NULL DEFAULT 0;
+-- ── Taxa de entrega e bairro ─────────────────────────────────
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee  DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS neighborhood  VARCHAR(100);
+
+-- ── Tabela de taxas por bairro ────────────────────────────────
+CREATE TABLE IF NOT EXISTS delivery_fees (
+  id           SERIAL       PRIMARY KEY,
+  neighborhood VARCHAR(100) NOT NULL UNIQUE,
+  fee          DECIMAL(10,2) NOT NULL,
+  active       BOOLEAN      NOT NULL DEFAULT true,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- Insere/atualiza taxas
+INSERT INTO delivery_fees (neighborhood, fee) VALUES
+  ('Itapeva',             6.00),
+  ('Itapeva Norte',       6.00),
+  ('Tupinambá',           8.00),
+  ('Praia Gaúcha',        8.00),
+  ('Praia Yara',          8.00),
+  ('Praia Recreio',      10.00),
+  ('Praia Santa Helena', 10.00),
+  ('Praia Estrela',      10.00),
+  ('Praia Real',         10.00),
+  ('Praia Paraíso',      15.00),
+  ('São Brás',           15.00),
+  ('Campo Bonito',       17.00),
+  ('Torres',             20.00)
+ON CONFLICT (neighborhood) DO UPDATE SET fee = EXCLUDED.fee, updated_at = NOW();
 
 -- ── Migração: colunas de contagem física no fechamento de caixa ──
 -- (idempotente — ADD COLUMN IF NOT EXISTS é seguro re-executar)
