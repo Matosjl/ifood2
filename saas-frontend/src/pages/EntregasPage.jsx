@@ -174,16 +174,24 @@ export default function EntregasPage() {
   }, [loadOrders]);
 
   // ── GPS tracking ──────────────────────────────────────────
+  // Coordenadas do centro da cidade (fallback quando GPS bloqueado — ex: HTTP sem HTTPS)
+  const CITY_FALLBACK = [-49.7264, -29.3388]; // Torres, RS
+
   useEffect(() => {
-    if (!('geolocation' in navigator)) { setGeoError('GPS não disponível'); return; }
+    const useFallback = (msg) => {
+      setGeoError(`${msg} — usando localização da cidade`);
+      setDriverPos(CITY_FALLBACK);
+    };
+
+    if (!('geolocation' in navigator)) { useFallback('GPS não disponível'); return; }
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const next = [pos.coords.longitude, pos.coords.latitude];
         setDriverPos(next);
-        // Only auto-center if no active order selected
         setMapCenter((prev) => prev);
       },
-      (err) => setGeoError(err.message),
+      (err) => useFallback(err.message),
       { enableHighAccuracy: true, maximumAge: 5_000 },
     );
     return () => {

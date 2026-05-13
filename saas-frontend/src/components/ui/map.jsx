@@ -489,15 +489,28 @@ export function MapControls({
   const zoomOut   = useCallback(() => map?.zoomTo(map.getZoom() - 1, { duration: 300 }), [map]);
   const resetNorth= useCallback(() => map?.resetNorthPitch({ duration: 300 }), [map]);
   const locate    = useCallback(() => {
+    // Coordenadas de Torres, RS — fallback quando GPS bloqueado (sem HTTPS)
+    const CITY_FALLBACK = { longitude: -49.7264, latitude: -29.3388 };
     setWaiting(true);
-    navigator.geolocation?.getCurrentPosition(
+    if (!navigator.geolocation) {
+      map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 14, duration: 1500 });
+      onLocate?.(CITY_FALLBACK);
+      setWaiting(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
       (pos) => {
         const coords = { longitude: pos.coords.longitude, latitude: pos.coords.latitude };
         map?.flyTo({ center: [coords.longitude, coords.latitude], zoom: 14, duration: 1500 });
         onLocate?.(coords);
         setWaiting(false);
       },
-      () => setWaiting(false),
+      () => {
+        // GPS bloqueado (HTTP) — centraliza na cidade
+        map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 13, duration: 1500 });
+        onLocate?.(CITY_FALLBACK);
+        setWaiting(false);
+      },
     );
   }, [map, onLocate]);
   const fullscreen = useCallback(() => {
