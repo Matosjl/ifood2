@@ -67,17 +67,116 @@ function DriverMarkerContent() {
   );
 }
 
-// ── Delivery marker (numbered pin) ────────────────────────────
+// ── Delivery marker (order number pin) ───────────────────────
 
-function DeliveryMarkerContent({ num, active }) {
+function DeliveryMarkerContent({ orderNumber, active }) {
   return (
     <div className={[
-      'flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-lg text-xs font-black transition-all',
+      'flex items-center justify-center rounded-full border-2 shadow-lg font-black transition-all',
+      'px-2 h-7 min-w-[28px] text-xs',
       active
-        ? 'bg-orange-500 border-white text-white scale-125'
-        : 'bg-gray-800 border-orange-400 text-orange-300',
+        ? 'bg-orange-500 border-white text-white scale-125 shadow-orange-500/40'
+        : 'bg-gray-900 border-orange-400 text-orange-300 hover:scale-110',
     ].join(' ')}>
-      {num}
+      #{orderNumber}
+    </div>
+  );
+}
+
+// ── Order popup (detail card on map) ─────────────────────────
+
+const PAYMENT_LABELS = {
+  cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito',
+  debit: 'Débito', voucher: 'Vale-Ref.', other: 'Outro',
+};
+
+function OrderPopup({ order, delivering, onDeliver, onRoute }) {
+  const items     = order.items ?? [];
+  const payment   = PAYMENT_LABELS[order.payment_method] ?? order.payment_method ?? '—';
+  const address   = order.customer_address ?? '';
+  const mapsUrl   = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+  const wazeUrl   = `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
+
+  return (
+    <div className="space-y-2 min-w-[220px] max-w-[260px]">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-black text-white text-base">#{order.orderNumber}</span>
+        <span className={[
+          'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
+          order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' : 'bg-green-500/20 text-green-300',
+        ].join(' ')}>
+          {STATUS_LABELS[order.status] ?? order.status}
+        </span>
+      </div>
+
+      {/* Cliente */}
+      {order.customerName && (
+        <p className="text-sm font-semibold text-gray-200">{order.customerName}</p>
+      )}
+      {order.customerPhone && (
+        <p className="text-xs text-gray-400">📞 {order.customerPhone}</p>
+      )}
+
+      {/* Endereço / bairro */}
+      {(order.neighborhood || address) && (
+        <div className="bg-gray-800 rounded-lg px-2.5 py-1.5 space-y-0.5">
+          {order.neighborhood && (
+            <p className="text-xs font-bold text-orange-300">📌 {order.neighborhood}</p>
+          )}
+          {address && (
+            <p className="text-xs text-gray-400">📍 {address}</p>
+          )}
+        </div>
+      )}
+
+      {/* Itens */}
+      {items.length > 0 && (
+        <div className="space-y-0.5">
+          {items.slice(0, 3).map((it, i) => (
+            <p key={i} className="text-xs text-gray-400 truncate">
+              · {it.quantity ?? it.weight_kg + 'kg'}× {it.product_name}
+            </p>
+          ))}
+          {items.length > 3 && (
+            <p className="text-xs text-gray-500">+{items.length - 3} item(s)…</p>
+          )}
+        </div>
+      )}
+
+      {/* Total + pagamento */}
+      <div className="flex items-center justify-between pt-1 border-t border-white/10">
+        <span className="text-sm font-black text-orange-400">{fmt(order.total)}</span>
+        <span className="text-xs text-gray-400">{payment}</span>
+      </div>
+
+      {/* Ações de navegação */}
+      {address && (
+        <div className="flex gap-1.5">
+          <a href={mapsUrl} target="_blank" rel="noreferrer"
+            className="flex-1 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold text-center transition-colors">
+            🗺️ Maps
+          </a>
+          <a href={wazeUrl} target="_blank" rel="noreferrer"
+            className="flex-1 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold text-center transition-colors">
+            🔵 Waze
+          </a>
+        </div>
+      )}
+
+      {/* Rota interna */}
+      <button onClick={onRoute}
+        className="w-full py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-colors">
+        🛣️ Calcular Rota no Mapa
+      </button>
+
+      {/* Marcar entregue */}
+      {order.status !== 'delivered' && (
+        <button onClick={() => onDeliver(order.id)} disabled={delivering === order.id}
+          className="w-full py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-colors disabled:opacity-50">
+          {delivering === order.id ? 'Registrando...' : '✓ Marcar como Entregue'}
+        </button>
+      )}
     </div>
   );
 }
@@ -388,7 +487,7 @@ export default function EntregasPage() {
             )}
 
             {/* Delivery markers */}
-            {activeDeliveries.map((order, i) => {
+            {activeDeliveries.map((order) => {
               const pos = coords[order.id];
               if (!pos) return null;
               const isActive = activeOrder?.id === order.id;
@@ -400,27 +499,16 @@ export default function EntregasPage() {
                   onClick={() => handleSelect(order)}
                 >
                   <MarkerContent>
-                    <DeliveryMarkerContent num={i + 1} active={isActive} />
+                    <DeliveryMarkerContent orderNumber={order.order_number ?? order.orderNumber} active={isActive} />
                   </MarkerContent>
                   {isActive && (
-                    <MarkerPopup closeButton>
-                      <div className="space-y-1.5 min-w-[180px]">
-                        <p className="font-black text-white text-sm">#{order.orderNumber}</p>
-                        {order.customerName && (
-                          <p className="text-xs text-gray-300">{order.customerName}</p>
-                        )}
-                        {order.customer_address && (
-                          <p className="text-xs text-gray-400">📍 {order.customer_address}</p>
-                        )}
-                        <p className="text-sm font-bold text-orange-400">{fmt(order.total)}</p>
-                        <button
-                          onClick={() => handleDeliver(order.id)}
-                          disabled={delivering === order.id}
-                          className="w-full mt-1 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-colors disabled:opacity-50"
-                        >
-                          {delivering === order.id ? 'Registrando...' : '✓ Marcar como Entregue'}
-                        </button>
-                      </div>
+                    <MarkerPopup closeButton onClose={() => { setActiveOrder(null); setRoute([]); }}>
+                      <OrderPopup
+                        order={order}
+                        delivering={delivering}
+                        onDeliver={handleDeliver}
+                        onRoute={() => handleSelect(order)}
+                      />
                     </MarkerPopup>
                   )}
                 </MapMarker>
