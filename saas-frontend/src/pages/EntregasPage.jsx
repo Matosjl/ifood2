@@ -23,8 +23,11 @@ const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
 // Status label map
 const STATUS_LABELS = {
-  ready:      'Pronto para entrega',
-  delivering: 'Saiu para entrega',
+  pending:    'Pendente',
+  confirmed:  'Confirmado',
+  preparing:  'Em preparo',
+  ready:      'Pronto p/ entrega',
+  delivering: 'Saiu p/ entrega',
   delivered:  'Entregue',
 };
 
@@ -104,7 +107,11 @@ function OrderPopup({ order, delivering, onDeliver, onRoute }) {
         <span className="font-black text-white text-base">#{order.orderNumber}</span>
         <span className={[
           'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
-          order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' : 'bg-green-500/20 text-green-300',
+          order.status === 'delivered'  ? 'bg-green-500/20 text-green-300' :
+          order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' :
+          order.status === 'ready'      ? 'bg-orange-500/20 text-orange-300' :
+          order.status === 'preparing'  ? 'bg-yellow-500/20 text-yellow-300' :
+                                          'bg-gray-500/20 text-gray-400',
         ].join(' ')}>
           {STATUS_LABELS[order.status] ?? order.status}
         </span>
@@ -198,9 +205,11 @@ function OrderCard({ order, active, onSelect, onDeliver, delivering }) {
         <span className="text-sm font-black text-white">#{order.orderNumber}</span>
         <span className={[
           'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
-          order.status === 'delivering'
-            ? 'bg-blue-500/20 text-blue-300'
-            : 'bg-green-500/20 text-green-300',
+          order.status === 'delivered'  ? 'bg-green-500/20 text-green-300' :
+          order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' :
+          order.status === 'ready'      ? 'bg-orange-500/20 text-orange-300' :
+          order.status === 'preparing'  ? 'bg-yellow-500/20 text-yellow-300' :
+                                          'bg-gray-500/20 text-gray-400',
         ].join(' ')}>
           {STATUS_LABELS[order.status] ?? order.status}
         </span>
@@ -256,8 +265,7 @@ export default function EntregasPage() {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const { data } = await getOrders({ limit: 100, startDate: today.toISOString() });
       const deliveries = (data.data ?? []).filter(
-        (o) => o.delivery_type === 'delivery' &&
-               ['ready', 'delivering', 'delivered'].includes(o.status)
+        (o) => o.delivery_type === 'delivery' && o.status !== 'cancelled'
       );
       setOrders(deliveries);
     } catch { /* non-fatal */ }
