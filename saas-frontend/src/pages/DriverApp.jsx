@@ -756,8 +756,8 @@ export default function DriverApp() {
   });
 
   const [tab,          setTab]          = useState('deliveries');
-  const [subTab,       setSubTab]       = useState('available');
-  const [online,       setOnline]       = useState(false);
+  const [subTab,       setSubTab]       = useState(() => localStorage.getItem('driverSubTab') || 'available');
+  const [online,       setOnline]       = useState(() => localStorage.getItem('driverOnline') === 'true');
   const [available,    setAvailable]    = useState([]);
   const [active,       setActive]       = useState([]);
   const [stats,        setStats]        = useState(null);
@@ -774,6 +774,7 @@ export default function DriverApp() {
   const pollRef          = useRef(null);
   const socketRef        = useRef(null);
   const locationWatchRef = useRef(null);
+  const initialLoadRef   = useRef(true); // auto-switch to active on first load
 
   // ── Fetch ───────────────────────────────────────────────────
 
@@ -787,10 +788,18 @@ export default function DriverApp() {
       setAvailable(av);
       setActive(ac);
       setError('');
+      // Na primeira carga: se há entregas ativas, vai direto para aba 'active'
+      if (initialLoadRef.current && ac.length > 0) {
+        initialLoadRef.current = false;
+        setSubTab('active');
+        localStorage.setItem('driverSubTab', 'active');
+      } else {
+        initialLoadRef.current = false;
+      }
     } catch (e) {
       setError(e.message);
     }
-  }, [token]);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchStats = useCallback(async () => {
     if (!token) return;
@@ -850,6 +859,7 @@ export default function DriverApp() {
     socket.on('delivery:assigned', () => {
       fetchDeliveries();
       setSubTab('active');
+      localStorage.setItem('driverSubTab', 'active');
     });
 
     socketRef.current = socket;
@@ -863,6 +873,7 @@ export default function DriverApp() {
     try {
       await http('PUT', '/status', { status: goingOnline ? 'available' : 'offline' }, token);
       setOnline(goingOnline);
+      localStorage.setItem('driverOnline', goingOnline);
       if (goingOnline) {
         if ('geolocation' in navigator) {
           locationWatchRef.current = navigator.geolocation.watchPosition(
@@ -893,6 +904,7 @@ export default function DriverApp() {
       await http('POST', `/deliveries/${orderId}/accept`, {}, token);
       await fetchDeliveries();
       setSubTab('active');
+      localStorage.setItem('driverSubTab', 'active');
       setAcceptToast({ orderNumber: found?.order_number });
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -944,6 +956,8 @@ export default function DriverApp() {
     }
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driverUser');
+    localStorage.removeItem('driverOnline');
+    localStorage.removeItem('driverSubTab');
     setToken(null);
     setUser(null);
   };
@@ -1090,7 +1104,7 @@ export default function DriverApp() {
                 { k: 'available', label: 'Disponíveis', count: available.length },
                 { k: 'active',    label: 'Ativas',      count: active.length },
               ].map(({ k, label, count }) => (
-                <button key={k} onClick={() => setSubTab(k)}
+                <button key={k} onClick={() => { setSubTab(k); localStorage.setItem('driverSubTab', k); }}
                   className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${
                     subTab === k
                       ? 'border-b-2 border-blue-600 text-blue-600'
