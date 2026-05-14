@@ -393,8 +393,9 @@ CREATE TABLE IF NOT EXISTS deliveries (
   accepted_at  TIMESTAMPTZ,
   picked_up_at TIMESTAMPTZ,
   delivered_at TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  UNIQUE(order_id)
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  -- sem UNIQUE(order_id) aqui — usamos índice parcial abaixo para permitir
+  -- re-atribuição após cancelamento
 );
 
 CREATE INDEX IF NOT EXISTS idx_drivers_email          ON drivers(email);
@@ -403,3 +404,6 @@ CREATE INDEX IF NOT EXISTS idx_dtc_tenant             ON driver_tenant_connectio
 CREATE INDEX IF NOT EXISTS idx_deliveries_driver      ON deliveries(driver_id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_order       ON deliveries(order_id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_tenant      ON deliveries(tenant_id);
+-- Garante 1 entrega ativa por pedido, mas permite recriar após cancelamento
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_order_active
+  ON deliveries(order_id) WHERE status != 'cancelled';
