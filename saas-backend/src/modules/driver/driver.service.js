@@ -238,7 +238,7 @@ const confirmDelivery = async (driverId, deliveryId) => {
       [delivery.order_id]
     );
     await client.query('COMMIT');
-    return { success: true };
+    return { orderId: delivery.order_id, tenantId: delivery.tenant_id };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

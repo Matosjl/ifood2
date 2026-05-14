@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Header        from '../components/Header';
 import OrdersBoard   from '../components/OrdersBoard';
 import NewOrderModal from '../components/NewOrderModal';
 import Toast         from '../components/Toast';
 import useOrders     from '../hooks/useOrders';
+import api           from '../api/axios';
 
 const VIEW_MODES = [
   { id: 'default', label: 'Padrão',    icon: '⊞' },
@@ -59,6 +60,32 @@ export default function DashboardPage() {
     addOrder, markPaid, editItems,
   } = useOrders();
 
+  // ── Motoboys conectados ──────────────────────────────────────
+  const [drivers, setDrivers] = useState([]);
+
+  const loadDrivers = useCallback(async () => {
+    try {
+      const { data } = await api.get('/driver/restaurant/drivers');
+      setDrivers(data.data ?? []);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    loadDrivers();
+    const id = setInterval(loadDrivers, 30_000);
+    return () => clearInterval(id);
+  }, [loadDrivers]);
+
+  const handleAssignDriver = useCallback(async (orderId, driverId) => {
+    try {
+      await api.post('/driver/restaurant/assign', { orderId, driverId });
+      // O socket vai atualizar o status do pedido automaticamente;
+      // se não estiver conectado, o polling de 15s vai buscar
+    } catch (e) {
+      setStatusError(e?.response?.data?.message ?? 'Erro ao atribuir motoboy.');
+    }
+  }, [setStatusError]);
+
   // Count pending (non-confirmed yet) orders for badge
   const pendingCount = orders.filter((o) =>
     o.status === 'pending' || o.status === 'confirmed'
@@ -106,6 +133,8 @@ export default function DashboardPage() {
         acknowledgeOrder={acknowledgeOrder}
         markPaid={markPaid}
         editItems={editItems}
+        drivers={drivers}
+        onAssign={handleAssignDriver}
         viewMode={viewMode}
       />
 

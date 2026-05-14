@@ -210,6 +210,7 @@ export default function OrdersBoard({
   loading, orders = [], getColumnOrders,
   changeStatus, doCancel, acknowledgeOrder,
   markPaid, editItems,
+  drivers, onAssign,
   viewMode = 'default',
 }) {
   const [editingOrder, setEditingOrder] = useState(null);
@@ -235,6 +236,8 @@ export default function OrdersBoard({
               onAcknowledge={acknowledgeOrder}
               onMarkPaid={markPaid}
               onEditItems={setEditingOrder}
+              drivers={drivers}
+              onAssign={onAssign}
             />
           ))}
         </div>

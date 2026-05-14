@@ -7,7 +7,7 @@ const DOT = {
   red:    'bg-red-400',
 };
 
-export default function KanbanColumn({ column, orders, onStatusChange, onAcknowledge, onMarkPaid, onEditItems }) {
+export default function KanbanColumn({ column, orders, onStatusChange, onAcknowledge, onMarkPaid, onEditItems, drivers, onAssign }) {
   const { label, color, header, count } = column;
   const activeCount = orders.filter((o) => !['delivered','cancelled'].includes(o.status)).length;
   const borderCls   = header.split(' ').find((c) => c.startsWith('border-')) ?? 'border-white/10';
@@ -49,6 +49,8 @@ export default function KanbanColumn({ column, orders, onStatusChange, onAcknowl
               onAcknowledge={onAcknowledge}
               onMarkPaid={onMarkPaid}
               onEditItems={onEditItems}
+              drivers={drivers}
+              onAssign={onAssign}
             />
           ))
         )}

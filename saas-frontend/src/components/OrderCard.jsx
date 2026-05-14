@@ -61,11 +61,13 @@ function Timer({ createdAt, endAt }) {
 
 // ── Card ──────────────────────────────────────────────────────
 
-export default function OrderCard({ order, onStatusChange, onAcknowledge, onMarkPaid, onEditItems }) {
-  const [isNew,        setIsNew]        = useState(true);
-  const [confirming,   setConfirming]   = useState(null);   // status sendo confirmado
-  const [showPayPick,  setShowPayPick]  = useState(false);  // picker de forma de pgto
-  const [payLoading,   setPayLoading]   = useState(false);
+export default function OrderCard({ order, onStatusChange, onAcknowledge, onMarkPaid, onEditItems, drivers, onAssign }) {
+  const [isNew,           setIsNew]           = useState(true);
+  const [confirming,      setConfirming]       = useState(null);   // status sendo confirmado
+  const [showPayPick,     setShowPayPick]      = useState(false);  // picker de forma de pgto
+  const [payLoading,      setPayLoading]       = useState(false);
+  const [showDriverPick,  setShowDriverPick]   = useState(false);  // picker de motoboy
+  const [assigning,       setAssigning]        = useState(false);
   const cfg = STATUS[order.status] ?? STATUS.pending;
 
   // Pagamento pendente: criado com 'A cobrar' e ainda não recebido
@@ -111,13 +113,28 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       case 'confirmed': return [prepare, cancel];
       case 'preparing': return [ready,   cancel];
       case 'ready':
-        // Só mostra "Entregar" se pagamento já foi recebido (ou não era pendente)
-        return isPendingPayment ? [] : [deliver];
+        if (isPendingPayment) return [];
+        // Para delivery: motoboy faz a entrega — só mostra "Entregar" se não há onAssign
+        if (order.deliveryType === 'delivery' && onAssign) return [];
+        return [deliver];
       default:          return [];
     }
   })();
 
-  const isEditable = EDITABLE_STATUSES.has(order.status);
+  const isEditable       = EDITABLE_STATUSES.has(order.status);
+  const availableDrivers = (drivers ?? []).filter(
+    (d) => d.status === 'available' || d.status === 'busy'
+  );
+
+  const handleAssignDriver = async (driverId) => {
+    setAssigning(true);
+    setShowDriverPick(false);
+    try {
+      await onAssign?.(order.id, driverId);
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   return (
     <div
@@ -296,6 +313,57 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
                 </button>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* ── Atribuir motoboy (delivery + ready) ─────────────── */}
+      {order.status === 'ready' && order.deliveryType === 'delivery' && onAssign && (
+        <div className="px-3 pb-3 border-t border-white/[0.06] pt-2">
+          {!showDriverPick ? (
+            <button
+              disabled={assigning}
+              onClick={() => setShowDriverPick(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 text-xs font-semibold transition-colors border border-blue-500/30 disabled:opacity-50"
+            >
+              {assigning ? '🛵 Atribuindo...' : (
+                <>
+                  🛵 Atribuir Motoboy
+                  {availableDrivers.length > 0 && (
+                    <span className="bg-blue-500 text-white text-[10px] px-1.5 rounded-full">
+                      {availableDrivers.length}
+                    </span>
+                  )}
+                </>
+              )}
+            </button>
+          ) : (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">
+                Escolher motoboy:
+              </p>
+              {availableDrivers.length === 0 ? (
+                <p className="text-xs text-gray-600 italic py-1">Nenhum motoboy disponível</p>
+              ) : (
+                availableDrivers.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => handleAssignDriver(d.id)}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gray-700/60 hover:bg-blue-600/30 text-gray-200 text-xs font-medium transition-colors"
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${d.status === 'available' ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                    <span className="flex-1 text-left truncate">{d.name}</span>
+                    {d.phone && <span className="text-gray-500 text-[10px] shrink-0">{d.phone}</span>}
+                  </button>
+                ))
+              )}
+              <button
+                onClick={() => setShowDriverPick(false)}
+                className="w-full text-xs text-gray-600 hover:text-gray-400 py-1"
+              >
+                Cancelar
+              </button>
+            </div>
           )}
         </div>
       )}

@@ -515,6 +515,12 @@ export default function DriverApp() {
     } catch {}
   }, [token]);
 
+  // Carrega perfil (inclui restaurantes) no login e ao trocar de aba
+  useEffect(() => {
+    if (!token) return;
+    fetchProfile(); // sempre ao montar / logar
+  }, [token, fetchProfile]);
+
   // Polling a cada 15s quando online
   useEffect(() => {
     if (!token) return;
@@ -549,6 +555,12 @@ export default function DriverApp() {
         if (prev.some((d) => d.id === order.id)) return prev;
         return [order, ...prev];
       });
+    });
+
+    // Restaurante atribuiu este motoboy a um pedido → atualiza ativas imediatamente
+    socket.on('delivery:assigned', () => {
+      fetchDeliveries();
+      setSubTab('active');
     });
 
     socket.on('disconnect', () => {
@@ -778,6 +790,23 @@ export default function DriverApp() {
         {/* ── Deliveries ── */}
         {tab === 'deliveries' && (
           <div>
+            {/* Restaurantes conectados */}
+            {profile?.restaurants?.length > 0 && (
+              <div className="px-3 pt-3 pb-1 flex flex-wrap gap-1.5">
+                {profile.restaurants.map((r) => (
+                  <span key={r.id}
+                    className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full">
+                    🏪 {r.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            {!profile?.restaurants?.length && (
+              <div className="mx-3 mt-3 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-xs text-yellow-800">
+                ⚠️ Nenhum restaurante conectado. Use o menu lateral para conectar.
+              </div>
+            )}
+
             {/* Sub-tabs */}
             <div className="flex border-b bg-white sticky top-0 z-10">
               {[

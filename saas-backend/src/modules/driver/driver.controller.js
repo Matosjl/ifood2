@@ -83,14 +83,31 @@ const markPaid = asyncHandler(async (req, res) => {
   const data = await service.markOrderPaid(req.driverId, req.params.deliveryId, paymentMethod);
 
   // Notifica o restaurante via Socket.io que o pagamento foi registrado
-  try { eventService.orderUpdated(data); } catch (_) {}
+  try { eventService.orderUpdated(data.tenant_id, data); } catch (_) {}
 
   res.json({ success: true, data });
 });
 
 const complete = asyncHandler(async (req, res) => {
-  await service.confirmDelivery(req.driverId, req.params.deliveryId);
+  const { orderId, tenantId } = await service.confirmDelivery(req.driverId, req.params.deliveryId);
   res.json({ success: true });
+
+  // Notifica o restaurante via Socket.io para atualizar o kanban em tempo real
+  try {
+    const db = require('../../config/database');
+    const { rows } = await db.query(
+      `SELECT o.*,
+              COALESCE(json_agg(json_build_object(
+                'id', oi.id, 'product_id', oi.product_id, 'product_name', oi.product_name,
+                'quantity', oi.quantity, 'weight_kg', oi.weight_kg,
+                'unit_price', oi.unit_price, 'total', oi.total, 'notes', oi.notes
+              ) ORDER BY oi.created_at) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
+       FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
+       WHERE o.id = $1 GROUP BY o.id`,
+      [orderId]
+    );
+    if (rows[0]) eventService.orderUpdated(tenantId, rows[0]);
+  } catch (_) {}
 });
 
 const getStats = asyncHandler(async (req, res) => {
