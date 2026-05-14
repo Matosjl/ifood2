@@ -116,10 +116,29 @@ const getDrivers = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+const assign = asyncHandler(async (req, res) => {
+  const { orderId, driverId } = req.body;
+  if (!orderId || !driverId) throw new AppError('orderId e driverId são obrigatórios.', 400);
+  const data = await service.assignDelivery(req.user.tenantId, orderId, driverId);
+
+  // Notifica o motoboy via Socket.io imediatamente
+  try {
+    const { getEmitter } = require('../../socket/emitter');
+    getEmitter().to(`driver:${driverId}`).emit('delivery:assigned', {
+      deliveryId: data.id,
+      orderId,
+      message: 'Você foi atribuído a uma entrega!',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (_) {}
+
+  res.status(201).json({ success: true, data });
+});
+
 module.exports = {
   register, login, getProfile,
   connect, updateStatus, updateLocation,
   getAvailable, getActive, accept, pickup, markPaid, complete,
   getStats, getHistory,
-  getToken, getDrivers,
+  getToken, getDrivers, assign,
 };

@@ -331,6 +331,53 @@ const getConnectedDrivers = async (tenantId) => {
   return rows;
 };
 
+// ── Restaurante atribui motoboy a um pedido ───────────────────
+
+const assignDelivery = async (tenantId, orderId, driverId) => {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: orderRows } = await client.query(
+      `SELECT id, delivery_fee FROM orders
+       WHERE id=$1 AND tenant_id=$2 AND status='ready' AND delivery_type='delivery'`,
+      [orderId, tenantId]
+    );
+    if (!orderRows.length)
+      throw new AppError('Pedido não encontrado ou não está pronto para entrega.', 404);
+
+    const { rows: connRows } = await client.query(
+      `SELECT id FROM driver_tenant_connections WHERE driver_id=$1 AND tenant_id=$2`,
+      [driverId, tenantId]
+    );
+    if (!connRows.length)
+      throw new AppError('Motoboy não está conectado a este restaurante.', 403);
+
+    const { rows: existing } = await client.query(
+      `SELECT id FROM deliveries WHERE order_id=$1 AND status!='cancelled'`,
+      [orderId]
+    );
+    if (existing.length)
+      throw new AppError('Este pedido já foi atribuído a um motoboy.', 409);
+
+    const driverFee = (parseFloat(orderRows[0].delivery_fee) || 0) * 0.7;
+
+    const { rows } = await client.query(
+      `INSERT INTO deliveries (order_id, driver_id, tenant_id, status, driver_fee, accepted_at)
+       VALUES ($1, $2, $3, 'accepted', $4, NOW()) RETURNING *`,
+      [orderId, driverId, tenantId, driverFee.toFixed(2)]
+    );
+
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   register, login,
   connectToRestaurant, getConnectedRestaurants,
@@ -339,4 +386,5 @@ module.exports = {
   updateStatus, updateLocation,
   getProfile, getStats, getHistory,
   getTenantToken, getConnectedDrivers,
+  assignDelivery,
 };

@@ -59,7 +59,8 @@ router.get ('/history',                        authDriver, ctrl.getHistory);
 
 // ── Rotas do restaurante (requerem auth normal de staff) ──────
 
-router.get('/restaurant/token',   authenticate, ctrl.getToken);
-router.get('/restaurant/drivers', authenticate, ctrl.getDrivers);
+router.get ('/restaurant/token',   authenticate, ctrl.getToken);
+router.get ('/restaurant/drivers', authenticate, ctrl.getDrivers);
+router.post('/restaurant/assign',  authenticate, ctrl.assign);
 
 module.exports = router;

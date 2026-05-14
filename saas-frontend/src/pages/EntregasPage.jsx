@@ -211,75 +211,136 @@ function OrderPopup({ order, delivering, onDeliver, onRoute, onPin, isPinning })
 
 // ── Order card (sidebar) ───────────────────────────────────────
 
-function OrderCard({ order, active, onSelect, onDeliver, delivering, onPin, isPinning, hasCoords }) {
+function OrderCard({ order, active, onSelect, onDeliver, delivering, onPin, isPinning, hasCoords, drivers, onAssign, assigning }) {
+  const [showDriverPicker, setShowDriverPicker] = useState(false);
+
+  const availableDrivers = (drivers ?? []).filter(
+    (d) => d.status === 'available' || d.status === 'busy'
+  );
+
   return (
-    <button
-      onClick={() => onSelect(order)}
+    <div
       className={[
-        'w-full text-left rounded-xl border p-3 transition-all',
+        'w-full text-left rounded-xl border transition-all',
         active
           ? 'bg-orange-500/10 border-orange-500/40 ring-1 ring-orange-500/30'
           : 'bg-gray-800/60 border-white/[0.06] hover:border-orange-500/30 hover:bg-gray-800',
       ].join(' ')}
     >
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-sm font-black text-white">#{order.orderNumber}</span>
-        <span className={[
-          'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
-          order.status === 'delivered'  ? 'bg-green-500/20 text-green-300' :
-          order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' :
-          order.status === 'ready'      ? 'bg-orange-500/20 text-orange-300' :
-          order.status === 'preparing'  ? 'bg-yellow-500/20 text-yellow-300' :
-                                          'bg-gray-500/20 text-gray-400',
-        ].join(' ')}>
-          {STATUS_LABELS[order.status] ?? order.status}
-        </span>
-      </div>
+      <button className="w-full text-left p-3" onClick={() => onSelect(order)}>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <span className="text-sm font-black text-white">#{order.orderNumber}</span>
+          <span className={[
+            'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
+            order.status === 'delivered'  ? 'bg-green-500/20 text-green-300' :
+            order.status === 'delivering' ? 'bg-blue-500/20 text-blue-300' :
+            order.status === 'ready'      ? 'bg-orange-500/20 text-orange-300' :
+            order.status === 'preparing'  ? 'bg-yellow-500/20 text-yellow-300' :
+                                            'bg-gray-500/20 text-gray-400',
+          ].join(' ')}>
+            {STATUS_LABELS[order.status] ?? order.status}
+          </span>
+        </div>
 
-      {order.customerName && (
-        <p className="text-xs text-gray-300 truncate font-medium">{order.customerName}</p>
-      )}
-      {order.customerAddress && (
-        <p className="text-xs text-gray-500 truncate mt-0.5" title={order.customerAddress}>
-          📍 {order.customerAddress}
-        </p>
-      )}
+        {order.customerName && (
+          <p className="text-xs text-gray-300 truncate font-medium">{order.customerName}</p>
+        )}
+        {order.customerPhone && (
+          <p className="text-xs text-gray-500 truncate">📞 {order.customerPhone}</p>
+        )}
+        {order.customerAddress && (
+          <p className="text-xs text-gray-500 truncate mt-0.5" title={order.customerAddress}>
+            📍 {order.customerAddress}{order.neighborhood ? `, ${order.neighborhood}` : ''}
+          </p>
+        )}
 
-      <div className="flex items-center justify-between mt-2 gap-1">
-        <span className="text-sm font-semibold text-white">{fmt(order.total)}</span>
-        <div className="flex gap-1">
-          {/* Botão fixar pin — aparece para pedidos sem coords ou quando coords erradas */}
-          {onPin && (
+        <div className="flex items-center justify-between mt-2 gap-1">
+          <div>
+            <span className="text-sm font-semibold text-white">{fmt(order.total)}</span>
+            {order.deliveryFee > 0 && (
+              <span className="text-xs text-gray-500 ml-1">+{fmt(order.deliveryFee)} frete</span>
+            )}
+          </div>
+          <div className="flex gap-1">
+            {onPin && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onPin(); }}
+                title="Fixar localização no mapa"
+                className={[
+                  'px-2 py-1 rounded-lg text-xs font-semibold transition-colors',
+                  isPinning
+                    ? 'bg-purple-500 text-white animate-pulse'
+                    : hasCoords
+                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+                      : 'bg-purple-600/30 hover:bg-purple-600/60 text-purple-300',
+                ].join(' ')}
+              >
+                📍
+              </button>
+            )}
+            {order.status !== 'delivered' && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onDeliver(order.id); }}
+                disabled={delivering === order.id}
+                className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                {delivering === order.id ? '...' : '✓ Entregue'}
+              </button>
+            )}
+            {order.status === 'delivered' && (
+              <span className="text-xs text-green-400 font-semibold self-center">✓ Entregue</span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {/* Botão atribuir motoboy — apenas para pedidos ready ainda não atribuídos */}
+      {order.status === 'ready' && onAssign && (
+        <div className="px-3 pb-3 border-t border-white/[0.06] pt-2">
+          {!showDriverPicker ? (
             <button
-              onClick={(e) => { e.stopPropagation(); onPin(); }}
-              title="Fixar localização no mapa"
-              className={[
-                'px-2 py-1 rounded-lg text-xs font-semibold transition-colors',
-                isPinning
-                  ? 'bg-purple-500 text-white animate-pulse'
-                  : hasCoords
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-400'
-                    : 'bg-purple-600/30 hover:bg-purple-600/60 text-purple-300',
-              ].join(' ')}
+              onClick={() => setShowDriverPicker(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 text-xs font-semibold transition-colors border border-blue-500/30"
             >
-              📍
+              🛵 Atribuir Motoboy
+              {availableDrivers.length > 0 && (
+                <span className="bg-blue-500 text-white text-[10px] px-1.5 rounded-full">
+                  {availableDrivers.length}
+                </span>
+              )}
             </button>
-          )}
-          {order.status !== 'delivered' && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onDeliver(order.id); }}
-              disabled={delivering === order.id}
-              className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
-            >
-              {delivering === order.id ? '...' : '✓ Entregue'}
-            </button>
-          )}
-          {order.status === 'delivered' && (
-            <span className="text-xs text-green-400 font-semibold self-center">✓ Entregue</span>
+          ) : (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">
+                Escolher motoboy:
+              </p>
+              {availableDrivers.length === 0 ? (
+                <p className="text-xs text-gray-600 italic py-1">Nenhum motoboy disponível</p>
+              ) : (
+                availableDrivers.map((d) => (
+                  <button
+                    key={d.id}
+                    disabled={assigning === order.id}
+                    onClick={() => { onAssign(order.id, d.id); setShowDriverPicker(false); }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gray-700/60 hover:bg-blue-600/30 text-gray-200 text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${d.status === 'available' ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                    <span className="truncate">{d.name}</span>
+                    {d.phone && <span className="text-gray-500 shrink-0">{d.phone}</span>}
+                  </button>
+                ))
+              )}
+              <button
+                onClick={() => setShowDriverPicker(false)}
+                className="w-full text-xs text-gray-600 hover:text-gray-400 py-1"
+              >
+                Cancelar
+              </button>
+            </div>
           )}
         </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }
 
@@ -299,6 +360,7 @@ export default function EntregasPage() {
   const [mapCenter,      setMapCenter]      = useState(BRAZIL_CENTER);
   const [mapZoom,        setMapZoom]        = useState(12);
   const [pinningOrderId, setPinningOrderId] = useState(null); // orderId aguardando pin manual
+  const [assigning,      setAssigning]      = useState(null); // orderId sendo atribuído
   const watchIdRef = useRef(null);
   const mapRef     = useRef(null);
 
@@ -439,6 +501,20 @@ export default function EntregasPage() {
     finally { setDelivering(null); }
   }, [activeOrder]);
 
+  // ── Assign driver to order ────────────────────────────────
+  const handleAssign = useCallback(async (orderId, driverId) => {
+    setAssigning(orderId);
+    try {
+      await api.post('/driver/restaurant/assign', { orderId, driverId });
+      await loadOrders();
+      await loadDrivers();
+    } catch (e) {
+      alert(e?.response?.data?.message ?? 'Erro ao atribuir motoboy. Tente novamente.');
+    } finally {
+      setAssigning(null);
+    }
+  }, [loadOrders, loadDrivers]);
+
   // ── Active deliveries (non-delivered) ─────────────────────
   const activeDeliveries = orders.filter((o) => o.status !== 'delivered');
   const delivered        = orders.filter((o) => o.status === 'delivered');
@@ -498,6 +574,9 @@ export default function EntregasPage() {
                 onPin={() => { setPinningOrderId((p) => p === order.id ? null : order.id); setActiveOrder(order); }}
                 isPinning={pinningOrderId === order.id}
                 hasCoords={!!coords[order.id]}
+                drivers={drivers}
+                onAssign={handleAssign}
+                assigning={assigning}
               />
             ))}
 
