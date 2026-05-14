@@ -11,7 +11,7 @@ import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
 
-// Reverse-geocode [lng, lat] → { road, suburb } via Nominatim
+// Reverse-geocode [lng, lat] → { road, number, suburb } via Nominatim
 async function reverseGeocode(lng, lat) {
   try {
     const res  = await fetch(
@@ -19,11 +19,13 @@ async function reverseGeocode(lng, lat) {
       { headers: { 'Accept-Language': 'pt-BR' } }
     );
     const data = await res.json();
+    const addr = data.address ?? {};
     return {
-      road:   data.address?.road ?? data.address?.pedestrian ?? data.address?.path ?? '',
-      suburb: data.address?.suburb ?? data.address?.neighbourhood ?? data.address?.quarter ?? '',
+      road:   addr.road ?? addr.pedestrian ?? addr.path ?? addr.footway ?? '',
+      number: addr.house_number ?? '',
+      suburb: addr.suburb ?? addr.neighbourhood ?? addr.quarter ?? addr.city_district ?? '',
     };
-  } catch { return { road: '', suburb: '' }; }
+  } catch { return { road: '', number: '', suburb: '' }; }
 }
 
 // ── Map address picker (overlay dentro do modal) ──────────────
@@ -31,24 +33,40 @@ async function reverseGeocode(lng, lat) {
 const CITY_CENTER = [-49.7802, -29.3965]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
 
 function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
-  const [markerPos, setMarkerPos] = useState(CITY_CENTER);
-  const [loading,   setLoading]   = useState(false);
-  const [preview,   setPreview]   = useState(initialStreet || '');
+  const [markerPos,   setMarkerPos]   = useState(CITY_CENTER);
+  const [loading,     setLoading]     = useState(false);
+  const [previewRoad, setPreviewRoad] = useState(initialStreet || '');
+  const [previewNum,  setPreviewNum]  = useState('');
+  const [previewSub,  setPreviewSub]  = useState('');
   const mapRef = useRef(null);
+
+  const doGeocode = useCallback(async (lng, lat) => {
+    setLoading(true);
+    const result = await reverseGeocode(lng, lat);
+    setPreviewRoad(result.road);
+    setPreviewNum(result.number);
+    setPreviewSub(result.suburb);
+    setLoading(false);
+    return result;
+  }, []);
 
   const handleDragEnd = useCallback(async (lngLat) => {
     setMarkerPos([lngLat.lng, lngLat.lat]);
-    setLoading(true);
-    const { road } = await reverseGeocode(lngLat.lng, lngLat.lat);
-    setPreview(road);
-    setLoading(false);
-  }, []);
+    await doGeocode(lngLat.lng, lngLat.lat);
+  }, [doGeocode]);
 
   const handleConfirm = async () => {
     setLoading(true);
-    const { road } = await reverseGeocode(markerPos[0], markerPos[1]);
-    onConfirm({ street: road || preview, coords: markerPos });
+    const fresh = await reverseGeocode(markerPos[0], markerPos[1]);
+    onConfirm({
+      street:       fresh.road   || previewRoad,
+      streetNumber: fresh.number || previewNum,
+      suburb:       fresh.suburb || previewSub,
+      coords:       markerPos,
+    });
   };
+
+  const fullPreview = [previewRoad, previewNum].filter(Boolean).join(', ');
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-gray-950 rounded-2xl overflow-hidden">
@@ -83,10 +101,17 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
       {/* Footer */}
       <div className="px-4 py-3 bg-gray-900 border-t border-white/10 shrink-0 flex items-center gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-400 mb-0.5">Rua identificada:</p>
-          <p className="text-sm font-semibold text-white truncate">
-            {loading ? <span className="animate-pulse text-gray-500">Identificando...</span> : (preview || '— arraste o alfinete —')}
-          </p>
+          <p className="text-xs text-gray-400 mb-0.5">Endereço identificado:</p>
+          {loading ? (
+            <p className="text-sm text-gray-500 animate-pulse">Identificando...</p>
+          ) : fullPreview ? (
+            <div className="space-y-0.5">
+              <p className="text-sm font-semibold text-white truncate">{fullPreview}</p>
+              {previewSub && <p className="text-xs text-gray-400 truncate">📌 {previewSub}</p>}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 italic">— arraste o alfinete —</p>
+          )}
         </div>
         <button onClick={handleConfirm} disabled={loading}
           className="shrink-0 px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-50">
@@ -922,7 +947,22 @@ export default function NewOrderModal({ onClose, onCreated }) {
           <MapAddressPicker
             initialStreet={street}
             onClose={() => setShowMapPicker(false)}
-            onConfirm={({ street: s }) => { setStreet(s); setShowMapPicker(false); }}
+            onConfirm={({ street: s, streetNumber: n, suburb }) => {
+              if (s) setStreet(s);
+              if (n) setStreetNumber(n);
+              // Auto-detecta bairro pelo suburb retornado pelo Nominatim
+              if (suburb && !neighborhood) {
+                const sub = suburb.toLowerCase();
+                const match = NEIGHBORHOODS.find(
+                  (nb) => sub.includes(nb.bairro.toLowerCase()) || nb.bairro.toLowerCase().includes(sub)
+                );
+                if (match) {
+                  setNeighborhood(match.bairro);
+                  setDeliveryFee(String(match.taxa));
+                }
+              }
+              setShowMapPicker(false);
+            }}
           />
         )}
 
