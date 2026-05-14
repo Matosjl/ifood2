@@ -85,7 +85,7 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
           <MapControls position="top-right" showZoom showLocate
             onLocate={({ longitude, latitude }) => setMarkerPos([longitude, latitude])} />
           <MapMarker longitude={markerPos[0]} latitude={markerPos[1]} draggable
-            onDragEnd={(e) => handleDragEnd(e.target.getLngLat())}>
+            onDragEnd={handleDragEnd}>
             <MarkerContent>
               <div className="flex flex-col items-center -mt-8">
                 <div className="bg-orange-500 text-white rounded-full px-2 py-1 text-xs font-black shadow-lg shadow-orange-500/40">
