@@ -543,22 +543,28 @@ function MotoboyTab({ currentUser, onToast }) {
   const [token,   setToken]   = useState('');
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState('');
 
+  // onToast is intentionally NOT in the dependency array to avoid an
+  // infinite re-render loop: failure → onToast → parent re-render → new
+  // onToast ref → load recreated → useEffect fires again → failure…
   const load = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
       const [tkRes, drRes] = await Promise.all([
         api.get('/driver/restaurant/token'),
         api.get('/driver/restaurant/drivers'),
       ]);
-      setToken(tkRes.data.data ?? '');
+      setToken(tkRes.data.data?.token ?? tkRes.data.data ?? '');
       setDrivers(drRes.data.data ?? []);
     } catch (err) {
-      onToast(err.response?.data?.message ?? 'Erro ao carregar dados de motoboys.', 'error');
+      const msg = err.response?.data?.message ?? 'Erro ao carregar dados de motoboys.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
-  }, [onToast]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -571,6 +577,21 @@ function MotoboyTab({ currentUser, onToast }) {
     return (
       <div className="flex items-center justify-center h-40">
         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-40 gap-3 text-center">
+        <span className="text-3xl">⚠️</span>
+        <p className="text-sm text-red-400 font-semibold">{error}</p>
+        <button
+          onClick={load}
+          className="px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-sm text-white font-semibold transition-colors"
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   }
