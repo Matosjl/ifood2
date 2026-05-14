@@ -8,7 +8,7 @@ import { Map, MapMarker, MarkerContent, MarkerTooltip, MapRoute } from '../compo
 
 // Cliente separado para motoboy (token diferente do restaurante)
 const driverApi = axios.create({
-  baseURL: baseApi.defaults.baseURL, // herda a BASE já resolvida
+  baseURL: baseApi.defaults.baseURL,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -31,7 +31,7 @@ const http = async (method, path, body, token) => {
 // ── Socket URL ───────────────────────────────────────────────
 const SOCKET_URL = baseApi.defaults.baseURL?.replace('/api', '') || '';
 
-// ── Nominatim geocoding (for mini map) ───────────────────────
+// ── Nominatim geocoding ───────────────────────────────────────
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 async function geocode(address) {
   if (!address) return null;
@@ -59,10 +59,21 @@ async function fetchRoute(from, to) {
   } catch { return null; }
 }
 
-// Torres RS center fallback
 const TORRES_CENTER = [-49.7295, -29.3377];
 
-// ── Icons (inline SVG simples) ────────────────────────────────
+// Paleta de cores para diferenciar restaurantes no mapa
+const RESTAURANT_COLORS = [
+  '#ef4444', // vermelho
+  '#3b82f6', // azul
+  '#22c55e', // verde
+  '#f59e0b', // âmbar
+  '#8b5cf6', // roxo
+  '#ec4899', // rosa
+  '#06b6d4', // ciano
+  '#f97316', // laranja
+];
+
+// ── Icons ─────────────────────────────────────────────────────
 const Icon = ({ d, size = 20, cls = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
@@ -82,14 +93,15 @@ const ICONS = {
   qr:    'M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 17h2M17 15h4M21 21h-4M15 19v2M19 19v2',
   clock: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2',
   alert: 'M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01',
+  mapTab:'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6-3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7',
 };
 
 // ── Pay methods ───────────────────────────────────────────────
 const PAY_OPTIONS = [
   { value: 'cash',   label: '💵 Dinheiro' },
-  { value: 'pix',    label: '📱 Pix'     },
-  { value: 'credit', label: '💳 Crédito' },
-  { value: 'debit',  label: '💳 Débito'  },
+  { value: 'pix',    label: '📱 Pix'      },
+  { value: 'credit', label: '💳 Crédito'  },
+  { value: 'debit',  label: '💳 Débito'   },
 ];
 
 const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito' };
@@ -97,14 +109,300 @@ const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'D
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
 // ─────────────────────────────────────────────────────────────
+// ACCEPT TOAST
+// ─────────────────────────────────────────────────────────────
+
+function AcceptToast({ orderNumber, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3_000);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  return (
+    <div className="fixed top-16 left-0 right-0 max-w-md mx-auto px-4 z-[60] pointer-events-none">
+      <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl px-5 py-4 shadow-2xl flex items-center gap-3">
+        <span className="text-3xl">✅</span>
+        <div>
+          <p className="font-black text-base">Pedido aceito!</p>
+          {orderNumber && (
+            <p className="text-sm text-green-100">#{orderNumber} · Vá ao restaurante retirar o pedido</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAY MODAL — cobrança completa com troco
+// ─────────────────────────────────────────────────────────────
+
+function PayModal({ delivery, onConfirm, onClose }) {
+  const [method,   setMethod]   = useState('');
+  const [received, setReceived] = useState('');
+
+  const total     = parseFloat(delivery.total ?? 0);
+  const fee       = parseFloat(delivery.delivery_fee ?? 0);
+  const gain      = parseFloat(delivery.driver_fee ?? 0);
+  const recNum    = parseFloat(received) || 0;
+  const change    = method === 'cash' && recNum > total ? recNum - total : 0;
+  const needTroco = method === 'cash' && recNum > 0;
+  const canConfirm = !!method && (method !== 'cash' || recNum >= total);
+
+  const btnLabel = !method
+    ? 'Selecione a forma de pagamento'
+    : method === 'cash' && recNum < total && recNum > 0
+      ? 'Valor insuficiente'
+      : '✅ Confirmar pagamento';
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-end justify-center">
+      <div className="bg-white w-full max-w-md rounded-t-3xl overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-5 py-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-white font-black text-lg">💰 Cobrar Pagamento</h2>
+            <p className="text-yellow-100 text-xs">{delivery.customer_name || 'Cliente'} · #{delivery.order_number}</p>
+          </div>
+          <button onClick={onClose} className="text-white/80 hover:text-white text-2xl font-bold leading-none">×</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Valores */}
+          <div className="bg-gray-50 rounded-2xl p-4 space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-500">Total do pedido</span>
+              <span className="font-black text-gray-800 text-base">{fmt(total)}</span>
+            </div>
+            {fee > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">Taxa de entrega</span>
+                <span className="text-sm text-gray-600">{fmt(fee)}</span>
+              </div>
+            )}
+            {gain > 0 && (
+              <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                <span className="text-sm font-semibold text-green-600">Seu ganho</span>
+                <span className="font-black text-green-700">{fmt(gain)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Forma de pagamento */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Forma de pagamento</p>
+            <div className="grid grid-cols-2 gap-2">
+              {PAY_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => { setMethod(value); setReceived(''); }}
+                  className={`py-3 rounded-xl text-sm font-semibold border-2 transition-colors ${
+                    method === value
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Campos de dinheiro */}
+          {method === 'cash' && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                  Pagamento recebido (R$)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={received}
+                  onChange={(e) => setReceived(e.target.value)}
+                  placeholder={total.toFixed(2)}
+                  className="w-full mt-1 border-2 rounded-xl px-4 py-3 text-xl font-black text-center focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {needTroco && (
+                <div className={`flex justify-between items-center px-4 py-3 rounded-xl border-2 ${
+                  change > 0
+                    ? 'bg-orange-50 border-orange-200'
+                    : recNum === total
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-red-50 border-red-200'
+                }`}>
+                  <div>
+                    <p className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+                      {change > 0 ? '🔄 Precisa de troco' : recNum === total ? '✅ Valor exato' : '⚠️ Valor insuficiente'}
+                    </p>
+                    {change > 0 && (
+                      <p className="text-xs text-gray-500 mt-0.5">Dar de volta ao cliente</p>
+                    )}
+                  </div>
+                  <span className={`font-black text-xl ${
+                    change > 0 ? 'text-orange-700' : recNum === total ? 'text-green-700' : 'text-red-700'
+                  }`}>
+                    {change > 0 ? fmt(change) : recNum === total ? 'Sem troco' : '—'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Botão confirmar */}
+          <button
+            onClick={() => canConfirm && onConfirm(delivery.delivery_id, method)}
+            disabled={!canConfirm}
+            className={`w-full py-4 rounded-xl font-black text-base transition-all ${
+              canConfirm
+                ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg active:scale-95'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {btnLabel}
+          </button>
+        </div>
+
+        {/* Safe area for iOS */}
+        <div className="pb-4" />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// DRIVER MAP TAB
+// ─────────────────────────────────────────────────────────────
+
+function DriverMapTab({ active }) {
+  const [coords, setCoords] = useState({}); // { delivery_id: [lng, lat] }
+  const geocoding = useRef(new Set());
+
+  // Constrói mapa restaurante → cor
+  const restaurants = [...new Set(active.map((d) => d.restaurant_name).filter(Boolean))];
+  const restaurantColor = {};
+  restaurants.forEach((r, i) => {
+    restaurantColor[r] = RESTAURANT_COLORS[i % RESTAURANT_COLORS.length];
+  });
+
+  // Geocodifica endereços
+  useEffect(() => {
+    active.forEach(async (d) => {
+      const key = d.delivery_id;
+      if (coords[key] || geocoding.current.has(key)) return;
+      geocoding.current.add(key);
+      const addr = (d.customer_address || '') + (d.neighborhood ? ', ' + d.neighborhood : '');
+      const c = await geocode(addr);
+      if (c) setCoords((prev) => ({ ...prev, [key]: c }));
+    });
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (active.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+        <span className="text-5xl mb-3">🗺️</span>
+        <p className="text-sm font-medium">Nenhuma entrega ativa no mapa</p>
+        <p className="text-xs text-gray-300 mt-1">Aceite um pedido para ver no mapa</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-3">
+      {/* Legenda restaurantes */}
+      {restaurants.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {restaurants.map((r) => (
+            <span
+              key={r}
+              className="flex items-center gap-1.5 text-xs font-semibold bg-white border rounded-full px-2.5 py-1 shadow-sm"
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ background: restaurantColor[r] }}
+              />
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Mapa */}
+      <div className="rounded-2xl overflow-hidden border border-gray-200 shadow-sm"
+        style={{ height: 'calc(100vh - 260px)', minHeight: 300 }}>
+        <Map center={TORRES_CENTER} zoom={12} theme="light" className="h-full w-full">
+          {active.map((d) => {
+            const c     = coords[d.delivery_id];
+            if (!c) return null;
+            const color = restaurantColor[d.restaurant_name] || '#3b82f6';
+            return (
+              <MapMarker key={d.delivery_id} longitude={c[0]} latitude={c[1]}>
+                <MarkerContent>
+                  <div
+                    className="w-9 h-9 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-xs font-black"
+                    style={{ background: color }}
+                  >
+                    #{d.order_number}
+                  </div>
+                </MarkerContent>
+                <MarkerTooltip>
+                  <div className="text-xs space-y-0.5 min-w-[120px]">
+                    <p className="font-bold text-gray-800">{d.customer_name || 'Cliente'}</p>
+                    <p className="text-gray-600">{d.customer_address}</p>
+                    {d.neighborhood && <p className="text-gray-400">{d.neighborhood}</p>}
+                    <p className="font-semibold mt-1" style={{ color }}>🏪 {d.restaurant_name}</p>
+                    <p className="text-green-600 font-semibold">{fmt(d.total)}</p>
+                  </div>
+                </MarkerTooltip>
+              </MapMarker>
+            );
+          })}
+        </Map>
+      </div>
+
+      {/* Cards abaixo do mapa */}
+      <div className="mt-3 space-y-2">
+        {active.map((d) => {
+          const color = restaurantColor[d.restaurant_name] || '#3b82f6';
+          return (
+            <div
+              key={d.delivery_id}
+              className="bg-white rounded-xl px-3 py-2.5 shadow-sm border-l-4 flex items-center gap-3"
+              style={{ borderLeftColor: color }}
+            >
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0"
+                style={{ background: color }}
+              >
+                #{d.order_number}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800 truncate">{d.customer_name || 'Cliente'}</p>
+                <p className="text-xs text-gray-500 truncate">{d.customer_address}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-xs font-bold text-green-600">{fmt(d.total)}</p>
+                <p className="text-[10px] text-gray-400 capitalize">{d.delivery_status?.replace('_', ' ')}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // LOGIN / REGISTER
 // ─────────────────────────────────────────────────────────────
 
 function AuthScreen({ onLogin }) {
-  const [mode, setMode]     = useState('login');
-  const [form, setForm]     = useState({ name: '', phone: '', email: '', password: '' });
+  const [mode,    setMode]    = useState('login');
+  const [form,    setForm]    = useState({ name: '', phone: '', email: '', password: '' });
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState('');
+  const [error,   setError]   = useState('');
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -127,14 +425,12 @@ function AuthScreen({ onLogin }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-purple-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-6 py-8 text-center">
           <div className="text-5xl mb-2">🛵</div>
           <h1 className="text-2xl font-black text-white">ZapFome Driver</h1>
           <p className="text-blue-200 text-sm mt-1">Painel do Motoboy</p>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b">
           {['login', 'register'].map((m) => (
             <button key={m} onClick={() => setMode(m)}
@@ -177,31 +473,25 @@ function AuthScreen({ onLogin }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// DELIVERY CARD
+// MINI MAP (dentro do card de entrega ativa)
 // ─────────────────────────────────────────────────────────────
 
 function MiniMap({ delivery }) {
-  const [showMap,    setShowMap]    = useState(false);
+  const [showMap,        setShowMap]        = useState(false);
   const [customerCoords, setCustomerCoords] = useState(null);
-  const [route,      setRoute]      = useState(null);
+  const [route,          setRoute]          = useState(null);
 
-  // Restaurant fallback coords (Torres RS center)
   const restaurantCoords = TORRES_CENTER;
 
   useEffect(() => {
-    if (!showMap) return;
-    if (customerCoords) return; // already loaded
+    if (!showMap || customerCoords) return;
     geocode((delivery.customer_address || '') + (delivery.neighborhood ? ', ' + delivery.neighborhood : ''))
-      .then((coords) => {
-        if (coords) setCustomerCoords(coords);
-      });
+      .then((c) => { if (c) setCustomerCoords(c); });
   }, [showMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!showMap || !customerCoords) return;
-    fetchRoute(restaurantCoords, customerCoords).then((r) => {
-      if (r) setRoute(r);
-    });
+    fetchRoute(restaurantCoords, customerCoords).then((r) => { if (r) setRoute(r); });
   }, [showMap, customerCoords]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const destQuery = (delivery.customer_address || delivery.restaurant_name || '') + ', Torres RS';
@@ -219,13 +509,7 @@ function MiniMap({ delivery }) {
 
       {showMap && (
         <div className="rounded-xl overflow-hidden border border-gray-200 mt-1" style={{ height: 200 }}>
-          <Map
-            center={customerCoords ?? restaurantCoords}
-            zoom={customerCoords ? 14 : 12}
-            theme="light"
-            className="h-full w-full"
-          >
-            {/* Restaurant marker */}
+          <Map center={customerCoords ?? restaurantCoords} zoom={customerCoords ? 14 : 12} theme="light" className="h-full w-full">
             <MapMarker longitude={restaurantCoords[0]} latitude={restaurantCoords[1]}>
               <MarkerContent>
                 <div className="w-7 h-7 rounded-full bg-orange-500 border-2 border-white shadow flex items-center justify-center text-sm">🏪</div>
@@ -233,7 +517,6 @@ function MiniMap({ delivery }) {
               <MarkerTooltip>{delivery.restaurant_name}</MarkerTooltip>
             </MapMarker>
 
-            {/* Customer marker */}
             {customerCoords && (
               <MapMarker longitude={customerCoords[0]} latitude={customerCoords[1]}>
                 <MarkerContent>
@@ -243,7 +526,6 @@ function MiniMap({ delivery }) {
               </MapMarker>
             )}
 
-            {/* Route */}
             {route && route.length >= 2 && (
               <MapRoute coordinates={route} color="#2563eb" width={3} opacity={0.8} />
             )}
@@ -267,142 +549,146 @@ function MiniMap({ delivery }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// DELIVERY CARD
+// ─────────────────────────────────────────────────────────────
+
 function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, loading }) {
-  const [expanded, setExpanded] = useState(false);
-  const [payPicker, setPayPicker] = useState(false);
+  const [expanded,     setExpanded]     = useState(false);
+  const [showPayModal, setShowPayModal] = useState(false);
 
   const isPaid  = !!delivery.paid_at || delivery.payment_method === 'pix';
   const dstatus = delivery.delivery_status;
 
-  const openMaps = (label, query) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
-    window.open(url, '_blank');
+  const openMaps = (query) => {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`, '_blank');
+  };
+
+  const handlePayConfirm = async (deliveryId, method) => {
+    setShowPayModal(false);
+    await onPay(deliveryId, method);
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden mb-3">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b bg-gray-50">
-        <div className="flex items-center gap-2">
-          <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded-full">
-            #{delivery.order_number}
-          </span>
-          <span className="text-xs text-gray-500">{delivery.restaurant_name}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {!isPaid && (
-            <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <Icon d={ICONS.alert} size={12} /> COBRAR
-            </span>
-          )}
-          {isPaid && (
-            <span className="text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <Icon d={ICONS.check} size={12} /> PAGO
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="px-4 py-3 space-y-2">
-        {/* Customer */}
-        <div>
-          <p className="font-semibold text-gray-800 text-sm">{delivery.customer_name || 'Cliente'}</p>
-          {delivery.customer_phone && (
-            <a href={`tel:${delivery.customer_phone}`}
-              className="flex items-center gap-1 text-xs text-blue-600">
-              <Icon d={ICONS.phone} size={12} /> {delivery.customer_phone}
-            </a>
-          )}
-        </div>
-
-        {/* Address */}
-        {delivery.customer_address && (
-          <div className="flex items-start gap-1.5 bg-blue-50 rounded-xl px-3 py-2">
-            <Icon d={ICONS.map} size={14} cls="text-blue-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs font-medium text-blue-800">{delivery.customer_address}</p>
-              {delivery.neighborhood && (
-                <p className="text-xs text-blue-600">{delivery.neighborhood}</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Earnings */}
-        <div className="flex items-center justify-between">
-          {type === 'active' && delivery.driver_fee > 0 && (
-            <span className="text-green-700 font-black text-base">
-              Seu ganho: {fmt(delivery.driver_fee)}
-            </span>
-          )}
-          <span className="text-gray-500 text-sm ml-auto">
-            Total pedido: {fmt(delivery.total)}
-          </span>
-        </div>
-
-        {/* Payment info */}
-        <p className="text-xs text-gray-500">
-          Pagamento: {PAY_LABELS[delivery.payment_method] || delivery.payment_method}
-          {delivery.paid_at ? ` · pago` : ' · a cobrar'}
-        </p>
-
-        {/* Notes */}
-        {delivery.notes && (
-          <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1">
-            💬 {delivery.notes}
-          </p>
-        )}
-
-        {/* Mini map — show for active deliveries (accepted or picked_up) */}
-        {type === 'active' && (dstatus === 'accepted' || dstatus === 'picked_up') && (
-          <MiniMap delivery={delivery} />
-        )}
-
-        {/* Items toggle */}
-        {delivery.items?.length > 0 && (
-          <button onClick={() => setExpanded((e) => !e)}
-            className="text-xs text-blue-600 underline">
-            {expanded ? 'Ocultar itens' : `Ver ${delivery.items.length} iten(s)`}
-          </button>
-        )}
-        {expanded && (
-          <ul className="text-xs text-gray-600 space-y-0.5 pl-2 border-l-2 border-blue-200">
-            {delivery.items.map((it, i) => (
-              <li key={i}>{it.quantity}× {it.productName} — {fmt(it.total)}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Pay picker */}
-      {payPicker && (
-        <div className="px-4 pb-3 space-y-2 border-t pt-2 bg-yellow-50">
-          <p className="text-xs font-semibold text-gray-700">Forma de pagamento recebida:</p>
-          <div className="grid grid-cols-2 gap-2">
-            {PAY_OPTIONS.map(({ value, label }) => (
-              <button key={value} onClick={() => { onPay(delivery.delivery_id, value); setPayPicker(false); }}
-                className="py-2 rounded-xl text-xs font-semibold bg-white border hover:bg-green-50 hover:border-green-400 transition-colors">
-                {label}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setPayPicker(false)} className="w-full text-xs text-gray-500 py-1">
-            Cancelar
-          </button>
-        </div>
+    <>
+      {/* Pay Modal */}
+      {showPayModal && (
+        <PayModal
+          delivery={delivery}
+          onConfirm={handlePayConfirm}
+          onClose={() => setShowPayModal(false)}
+        />
       )}
 
-      {/* Actions */}
-      {!payPicker && (
-        <div className="px-4 pb-3 flex gap-2 flex-wrap border-t pt-2">
+      <div className="bg-white rounded-2xl shadow-sm border overflow-hidden mb-3">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b bg-gray-50">
+          <div className="flex items-center gap-2">
+            <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded-full">
+              #{delivery.order_number}
+            </span>
+            <span className="text-xs text-gray-500">{delivery.restaurant_name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {!isPaid && (
+              <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Icon d={ICONS.alert} size={12} /> COBRAR
+              </span>
+            )}
+            {isPaid && (
+              <span className="text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Icon d={ICONS.check} size={12} /> PAGO
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="px-4 py-3 space-y-2">
+          {/* Cliente */}
+          <div>
+            <p className="font-semibold text-gray-800 text-sm">{delivery.customer_name || 'Cliente'}</p>
+            {delivery.customer_phone && (
+              <a href={`tel:${delivery.customer_phone}`}
+                className="flex items-center gap-1 text-xs text-blue-600">
+                <Icon d={ICONS.phone} size={12} /> {delivery.customer_phone}
+              </a>
+            )}
+          </div>
+
+          {/* Endereço */}
+          {delivery.customer_address && (
+            <div className="flex items-start gap-1.5 bg-blue-50 rounded-xl px-3 py-2">
+              <Icon d={ICONS.map} size={14} cls="text-blue-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-blue-800">{delivery.customer_address}</p>
+                {delivery.neighborhood && (
+                  <p className="text-xs text-blue-600">{delivery.neighborhood}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Valores */}
+          <div className="flex items-center justify-between">
+            {type === 'active' && delivery.driver_fee > 0 && (
+              <span className="text-green-700 font-black text-base">
+                Seu ganho: {fmt(delivery.driver_fee)}
+              </span>
+            )}
+            <span className="text-gray-500 text-sm ml-auto">
+              Total: {fmt(delivery.total)}
+            </span>
+          </div>
+
+          {/* Pagamento */}
+          <p className="text-xs text-gray-500">
+            Pagamento: {PAY_LABELS[delivery.payment_method] || delivery.payment_method || '—'}
+            {delivery.paid_at ? ' · pago ✓' : ' · a cobrar'}
+          </p>
+
+          {/* Obs */}
+          {delivery.notes && (
+            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1">
+              💬 {delivery.notes}
+            </p>
+          )}
+
+          {/* Mini mapa (entregas ativas) */}
+          {type === 'active' && (dstatus === 'accepted' || dstatus === 'picked_up') && (
+            <MiniMap delivery={delivery} />
+          )}
+
+          {/* Itens */}
+          {delivery.items?.length > 0 && (
+            <button onClick={() => setExpanded((e) => !e)}
+              className="text-xs text-blue-600 underline">
+              {expanded ? 'Ocultar itens' : `Ver ${delivery.items.length} iten(s)`}
+            </button>
+          )}
+          {expanded && (
+            <ul className="text-xs text-gray-600 space-y-0.5 pl-2 border-l-2 border-blue-200">
+              {delivery.items.map((it, i) => (
+                <li key={i}>{it.quantity}× {it.productName} — {fmt(it.total)}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Ações */}
+        <div className="px-4 pb-4 flex gap-2 flex-wrap border-t pt-3">
           {type === 'available' && (
             <>
-              <button onClick={() => openMaps('restaurante', delivery.restaurant_name + ' Torres RS')}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold border border-blue-300 text-blue-700 hover:bg-blue-50">
+              <button
+                onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-blue-300 text-blue-700 hover:bg-blue-50"
+              >
                 🗺 Ver rota
               </button>
-              <button onClick={() => onAccept(delivery.id)} disabled={loading}
-                className="flex-1 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-purple-700 text-white disabled:opacity-60">
+              <button
+                onClick={() => onAccept(delivery.id)}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-purple-700 text-white disabled:opacity-60"
+              >
                 ✅ Aceitar
               </button>
             </>
@@ -410,12 +696,17 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
 
           {type === 'active' && dstatus === 'accepted' && (
             <>
-              <button onClick={() => openMaps('restaurante', delivery.restaurant_name + ' Torres RS')}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700">
+              <button
+                onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700"
+              >
                 🏪 Ir ao restaurante
               </button>
-              <button onClick={() => onPickup(delivery.delivery_id)} disabled={loading}
-                className="flex-1 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white disabled:opacity-60">
+              <button
+                onClick={() => onPickup(delivery.delivery_id)}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-blue-600 text-white disabled:opacity-60"
+              >
                 📦 Coletei
               </button>
             </>
@@ -423,30 +714,34 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
 
           {type === 'active' && dstatus === 'picked_up' && (
             <>
-              <button onClick={() => openMaps('cliente', delivery.customer_address + ', Torres RS')}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700">
+              <button
+                onClick={() => openMaps((delivery.customer_address || '') + ', Torres RS')}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700"
+              >
                 🗺 Ir ao cliente
               </button>
-              {!isPaid && (
-                <button onClick={() => setPayPicker(true)}
-                  className="flex-1 py-2 rounded-xl text-xs font-bold bg-yellow-500 text-white">
+
+              {!isPaid ? (
+                <button
+                  onClick={() => setShowPayModal(true)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-yellow-500 to-orange-500 text-white"
+                >
                   💰 Cobrar
                 </button>
+              ) : (
+                <button
+                  onClick={() => onComplete(delivery.delivery_id)}
+                  disabled={loading}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-60"
+                >
+                  ✅ Entregue!
+                </button>
               )}
-              <button onClick={() => onComplete(delivery.delivery_id)} disabled={!isPaid || loading}
-                title={!isPaid ? 'Registre o pagamento primeiro' : ''}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${
-                  isPaid
-                    ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}>
-                {isPaid ? '✅ Entregue!' : '🔒 Aguardando pgto'}
-              </button>
             </>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -455,28 +750,30 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
 // ─────────────────────────────────────────────────────────────
 
 export default function DriverApp() {
-  const [token,    setToken]    = useState(() => localStorage.getItem('driverToken'));
-  const [user,     setUser]     = useState(() => {
+  const [token,   setToken]   = useState(() => localStorage.getItem('driverToken'));
+  const [user,    setUser]    = useState(() => {
     try { return JSON.parse(localStorage.getItem('driverUser') || 'null'); } catch { return null; }
   });
 
-  const [tab,      setTab]      = useState('deliveries'); // deliveries | earnings | profile
-  const [subTab,   setSubTab]   = useState('available');  // available | active
-  const [online,   setOnline]   = useState(false);
-  const [available, setAvailable] = useState([]);
-  const [active,   setActive]   = useState([]);
-  const [stats,    setStats]    = useState(null);
-  const [history,  setHistory]  = useState([]);
-  const [profile,  setProfile]  = useState(null);
-  const [loading,  setLoading]  = useState(false);
-  const [sideMenu, setSideMenu] = useState(false);
+  const [tab,          setTab]          = useState('deliveries');
+  const [subTab,       setSubTab]       = useState('available');
+  const [online,       setOnline]       = useState(false);
+  const [available,    setAvailable]    = useState([]);
+  const [active,       setActive]       = useState([]);
+  const [stats,        setStats]        = useState(null);
+  const [history,      setHistory]      = useState([]);
+  const [profile,      setProfile]      = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [sideMenu,     setSideMenu]     = useState(false);
   const [connectModal, setConnectModal] = useState(false);
   const [connectToken, setConnectToken] = useState('');
   const [connectMsg,   setConnectMsg]   = useState('');
-  const [error,    setError]    = useState('');
-  const pollRef           = useRef(null);
-  const socketRef         = useRef(null);
-  const locationWatchRef  = useRef(null);
+  const [error,        setError]        = useState('');
+  const [acceptToast,  setAcceptToast]  = useState(null); // { orderNumber }
+
+  const pollRef          = useRef(null);
+  const socketRef        = useRef(null);
+  const locationWatchRef = useRef(null);
 
   // ── Fetch ───────────────────────────────────────────────────
 
@@ -515,13 +812,11 @@ export default function DriverApp() {
     } catch {}
   }, [token]);
 
-  // Carrega perfil (inclui restaurantes) no login e ao trocar de aba
   useEffect(() => {
     if (!token) return;
-    fetchProfile(); // sempre ao montar / logar
+    fetchProfile();
   }, [token, fetchProfile]);
 
-  // Polling a cada 15s quando online
   useEffect(() => {
     if (!token) return;
     fetchDeliveries();
@@ -536,7 +831,7 @@ export default function DriverApp() {
     if (tab === 'profile')  fetchProfile();
   }, [tab, fetchStats, fetchProfile]);
 
-  // ── Socket.io connection ─────────────────────────────────────
+  // ── Socket.io ────────────────────────────────────────────────
   useEffect(() => {
     if (!token) return;
 
@@ -545,66 +840,44 @@ export default function DriverApp() {
       transports: ['websocket', 'polling'],
     });
 
-    socket.on('connect', () => {
-      // No-op — driver is already in their own room via server auth
-    });
-
     socket.on('delivery:new', (order) => {
-      // Prepend to available list, dedup by id
       setAvailable((prev) => {
         if (prev.some((d) => d.id === order.id)) return prev;
         return [order, ...prev];
       });
     });
 
-    // Restaurante atribuiu este motoboy a um pedido → atualiza ativas imediatamente
     socket.on('delivery:assigned', () => {
       fetchDeliveries();
       setSubTab('active');
     });
 
-    socket.on('disconnect', () => {
-      // Will reconnect automatically
-    });
-
     socketRef.current = socket;
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
+    return () => { socket.disconnect(); socketRef.current = null; };
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Actions ─────────────────────────────────────────────────
+  // ── Actions ──────────────────────────────────────────────────
 
   const toggleOnline = async () => {
     const goingOnline = !online;
-    const newStatus   = goingOnline ? 'available' : 'offline';
     try {
-      await http('PUT', '/status', { status: newStatus }, token);
+      await http('PUT', '/status', { status: goingOnline ? 'available' : 'offline' }, token);
       setOnline(goingOnline);
-
       if (goingOnline) {
-        // Start GPS watch
         if ('geolocation' in navigator) {
           locationWatchRef.current = navigator.geolocation.watchPosition(
             (pos) => {
-              const lat = pos.coords.latitude;
-              const lng = pos.coords.longitude;
-              // Emit via socket for real-time
-              if (socketRef.current?.connected) {
+              const { latitude: lat, longitude: lng } = pos.coords;
+              socketRef.current?.connected &&
                 socketRef.current.emit('driver:location', { lat, lng });
-              }
-              // Also persist to DB
               http('PUT', '/location', { lat, lng }, token).catch(() => {});
             },
-            () => { /* GPS error — non-fatal */ },
+            () => {},
             { enableHighAccuracy: true, maximumAge: 5_000 },
           );
         }
         fetchDeliveries();
       } else {
-        // Stop GPS watch
         if (locationWatchRef.current != null) {
           navigator.geolocation.clearWatch(locationWatchRef.current);
           locationWatchRef.current = null;
@@ -616,9 +889,11 @@ export default function DriverApp() {
   const handleAccept = async (orderId) => {
     setLoading(true);
     try {
+      const found = available.find((d) => d.id === orderId);
       await http('POST', `/deliveries/${orderId}/accept`, {}, token);
       await fetchDeliveries();
       setSubTab('active');
+      setAcceptToast({ orderNumber: found?.order_number });
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   };
@@ -657,18 +932,12 @@ export default function DriverApp() {
       setConnectMsg(`✅ Conectado a: ${data.restaurantName}`);
       setConnectToken('');
       fetchProfile();
-    } catch (err) {
-      setConnectMsg(`❌ ${err.message}`);
-    }
+    } catch (err) { setConnectMsg(`❌ ${err.message}`); }
   };
 
-  const handleLogin = (tok, usr) => {
-    setToken(tok);
-    setUser(usr);
-  };
+  const handleLogin = (tok, usr) => { setToken(tok); setUser(usr); };
 
   const handleLogout = () => {
-    // Stop GPS if active
     if (locationWatchRef.current != null) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
       locationWatchRef.current = null;
@@ -679,15 +948,23 @@ export default function DriverApp() {
     setUser(null);
   };
 
-  // ── Auth guard ──────────────────────────────────────────────
-
   if (!token || !user) return <AuthScreen onLogin={handleLogin} />;
+
+  const totalBadge = active.length + available.length;
 
   // ─────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col max-w-md mx-auto relative">
+
+      {/* Accept toast */}
+      {acceptToast && (
+        <AcceptToast
+          orderNumber={acceptToast.orderNumber}
+          onDone={() => setAcceptToast(null)}
+        />
+      )}
 
       {/* Side menu backdrop */}
       {sideMenu && (
@@ -750,7 +1027,7 @@ export default function DriverApp() {
       )}
 
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-4 py-3 flex items-center justify-between">
+      <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-3">
           <button onClick={() => setSideMenu(true)} className="text-white">
             <Icon d={ICONS.menu} size={22} />
@@ -787,7 +1064,7 @@ export default function DriverApp() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto pb-20">
 
-        {/* ── Deliveries ── */}
+        {/* ── Entregas ── */}
         {tab === 'deliveries' && (
           <div>
             {/* Restaurantes conectados */}
@@ -853,7 +1130,18 @@ export default function DriverApp() {
           </div>
         )}
 
-        {/* ── Earnings ── */}
+        {/* ── Mapa ── */}
+        {tab === 'map' && (
+          <div>
+            <div className="px-4 pt-4 pb-2">
+              <h2 className="text-base font-black text-gray-800">Mapa de Entregas</h2>
+              <p className="text-xs text-gray-500">Entregas ativas · cores por restaurante</p>
+            </div>
+            <DriverMapTab active={active} profile={profile} />
+          </div>
+        )}
+
+        {/* ── Ganhos ── */}
         {tab === 'earnings' && (
           <div className="p-4 space-y-4">
             {stats && (
@@ -865,7 +1153,7 @@ export default function DriverApp() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: '7 dias', earnings: stats.week_earnings,  count: stats.week_count },
+                    { label: '7 dias',  earnings: stats.week_earnings,  count: stats.week_count },
                     { label: '30 dias', earnings: stats.month_earnings, count: stats.month_count },
                   ].map(({ label, earnings, count }) => (
                     <div key={label} className="bg-white rounded-2xl p-4 shadow-sm">
@@ -900,7 +1188,7 @@ export default function DriverApp() {
           </div>
         )}
 
-        {/* ── Profile ── */}
+        {/* ── Perfil ── */}
         {tab === 'profile' && (
           <div className="p-4 space-y-4">
             <div className="bg-white rounded-2xl shadow-sm p-5 flex items-center gap-4">
@@ -947,9 +1235,10 @@ export default function DriverApp() {
       </div>
 
       {/* Bottom nav */}
-      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t shadow-lg flex">
+      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t shadow-lg flex z-30">
         {[
-          { k: 'deliveries', icon: ICONS.pkg,   label: 'Entregas', badge: active.length + available.length },
+          { k: 'deliveries', icon: ICONS.pkg,    label: 'Entregas', badge: totalBadge },
+          { k: 'map',        icon: ICONS.mapTab,  label: 'Mapa',     badge: active.length },
           { k: 'earnings',   icon: ICONS.money,  label: 'Ganhos' },
           { k: 'profile',    icon: ICONS.user,   label: 'Perfil' },
         ].map(({ k, icon, label, badge }) => (
