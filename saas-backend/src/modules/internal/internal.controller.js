@@ -3,9 +3,11 @@
  * Internal Controller — Rotas chamadas pelo AI Engine (VPS2)
  * Auth: X-Internal-Key header
  */
-const asyncHandler = require('../../utils/asyncHandler');
-const db = require('../../config/database');
-const AppError = require('../../utils/AppError');
+const asyncHandler    = require('../../utils/asyncHandler');
+const db              = require('../../config/database');
+const AppError        = require('../../utils/AppError');
+const orderService    = require('../orders/orders.service');
+const eventService    = require('../../socket/eventService');
 
 // ── Tenants ────────────────────────────────────────────────────────
 
@@ -282,10 +284,59 @@ const sendWhatsAppMedia = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { sent: true } });
 });
 
+// ── Orders from WhatsApp ──────────────────────────────────────
+
+/**
+ * POST /api/internal/orders/from-whatsapp
+ * Cria pedido recebido pelo agente WhatsApp.
+ * Body: {
+ *   customerName, customerPhone, customerAddress?,
+ *   deliveryType ('delivery'|'pickup'), paymentMethod,
+ *   reference?, notes?,
+ *   items: [{ productId, quantity }]
+ * }
+ */
+const createOrderFromWhatsApp = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+
+  const {
+    customerName, customerPhone, customerAddress,
+    deliveryType = 'pickup', paymentMethod = 'cash',
+    reference, notes, items,
+  } = req.body;
+
+  if (!customerName?.trim())  throw new AppError('customerName obrigatório', 400);
+  if (!items?.length)         throw new AppError('items[] obrigatório', 400);
+
+  const notesComposed = [
+    reference ? `Referência: ${reference}` : null,
+    notes || null,
+    'Pedido via WhatsApp',
+  ].filter(Boolean).join(' | ');
+
+  const order = await orderService.createOrder(req.tenantId, {
+    customerName:    customerName.trim(),
+    customerPhone:   customerPhone || null,
+    customerAddress: customerAddress || null,
+    channel:         'whatsapp',
+    deliveryType,
+    paymentMethod,
+    notes:           notesComposed,
+    items,
+    initialStatus:   'pending',
+    idempotencyKey:  `wa:${req.tenantId}:${customerPhone}:${Date.now()}`,
+  });
+
+  // Notifica o painel em tempo real
+  eventService.orderCreated(req.tenantId, order);
+
+  res.status(201).json({ success: true, data: order });
+});
+
 module.exports = {
   getTenant, getAllTenants, getSuperStats,
   getProducts, getOrdersSummary,
   getFinancialSummary, createTransaction,
   bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
-  getOrdersByPhone,
+  getOrdersByPhone, createOrderFromWhatsApp,
 };

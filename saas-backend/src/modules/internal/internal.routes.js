@@ -16,8 +16,9 @@ router.get('/products',            ctrl.getProducts);
 router.post('/stock/bulk-update',  ctrl.bulkUpdateStock);
 
 // Orders
-router.get('/orders/summary',      ctrl.getOrdersSummary);
-router.get('/orders/by-phone',     ctrl.getOrdersByPhone);
+router.get('/orders/summary',            ctrl.getOrdersSummary);
+router.get('/orders/by-phone',           ctrl.getOrdersByPhone);
+router.post('/orders/from-whatsapp',     ctrl.createOrderFromWhatsApp);
 
 // Financial
 router.get('/financial/summary',   ctrl.getFinancialSummary);
