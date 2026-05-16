@@ -24,6 +24,7 @@ const itemRules = [
 
 router.get('/transitions/:status',  ctrl.transitions);
 router.get('/customers',            ctrl.searchCustomers);
+router.post('/customers',           ctrl.createCustomer);
 router.get('/',                     ctrl.list);
 router.post('/',                    checkOrderLimit, itemRules, ctrl.create);
 router.get('/:id',                  ctrl.getOne);

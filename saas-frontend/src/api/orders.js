@@ -16,8 +16,11 @@ export const updateOrderStatus = (id, status) =>
 export const cancelOrder = (id) =>
   api.patch(`/orders/${id}/status`, { status: 'cancelled' });
 
-export const searchCustomers = (q) =>
-  api.get('/orders/customers', { params: { q } });
+export const searchCustomers = (q, limit) =>
+  api.get('/orders/customers', { params: { q, ...(limit ? { limit } : {}) } });
+
+export const createCustomer = (payload) =>
+  api.post('/orders/customers', payload);
 
 /** Registra pagamento de um pedido (paid_at + payment_method). */
 export const markOrderPaid = (id, paymentMethod) =>

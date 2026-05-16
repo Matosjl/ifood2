@@ -32,6 +32,15 @@ module.exports = {
   // Super Admin
   SUPER_ADMIN_KEY: process.env.SUPER_ADMIN_KEY || 'change-me-super-secret-key',
 
+  // AI Engine (VPS2)
+  VPS2_URL:         process.env.VPS2_URL         || 'http://69.10.43.169:3001',
+  AI_ENGINE_KEY:    process.env.AI_ENGINE_KEY    || '',  // chave para chamar VPS2
+  INTERNAL_KEY:     process.env.INTERNAL_KEY     || '',  // chave que VPS2 usa para chamar VPS1
+
+  // Evolution API
+  EVOLUTION_API_URL: process.env.EVOLUTION_API_URL || 'http://localhost:8080',
+  EVOLUTION_API_KEY: process.env.EVOLUTION_API_KEY || '',
+
   isDev:  () => process.env.NODE_ENV !== 'production',
   isProd: () => process.env.NODE_ENV === 'production',
 };

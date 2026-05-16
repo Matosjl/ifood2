@@ -407,3 +407,21 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_tenant      ON deliveries(tenant_id);
 -- Garante 1 entrega ativa por pedido, mas permite recriar após cancelamento
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_order_active
   ON deliveries(order_id) WHERE status != 'cancelled';
+
+-- ── Clientes manuais (cadastro independente de pedidos) ──────────
+CREATE TABLE IF NOT EXISTS tenant_clients (
+  id         UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id  UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name       TEXT        NOT NULL,
+  phone      TEXT,
+  address    TEXT,
+  coords     JSONB,
+  notes      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_clients_phone
+  ON tenant_clients(tenant_id, lower(phone))
+  WHERE phone IS NOT NULL AND phone <> '';
+CREATE INDEX IF NOT EXISTS idx_tenant_clients_tenant
+  ON tenant_clients(tenant_id);

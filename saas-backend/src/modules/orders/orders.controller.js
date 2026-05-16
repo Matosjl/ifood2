@@ -7,6 +7,7 @@ const asyncHandler         = require('../../utils/asyncHandler');
 const AppError             = require('../../utils/AppError');
 const db                   = require('../../config/database');
 const eventService         = require('../../socket/eventService');
+const waNotify             = require('../../services/waNotify.service');
 
 const handleValidation = (req) => {
   const errors = validationResult(req);
@@ -106,6 +107,12 @@ const updateStatus = asyncHandler(async (req, res) => {
   const order = await service.updateStatus(req.params.id, req.user.tenantId, status);
   if (!order) throw new AppError('Pedido nao encontrado.', 404);
 
+  // Notifica todos os clientes conectados (evita estado dessincronizado no frontend)
+  eventService.orderUpdated(req.user.tenantId, order);
+
+  // Envia notificação WhatsApp ao cliente (fire-and-forget)
+  waNotify.notifyCustomer(req.user.tenantId, order).catch(() => {});
+
   res.json({ success: true, data: order });
 });
 
@@ -147,23 +154,105 @@ const updateItems = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order });
 });
 
-/** GET /api/orders/customers?q=... — busca clientes pelo histórico */
+/** GET /api/orders/customers?q=...&limit=N — busca clientes (pedidos + cadastro manual) */
 const searchCustomers = asyncHandler(async (req, res) => {
-  const q = (req.query.q ?? '').trim();
-  if (!q) return res.json({ success: true, data: [] });
+  const q     = (req.query.q ?? '').trim();
+  const limit = Math.min(parseInt(req.query.limit ?? '200', 10) || 200, 500);
+  const db    = require('../../config/database');
 
-  const { rows } = await require('../../config/database').query(
-    `SELECT DISTINCT ON (lower(customer_name), customer_phone)
-            customer_name, customer_phone, customer_address
-     FROM   orders
-     WHERE  tenant_id = $1
-       AND  (customer_name ILIKE $2 OR customer_phone ILIKE $2)
-       AND  customer_name IS NOT NULL
-     ORDER  BY lower(customer_name), customer_phone, created_at DESC
-     LIMIT  8`,
-    [req.user.tenantId, `%${q}%`]
-  );
+  const params = [req.user.tenantId];
+  let orderFilter  = '';
+  let manualFilter = '';
+  if (q) {
+    params.push(`%${q}%`);
+    orderFilter  = `AND (customer_name ILIKE $2 OR customer_phone ILIKE $2)`;
+    manualFilter = `AND (tc.name ILIKE $2 OR tc.phone ILIKE $2)`;
+  }
+  params.push(limit);
+  const limitParam = `$${params.length}`;
+
+  const sql = `
+    WITH ranked_orders AS (
+      SELECT customer_name, customer_phone, customer_address, total, created_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY lower(customer_name), customer_phone
+               ORDER BY created_at DESC
+             ) AS rn
+      FROM   orders
+      WHERE  tenant_id = $1
+        AND  customer_name IS NOT NULL
+        ${orderFilter}
+    ),
+    order_agg AS (
+      SELECT customer_name        AS name,
+             customer_phone       AS phone,
+             MAX(CASE WHEN rn = 1 THEN customer_address END) AS address,
+             COUNT(*)::int        AS order_count,
+             MAX(created_at)      AS last_order_date,
+             SUM(total)::numeric  AS total_spent,
+             NULL::uuid           AS client_id
+      FROM   ranked_orders
+      GROUP  BY customer_name, customer_phone
+    ),
+    manual_only AS (
+      SELECT tc.name, tc.phone, tc.address,
+             0::int              AS order_count,
+             NULL::timestamptz   AS last_order_date,
+             0::numeric          AS total_spent,
+             tc.id               AS client_id
+      FROM   tenant_clients tc
+      WHERE  tc.tenant_id = $1
+        ${manualFilter}
+        AND NOT EXISTS (
+          SELECT 1 FROM order_agg oa
+          WHERE (tc.phone IS NOT NULL AND tc.phone <> ''
+                 AND lower(oa.phone) = lower(tc.phone))
+             OR (tc.phone IS NULL OR tc.phone = '')
+                 AND lower(oa.name) = lower(tc.name)
+        )
+    )
+    SELECT * FROM order_agg
+    UNION ALL
+    SELECT * FROM manual_only
+    ORDER BY last_order_date DESC NULLS LAST, name ASC
+    LIMIT ${limitParam}
+  `;
+
+  const { rows } = await db.query(sql, params);
   res.json({ success: true, data: rows });
+});
+
+/** POST /api/orders/customers — cadastra cliente manualmente */
+const createCustomer = asyncHandler(async (req, res) => {
+  const { name, phone, address, coords, notes } = req.body;
+  if (!name?.trim()) throw new AppError('Nome é obrigatório.', 400);
+
+  const db = require('../../config/database');
+
+  if (phone?.trim()) {
+    const { rows: dup } = await db.query(
+      `SELECT id FROM tenant_clients
+       WHERE  tenant_id = $1 AND lower(phone) = lower($2) LIMIT 1`,
+      [req.user.tenantId, phone.trim()]
+    );
+    if (dup.length) throw new AppError('Já existe um cliente com esse telefone.', 409);
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO tenant_clients (tenant_id, name, phone, address, coords, notes)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+     RETURNING *`,
+    [
+      req.user.tenantId,
+      name.trim(),
+      phone?.trim() || null,
+      address?.trim() || null,
+      coords ? JSON.stringify(coords) : null,
+      notes?.trim() || null,
+    ]
+  );
+
+  res.status(201).json({ success: true, data: rows[0] });
 });
 
 /**
@@ -187,4 +276,4 @@ const updateInfo = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, setPaid, updateItems, updateInfo };
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, createCustomer, setPaid, updateItems, updateInfo };

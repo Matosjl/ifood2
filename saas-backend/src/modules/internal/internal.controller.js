@@ -1,0 +1,291 @@
+'use strict';
+/**
+ * Internal Controller — Rotas chamadas pelo AI Engine (VPS2)
+ * Auth: X-Internal-Key header
+ */
+const asyncHandler = require('../../utils/asyncHandler');
+const db = require('../../config/database');
+const AppError = require('../../utils/AppError');
+
+// ── Tenants ────────────────────────────────────────────────────────
+
+/** GET /api/internal/tenants/:tenantId */
+const getTenant = asyncHandler(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT id, name, plan, active, subscription_status, created_at
+     FROM tenants WHERE id = $1`,
+    [req.params.tenantId]
+  );
+  if (!rows.length) throw new AppError('Tenant não encontrado', 404);
+  res.json({ success: true, data: rows[0] });
+});
+
+/** GET /api/internal/super/tenants */
+const getAllTenants = asyncHandler(async (_req, res) => {
+  const { rows } = await db.query(
+    `SELECT id, name, plan, active, subscription_status, created_at
+     FROM tenants ORDER BY created_at DESC`
+  );
+  res.json({ success: true, data: rows });
+});
+
+/** GET /api/internal/super/stats */
+const getSuperStats = asyncHandler(async (_req, res) => {
+  const { rows } = await db.query(`
+    SELECT
+      COUNT(*)                                            AS total_tenants,
+      COUNT(*) FILTER (WHERE active = TRUE)              AS active_tenants,
+      COUNT(*) FILTER (WHERE plan = 'pro')               AS pro_tenants,
+      COUNT(*) FILTER (WHERE plan = 'basic')             AS basic_tenants,
+      COUNT(*) FILTER (WHERE plan = 'starter')           AS starter_tenants
+    FROM tenants
+  `);
+  const { rows: mrr } = await db.query(`
+    SELECT COALESCE(SUM(
+      CASE WHEN plan = 'pro'     THEN 197
+           WHEN plan = 'basic'   THEN 97
+           WHEN plan = 'starter' THEN 47
+           ELSE 0 END
+    ), 0) AS mrr_brl
+    FROM tenants WHERE active = TRUE
+  `);
+  res.json({
+    success: true,
+    data: { ...rows[0], mrr_brl: parseFloat(mrr[0].mrr_brl) },
+  });
+});
+
+// ── Products ───────────────────────────────────────────────────────
+
+/** GET /api/internal/products (X-Tenant-Id required) */
+const getProducts = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { rows } = await db.query(
+    `SELECT p.id, p.name, p.sale_price AS price, p.stock_qty AS stock, p.active AS available,
+            c.name AS category
+     FROM products p
+     LEFT JOIN categories c ON p.category_id = c.id
+     WHERE p.tenant_id = $1 AND p.active = TRUE
+     ORDER BY c.name, p.name`,
+    [req.tenantId]
+  );
+  res.json({ success: true, data: rows });
+});
+
+// ── Orders ─────────────────────────────────────────────────────────
+
+/** GET /api/internal/orders/summary */
+const getOrdersSummary = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const days = parseInt(req.query.days) || 7;
+  const { rows } = await db.query(`
+    SELECT
+      COUNT(*)                               AS total_orders,
+      COUNT(*) FILTER (WHERE status = 'delivered') AS delivered_orders,
+      COALESCE(SUM(total), 0)                AS total_revenue,
+      COALESCE(AVG(total), 0)                AS avg_ticket,
+      DATE(created_at)                       AS day
+    FROM orders
+    WHERE tenant_id = $1
+      AND created_at >= NOW() - ($2 || ' days')::INTERVAL
+    GROUP BY DATE(created_at)
+    ORDER BY day
+  `, [req.tenantId, days]);
+
+  const totals = rows.reduce((acc, r) => ({
+    totalOrders:   acc.totalOrders   + parseInt(r.total_orders),
+    totalRevenue:  acc.totalRevenue  + parseFloat(r.total_revenue),
+  }), { totalOrders: 0, totalRevenue: 0 });
+
+  res.json({ success: true, data: { ...totals, byDay: rows } });
+});
+
+// ── Financial ─────────────────────────────────────────────────────
+
+/** GET /api/internal/financial/summary */
+const getFinancialSummary = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const period = req.query.period || 'month';
+  const interval = period === 'day' ? '1 day' : period === 'week' ? '7 days' : '30 days';
+
+  // Receitas = orders entregues; Despesas = expenses
+  const { rows: rev } = await db.query(`
+    SELECT COALESCE(SUM(total), 0) AS receitas
+    FROM orders
+    WHERE tenant_id = $1 AND status = 'delivered'
+      AND created_at >= NOW() - $2::INTERVAL
+  `, [req.tenantId, interval]);
+
+  const { rows: exp } = await db.query(`
+    SELECT COALESCE(SUM(amount), 0) AS despesas
+    FROM expenses
+    WHERE tenant_id = $1
+      AND created_at >= NOW() - $2::INTERVAL
+  `, [req.tenantId, interval]);
+
+  const receitas = parseFloat(rev[0].receitas);
+  const despesas = parseFloat(exp[0].despesas);
+  res.json({ success: true, data: { receitas, despesas, lucro: receitas - despesas, period } });
+});
+
+/** POST /api/internal/financial/transactions — cria despesa via WhatsApp */
+const createTransaction = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { type, amount, category, description, date } = req.body;
+
+  if (type !== 'EXPENSE') {
+    return res.status(201).json({ success: true, data: { skipped: true, reason: 'Receitas são registradas via pedidos' } });
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO expenses (tenant_id, name, category, amount, payment_method, due_date, status)
+     VALUES ($1, $2, $3, $4, 'pix', $5, 'paid')
+     RETURNING *`,
+    [req.tenantId, description || category, category || 'other', amount, date || new Date()]
+  );
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
+// ── Stock ─────────────────────────────────────────────────────────
+
+/** POST /api/internal/stock/bulk-update */
+const bulkUpdateStock = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { items } = req.body;
+  if (!Array.isArray(items) || !items.length) throw new AppError('items[] obrigatório', 400);
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const updated = [];
+
+    for (const item of items) {
+      const { name, qty } = item;
+      if (!name || !qty) continue;
+
+      // Tenta encontrar produto por nome (busca aproximada)
+      const { rows } = await client.query(
+        `UPDATE products
+         SET stock_qty = stock_qty + $1, updated_at = NOW()
+         WHERE tenant_id = $2 AND LOWER(name) LIKE LOWER($3)
+         RETURNING id, name, stock_qty`,
+        [qty, req.tenantId, `%${name}%`]
+      );
+      if (rows.length) updated.push(...rows);
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, data: { updated: updated.length, items: updated } });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+/** GET /api/internal/orders/by-phone?phone=xxx — pedidos recentes do cliente */
+const getOrdersByPhone = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const rawPhone = (req.query.phone || '').replace(/\D/g, '');
+  if (!rawPhone) throw new AppError('phone obrigatório', 400);
+
+  // Gera variantes (8/9 dígitos) para cobrir diferenças de formatação
+  const variants = new Set([rawPhone]);
+  if (rawPhone.length === 13) {
+    // 55 + DDD(2) + 9dígitos → tenta sem o 9
+    variants.add(rawPhone.slice(0, 4) + rawPhone.slice(5));
+  } else if (rawPhone.length === 12) {
+    // 55 + DDD(2) + 8dígitos → tenta com o 9
+    variants.add(rawPhone.slice(0, 4) + '9' + rawPhone.slice(4));
+  }
+  const placeholders = [...variants].map((_, i) => `$${i + 2}`).join(',');
+
+  const { rows } = await db.query(
+    `SELECT id, order_number, status, total, customer_name,
+            customer_phone, delivery_type, created_at
+     FROM   orders
+     WHERE  tenant_id = $1
+       AND  customer_phone = ANY(ARRAY[${placeholders}])
+       AND  created_at >= NOW() - INTERVAL '24 hours'
+     ORDER  BY created_at DESC
+     LIMIT  3`,
+    [req.tenantId, ...[...variants]]
+  );
+  res.json({ success: true, data: rows });
+});
+
+// ── WhatsApp ──────────────────────────────────────────────────────
+
+/** POST /api/internal/whatsapp/send */
+const sendWhatsApp = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { phone, message, evolutionInstance } = req.body;
+  if (!phone || !message) throw new AppError('phone e message obrigatórios', 400);
+
+  // Usa instância fornecida pelo AI Engine (preferencial) ou busca no banco
+  let instance = evolutionInstance || null;
+
+  if (!instance) {
+    // Fallback: tenta buscar instância configurada no tenant
+    const { rows } = await db.query(
+      `SELECT whatsapp_instance FROM tenants WHERE id = $1`,
+      [req.tenantId]
+    );
+    instance = rows[0]?.whatsapp_instance || null;
+  }
+
+  if (!instance) {
+    return res.json({ success: true, data: { sent: false, reason: 'Instância WhatsApp não configurada' } });
+  }
+
+  // Chama Evolution API diretamente
+  const axios = require('axios');
+  const env   = require('../../config/env');
+  await axios.post(
+    `${env.EVOLUTION_API_URL}/message/sendText/${instance}`,
+    { number: phone, text: message },
+    { headers: { apikey: env.EVOLUTION_API_KEY }, timeout: 10000 }
+  );
+
+  res.json({ success: true, data: { sent: true, phone, instance } });
+});
+
+/** POST /api/internal/whatsapp/send-media — envia imagem/mídia */
+const sendWhatsAppMedia = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { phone, base64, caption = '', mimeType = 'image/jpeg', evolutionInstance } = req.body;
+  if (!phone || !base64) throw new AppError('phone e base64 obrigatórios', 400);
+
+  let instance = evolutionInstance || null;
+  if (!instance) {
+    const { rows } = await db.query(`SELECT whatsapp_instance FROM tenants WHERE id = $1`, [req.tenantId]);
+    instance = rows[0]?.whatsapp_instance || null;
+  }
+  if (!instance) return res.json({ success: true, data: { sent: false, reason: 'Instância não configurada' } });
+
+  const axios = require('axios');
+  const env   = require('../../config/env');
+
+  // Evolution API v2: sendMedia endpoint
+  await axios.post(
+    `${env.EVOLUTION_API_URL}/message/sendMedia/${instance}`,
+    {
+      number:   phone,
+      mediatype: mimeType.startsWith('image') ? 'image' : 'document',
+      media:    base64,
+      caption:  caption,
+    },
+    { headers: { apikey: env.EVOLUTION_API_KEY }, timeout: 15000 }
+  );
+
+  res.json({ success: true, data: { sent: true } });
+});
+
+module.exports = {
+  getTenant, getAllTenants, getSuperStats,
+  getProducts, getOrdersSummary,
+  getFinancialSummary, createTransaction,
+  bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
+  getOrdersByPhone,
+};
