@@ -219,34 +219,43 @@ export function printOrder(order) {
 
 </body></html>`;
 
-  // ── Impressão via iframe oculto (sem abrir nova aba) ──────────
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:58mm;height:1px;border:none;visibility:hidden;';
-  document.body.appendChild(iframe);
+  // ── Impressão via window.open (mais confiável que iframe) ───────
+  const w = window.open('', '_blank', 'width=300,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
 
-  const doc = iframe.contentDocument || iframe.contentWindow.document;
-  doc.open();
-  doc.write(html);
-  doc.close();
+  if (!w) {
+    // Popup bloqueado — fallback: baixa como arquivo HTML
+    const blob = new Blob([html], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `pedido-${order.orderNumber ?? order.order_number}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return false;
+  }
 
-  let printed = false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 
-  const doPrint = () => {
-    if (printed) return;
-    printed = true;
-    try {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-    } catch (e) {
-      console.warn('[print] erro:', e);
-    }
+  // Aguarda carregar e imprime
+  w.onload = () => {
     setTimeout(() => {
-      if (document.body.contains(iframe)) document.body.removeChild(iframe);
-    }, 4000);
+      w.focus();
+      w.print();
+      // Fecha a janela após impressão
+      setTimeout(() => { try { w.close(); } catch(e){} }, 2000);
+    }, 300);
   };
 
-  iframe.onload = () => doPrint();
-  setTimeout(doPrint, 800);
+  // Fallback caso onload não dispare
+  setTimeout(() => {
+    if (!w.closed) {
+      w.focus();
+      w.print();
+      setTimeout(() => { try { w.close(); } catch(e){} }, 2000);
+    }
+  }, 1000);
 
   return true;
 }
