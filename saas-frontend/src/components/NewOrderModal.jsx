@@ -11,7 +11,7 @@ import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
 
-// Reverse-geocode [lng, lat] → { road, number, suburb } via Nominatim
+// Reverse-geocode [lng, lat] → { road, number, suburb, allSuburbs[] } via Nominatim
 async function reverseGeocode(lng, lat) {
   try {
     const res  = await fetch(
@@ -20,12 +20,49 @@ async function reverseGeocode(lng, lat) {
     );
     const data = await res.json();
     const addr = data.address ?? {};
+    // Coleta todos os campos geográficos possíveis para matching de bairro
+    const allSuburbs = [
+      addr.suburb, addr.neighbourhood, addr.quarter, addr.city_district,
+      addr.district, addr.borough, addr.county, addr.town, addr.village,
+      addr.municipality, addr.state_district,
+    ].filter(Boolean);
     return {
-      road:   addr.road ?? addr.pedestrian ?? addr.path ?? addr.footway ?? '',
-      number: addr.house_number ?? '',
-      suburb: addr.suburb ?? addr.neighbourhood ?? addr.quarter ?? addr.city_district ?? '',
+      road:       addr.road ?? addr.pedestrian ?? addr.path ?? addr.footway ?? addr.street ?? '',
+      number:     addr.house_number ?? '',
+      suburb:     allSuburbs[0] ?? '',
+      allSuburbs,
+      displayName: data.display_name ?? '',
     };
-  } catch { return { road: '', number: '', suburb: '' }; }
+  } catch { return { road: '', number: '', suburb: '', allSuburbs: [], displayName: '' }; }
+}
+
+// Forward-geocode: busca endereço por texto → [{ display, lat, lng, road, number, suburb, allSuburbs }]
+async function forwardGeocode(query) {
+  if (!query || query.length < 4) return [];
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&accept-language=pt-BR&addressdetails=1`,
+      { headers: { 'Accept-Language': 'pt-BR' } }
+    );
+    const results = await res.json();
+    return results.map((r) => {
+      const addr = r.address ?? {};
+      const allSuburbs = [
+        addr.suburb, addr.neighbourhood, addr.quarter, addr.city_district,
+        addr.district, addr.borough, addr.county, addr.town, addr.village,
+        addr.municipality,
+      ].filter(Boolean);
+      return {
+        display:     r.display_name,
+        lat:         parseFloat(r.lat),
+        lng:         parseFloat(r.lon),
+        road:        addr.road ?? addr.pedestrian ?? addr.street ?? '',
+        number:      addr.house_number ?? '',
+        suburb:      allSuburbs[0] ?? '',
+        allSuburbs,
+      };
+    });
+  } catch { return []; }
 }
 
 // ── Map address picker (overlay dentro do modal) ──────────────
@@ -33,12 +70,17 @@ async function reverseGeocode(lng, lat) {
 const CITY_CENTER = [-49.7802, -29.3965]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
 
 function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
-  const [markerPos,   setMarkerPos]   = useState(CITY_CENTER);
-  const [loading,     setLoading]     = useState(false);
-  const [previewRoad, setPreviewRoad] = useState(initialStreet || '');
-  const [previewNum,  setPreviewNum]  = useState('');
-  const [previewSub,  setPreviewSub]  = useState('');
-  const mapRef = useRef(null);
+  const [markerPos,    setMarkerPos]    = useState(CITY_CENTER);
+  const [loading,      setLoading]      = useState(false);
+  const [previewRoad,  setPreviewRoad]  = useState(initialStreet || '');
+  const [previewNum,   setPreviewNum]   = useState('');
+  const [previewSub,   setPreviewSub]   = useState('');
+  const [allSuburbs,   setAllSuburbs]   = useState([]);
+  const [searchText,   setSearchText]   = useState('');
+  const [suggestions,  setSuggestions]  = useState([]);
+  const [searching,    setSearching]    = useState(false);
+  const mapRef     = useRef(null);
+  const searchTimer = useRef(null);
 
   const doGeocode = useCallback(async (lng, lat) => {
     setLoading(true);
@@ -46,12 +88,44 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
     setPreviewRoad(result.road);
     setPreviewNum(result.number);
     setPreviewSub(result.suburb);
+    setAllSuburbs(result.allSuburbs || []);
     setLoading(false);
     return result;
   }, []);
 
+  // Busca de endereço com debounce
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchText(val);
+    setSuggestions([]);
+    clearTimeout(searchTimer.current);
+    if (val.length < 5) return;
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      const results = await forwardGeocode(val);
+      setSuggestions(results.slice(0, 4));
+      setSearching(false);
+    }, 600);
+  };
+
+  const handleSelectSuggestion = (s) => {
+    setMarkerPos([s.lng, s.lat]);
+    setPreviewRoad(s.road);
+    setPreviewNum(s.number);
+    setPreviewSub(s.suburb);
+    setAllSuburbs(s.allSuburbs || []);
+    setSearchText(s.road + (s.number ? ', ' + s.number : ''));
+    setSuggestions([]);
+    // Centraliza o mapa na seleção
+    if (mapRef.current?.flyTo) {
+      mapRef.current.flyTo({ center: [s.lng, s.lat], zoom: 17 });
+    }
+  };
+
   const handleDragEnd = useCallback(async (lngLat) => {
     setMarkerPos([lngLat.lng, lngLat.lat]);
+    setSearchText('');
+    setSuggestions([]);
     await doGeocode(lngLat.lng, lngLat.lat);
   }, [doGeocode]);
 
@@ -62,6 +136,7 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
       street:       fresh.road   || previewRoad,
       streetNumber: fresh.number || previewNum,
       suburb:       fresh.suburb || previewSub,
+      allSuburbs:   fresh.allSuburbs?.length ? fresh.allSuburbs : allSuburbs,
       coords:       markerPos,
     });
   };
@@ -71,12 +146,39 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-gray-950 rounded-2xl overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-white/10 shrink-0">
-        <div>
-          <p className="text-sm font-black text-white">📍 Escolher localização</p>
-          <p className="text-xs text-gray-400">Arraste o alfinete até o endereço do cliente</p>
+      <div className="px-4 py-3 bg-gray-900 border-b border-white/10 shrink-0 space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-black text-white">📍 Escolher localização</p>
+            <p className="text-xs text-gray-400">Busque o endereço ou arraste o alfinete</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10">✕</button>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10">✕</button>
+
+        {/* Barra de busca de endereço */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Buscar endereço, ex: Av. Independência 1080, Torres..."
+            value={searchText}
+            onChange={handleSearchChange}
+            className="w-full bg-gray-800 text-white text-xs rounded-xl px-3 py-2 pr-8 border border-white/10 focus:outline-none focus:border-orange-500/50 placeholder-gray-500"
+          />
+          {searching && (
+            <span className="absolute right-2.5 top-2 text-xs text-gray-500 animate-pulse">⏳</span>
+          )}
+          {suggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 z-40 mt-1 bg-gray-800 border border-white/10 rounded-xl overflow-hidden shadow-xl">
+              {suggestions.map((s, i) => (
+                <button key={i} type="button"
+                  onClick={() => handleSelectSuggestion(s)}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 border-b border-white/5 last:border-0 truncate">
+                  📍 {s.display}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Map */}
@@ -132,10 +234,10 @@ const stepVariants = {
 };
 
 const STEPS = [
-  { id: 'customer', label: 'Cliente',    icon: '👤' },
-  { id: 'items',    label: 'Itens',      icon: '🛒' },
-  { id: 'payment',  label: 'Pagamento',  icon: '💳' },
-  { id: 'review',   label: 'Revisão',    icon: '✅' },
+  { id: 'customer', label: 'Cliente',    icon: '👤', desc: 'Quem vai receber?' },
+  { id: 'items',    label: 'Produtos',   icon: '🛒', desc: 'O que vai pedir?' },
+  { id: 'payment',  label: 'Entrega',    icon: '📦', desc: 'Como e onde?' },
+  { id: 'review',   label: 'Finalizar',  icon: '✅', desc: 'Confirmar pedido' },
 ];
 
 
@@ -221,43 +323,164 @@ function CategoryAccordion({ name, items, cart, onAdd, onQty, onWeight }) {
 
 // ── Steps ─────────────────────────────────────────────────────
 
-function StepCustomer({ name, setName, phone, setPhone, fetchSuggestions, showSug, suggestions, applySuggestion }) {
-  return (
-    <div className="space-y-4 max-w-md mx-auto">
-      <p className="text-sm text-gray-400">Informe os dados do cliente para identificar o pedido.</p>
+function StepCustomer({
+  name, setName, phone, setPhone,
+  fetchSuggestions, showSug, suggestions, applySuggestion,
+  pickupMode, setPickupMode, deliveryType,
+  allCustomers, custLoading,
+}) {
+  const phoneRequired = !pickupMode && deliveryType === 'delivery';
 
-      {/* Name */}
-      <div className="relative">
-        <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome *</label>
-        <input
-          type="text" placeholder="Nome do cliente" value={name} autoFocus
-          onChange={(e) => { setName(e.target.value); fetchSuggestions(e.target.value); }}
-          className="input w-full"
-        />
-        <AnimatePresence>
-          {showSug && suggestions.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-              className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-white/10 rounded-xl shadow-xl z-10 overflow-hidden"
-            >
-              {suggestions.map((s, i) => (
-                <button key={i} onMouseDown={() => applySuggestion(s)}
-                  className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors">
-                  <p className="text-sm text-gray-200 font-medium">{s.customer_name}</p>
-                  {s.customer_phone && <p className="text-xs text-gray-500">{s.customer_phone}</p>}
+  return (
+    <div className="flex gap-4 min-h-[320px]">
+
+      {/* ── Sidebar: clientes recentes ── */}
+      <div className="w-48 shrink-0 flex flex-col border-r border-white/[0.07] pr-3 gap-3">
+
+        {/* Header da sidebar */}
+        <div>
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">
+            Recentes
+          </p>
+          <div className="space-y-0.5">
+            {custLoading ? (
+              <div className="space-y-1.5">
+                {[1,2,3].map((i) => (
+                  <div key={i} className="h-8 bg-gray-800/60 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : allCustomers.length === 0 ? (
+              <p className="text-[11px] text-gray-600 italic py-2">Nenhum cliente ainda</p>
+            ) : allCustomers.slice(0, 8).map((c, i) => {
+              const initials = (c.customer_name ?? 'C').split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
+              const orders   = c.order_count ?? 1;
+              const isVip    = orders >= 10;
+              return (
+                <button key={i} type="button" onMouseDown={() => applySuggestion(c)}
+                  className="w-full text-left px-2 py-1.5 rounded-xl hover:bg-white/[0.06] transition-colors group flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center text-[10px] font-bold text-orange-300 shrink-0">
+                    {initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <p className="text-[11px] font-semibold text-gray-300 truncate group-hover:text-white leading-none">
+                        {c.customer_name}
+                      </p>
+                      {isVip && <span className="text-[8px] text-yellow-400">★</span>}
+                    </div>
+                    <p className="text-[10px] text-gray-600 leading-none mt-0.5">
+                      {orders} pedido{orders !== 1 ? 's' : ''}
+                    </p>
+                  </div>
                 </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Divisor */}
+        <div className="border-t border-white/[0.06]" />
+
+        {/* Quick actions */}
+        <div>
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">
+            Rápido
+          </p>
+          <div className="space-y-1">
+            <button type="button"
+              onMouseDown={() => { setPickupMode(true); }}
+              className="w-full text-left px-2 py-1.5 rounded-xl hover:bg-orange-500/10 text-[11px] text-gray-400 hover:text-orange-300 transition-colors flex items-center gap-1.5 font-medium">
+              🏃 Retirada balcão
+            </button>
+            <button type="button"
+              onMouseDown={() => { applySuggestion({ customer_name: 'Cliente', customer_phone: '' }); }}
+              className="w-full text-left px-2 py-1.5 rounded-xl hover:bg-gray-700/40 text-[11px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1.5 font-medium">
+              🎭 Anônimo
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Phone */}
-      <div>
-        <label className="text-xs text-gray-400 font-semibold mb-1 block">Telefone <span className="text-gray-600 font-normal">(opcional)</span></label>
-        <input type="tel" placeholder="(11) 99999-9999" value={phone}
-          onChange={(e) => { setPhone(e.target.value); fetchSuggestions(e.target.value); }}
-          className="input w-full" />
+      {/* ── Formulário ── */}
+      <div className="flex-1 space-y-4">
+        <div>
+          <p className="text-base font-bold text-white">Quem vai receber o pedido?</p>
+          <p className="text-xs text-gray-500 mt-0.5">Selecione um cliente recente ou preencha os dados</p>
+        </div>
+
+        {/* Toggle: nome para retirada */}
+        <button type="button" onClick={() => setPickupMode((v) => !v)}
+          className={`flex items-center gap-2 text-xs px-3 py-2 rounded-xl font-semibold transition-all border ${
+            pickupMode
+              ? 'bg-orange-500/20 text-orange-300 border-orange-500/40 scale-[1.02]'
+              : 'bg-gray-800/60 text-gray-400 border-white/[0.07] hover:text-gray-200 hover:bg-gray-800'
+          }`}>
+          🏃 Nome para retirada
+          {pickupMode && (
+            <span className="bg-orange-500/30 text-orange-300 text-[10px] px-1.5 py-0.5 rounded-full leading-none">ativo</span>
+          )}
+        </button>
+        {pickupMode && (
+          <p className="text-[10px] text-gray-500 -mt-2 pl-1">
+            Apenas identifica o pedido — telefone não obrigatório e não aparece no histórico.
+          </p>
+        )}
+
+        {/* Nome */}
+        <div className="relative">
+          <label className="text-xs text-gray-400 font-semibold mb-1 flex items-center gap-1.5">
+            Nome *
+            {pickupMode && (
+              <span className="text-[10px] text-orange-400 font-normal bg-orange-500/10 px-1.5 py-0.5 rounded-full">para retirada</span>
+            )}
+          </label>
+          <input
+            type="text"
+            placeholder={pickupMode ? 'Ex: Mesa 3, João, Balcão...' : 'Como ele será identificado...'}
+            value={name} autoFocus
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!pickupMode) fetchSuggestions(e.target.value);
+            }}
+            className="input w-full focus:ring-2 focus:ring-orange-500/40 focus:border-orange-500/50 transition-all"
+          />
+          <AnimatePresence>
+            {showSug && suggestions.length > 0 && !pickupMode && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-white/10 rounded-xl shadow-xl z-10 overflow-hidden"
+              >
+                {suggestions.map((s, i) => (
+                  <button key={i} onMouseDown={() => applySuggestion(s)}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors">
+                    <p className="text-sm text-gray-200 font-medium">{s.customer_name}</p>
+                    {s.customer_phone && <p className="text-xs text-gray-500">{s.customer_phone}</p>}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Telefone — oculto no modo retirada */}
+        {!pickupMode && (
+          <div>
+            <label className="text-xs text-gray-400 font-semibold mb-0.5 block">
+              Telefone{' '}
+              {phoneRequired
+                ? <span className="text-red-400">*</span>
+                : <span className="text-gray-600 font-normal">(opcional)</span>
+              }
+            </label>
+            <p className="text-[10px] text-gray-600 mb-1">Para enviar atualizações e próximos pedidos</p>
+            <input type="tel" placeholder="(51) 99999-9999" value={phone}
+              onChange={(e) => { setPhone(e.target.value); fetchSuggestions(e.target.value); }}
+              className={`input w-full focus:ring-2 focus:ring-orange-500/40 transition-all ${phoneRequired && !phone.trim() ? 'ring-1 ring-red-500/50' : ''}`} />
+            {phoneRequired && !phone.trim() && (
+              <p className="text-[10px] text-red-400 mt-1 pl-0.5">Obrigatório para pedidos de entrega</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -382,6 +605,7 @@ function StepPayment({
   fiadoClienteSearch, setFiadoClienteSearch,
   showMapPicker, setShowMapPicker,
   orderTotal,
+  phoneOk,
 }) {
   const splitTotal    = splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const splitRemain   = Math.max(0, (parseFloat(orderTotal) || 0) - splitTotal);
@@ -444,6 +668,17 @@ function StepPayment({
           {deliveryType === 'delivery' && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
               className="mt-2 space-y-2 overflow-hidden">
+
+              {/* Aviso: telefone obrigatório */}
+              {!phoneOk && (
+                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+                  <span className="text-red-400 shrink-0">📱</span>
+                  <p className="text-xs text-red-400">
+                    Telefone obrigatório para entrega —{' '}
+                    <span className="font-semibold">volte ao passo 1 e preencha.</span>
+                  </p>
+                </div>
+              )}
 
               {/* Bairro */}
               <div>
@@ -733,6 +968,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [phone,         setPhone]         = useState('');
   const [suggestions,   setSuggestions]   = useState([]);
   const [showSug,       setShowSug]       = useState(false);
+  const [pickupMode,    setPickupMode]    = useState(false);
+  const [allCustomers,  setAllCustomers]  = useState([]);
+  const [custLoading,   setCustLoading]   = useState(false);
   const sugTimer   = useRef(null);
   const fiadoTimer = useRef(null);
 
@@ -777,11 +1015,53 @@ export default function NewOrderModal({ onClose, onCreated }) {
     }, 300);
   }, [paymentMethod, fiadoClienteSearch]);
 
+  // Carrega lista completa de clientes para a sidebar do passo 1
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    setCustLoading(true);
+    searchCustomers('')
+      .then(({ data }) => {
+        const list = data.data ?? [];
+        // Deduplica por telefone (ou nome se sem telefone)
+        const seen = new Set();
+        const unique = list.filter((c) => {
+          const key = c.customer_phone?.trim() || c.customer_name?.trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setAllCustomers(unique);
+      })
+      .catch(() => {})
+      .finally(() => setCustLoading(false));
+  }, []);
+
+  // Quando seleciona cliente fiado, preenche nome e telefone automaticamente
+  useEffect(() => {
+    if (!fiadoClienteId) return;
+    const client = fiadoClientes.find((c) => c.id === fiadoClienteId);
+    if (!client) return;
+    if (client.name)  setName(client.name);
+    if (client.phone) setPhone(client.phone);
+  }, [fiadoClienteId, fiadoClientes]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const tag = (e.target?.tagName ?? '').toLowerCase();
+        if (tag === 'textarea' || tag === 'select') return;
+        if (canAdvance() && !submitting && !showMapPicker) {
+          e.preventDefault();
+          goNext();
+        }
+      }
+    };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, stepIndex, submitting, showMapPicker,
+      name, cart, deliveryType, neighborhood, pickupMode,
+      phone, splitMode, paymentMethod, fiadoClienteId]);
 
   // ── Cart ──────────────────────────────────────────────────
   const handleAdd    = useCallback((p) => setCart((c) => addToCart(c, p)), []);
@@ -825,6 +1105,8 @@ export default function NewOrderModal({ onClose, onCreated }) {
     if (stepIndex === 1) return Object.keys(cart).length > 0;
     if (stepIndex === 2) {
       if (deliveryType === 'delivery' && !neighborhood) return false;
+      // Telefone obrigatório para entrega (exceto modo retirada)
+      if (deliveryType === 'delivery' && !pickupMode && !phone.trim()) return false;
       if (!splitMode && paymentMethod === 'fiado' && !fiadoClienteId) return false;
       if (splitMode) {
         const total = splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
@@ -891,8 +1173,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
     try {
       const { data } = await createOrder({
         customerName:    name.trim(),
-        customerPhone:   phone.trim()         || undefined,
-        customerAddress: customerAddress       || undefined,
+        // No modo "retirada", não envia telefone (sem histórico de cliente)
+        customerPhone:   (!pickupMode && phone.trim()) || undefined,
+        customerAddress: customerAddress               || undefined,
         neighborhood:    (neighborhood && neighborhood !== 'outro') ? neighborhood : undefined,
         deliveryType,
         paymentMethod:   finalPayMethod,
@@ -940,26 +1223,46 @@ export default function NewOrderModal({ onClose, onCreated }) {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.97, y: 16 }}
         transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-        className="relative w-full max-w-3xl max-h-[88vh] bg-gray-900 rounded-2xl shadow-2xl flex flex-col border border-white/10 overflow-hidden z-10"
+        className="relative w-full max-w-[760px] max-h-[88vh] rounded-2xl shadow-2xl flex flex-col border border-white/[0.08] overflow-hidden z-10"
+        style={{ background: 'linear-gradient(160deg, #1a2332 0%, #1e293b 60%, #1a2332 100%)' }}
       >
         {/* Map picker overlay — cobre o modal inteiro */}
         {showMapPicker && (
           <MapAddressPicker
             initialStreet={street}
             onClose={() => setShowMapPicker(false)}
-            onConfirm={({ street: s, streetNumber: n, suburb }) => {
+            onConfirm={({ street: s, streetNumber: sn, suburb, allSuburbs = [] }) => {
+              // Aplica rua do mapa
               if (s) setStreet(s);
-              if (n) setStreetNumber(n);
-              // Auto-detecta bairro pelo suburb retornado pelo Nominatim
-              if (suburb && !neighborhood) {
-                const sub = suburb.toLowerCase();
-                const match = NEIGHBORHOODS.find(
-                  (nb) => sub.includes(nb.bairro.toLowerCase()) || nb.bairro.toLowerCase().includes(sub)
+              // Se o Nominatim devolveu número (forward geocoding com número exato), aplica
+              if (sn) setStreetNumber(sn);
+              else setStreetNumber(''); // senão limpa — usuário digita
+
+              // Tenta detectar bairro usando TODOS os campos geográficos do Nominatim
+              const candidates = [suburb, ...allSuburbs].filter(Boolean);
+              let matched = null;
+              for (const candidate of candidates) {
+                const c = candidate.toLowerCase().trim();
+                // Tenta match exato primeiro
+                const exact = NEIGHBORHOODS.find(
+                  (nb) => nb.bairro.toLowerCase() === c
                 );
-                if (match) {
-                  setNeighborhood(match.bairro);
-                  setDeliveryFee(String(match.taxa));
-                }
+                if (exact) { matched = exact; break; }
+                // Tenta match parcial (contém)
+                const partial = NEIGHBORHOODS.find(
+                  (nb) => c.includes(nb.bairro.toLowerCase()) || nb.bairro.toLowerCase().includes(c)
+                );
+                if (partial) { matched = partial; break; }
+                // Tenta match por palavras (ex: "Itapeva Norte" vs "Norte Itapeva")
+                const words = c.split(/\s+/).filter(w => w.length > 3);
+                const wordMatch = NEIGHBORHOODS.find(
+                  (nb) => words.some(w => nb.bairro.toLowerCase().includes(w))
+                );
+                if (wordMatch) { matched = wordMatch; break; }
+              }
+              if (matched) {
+                setNeighborhood(matched.bairro);
+                setDeliveryFee(String(matched.taxa));
               }
               setShowMapPicker(false);
             }}
@@ -967,37 +1270,61 @@ export default function NewOrderModal({ onClose, onCreated }) {
         )}
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
-          <div>
-            <h2 className="text-lg font-black text-white">Novo Pedido</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{currentStep.label}</p>
+        <div className="px-5 pt-4 pb-0 border-b border-white/[0.06] shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-black text-white tracking-tight">Novo Pedido</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{currentStep.desc}</p>
+            </div>
+            <button onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
-          {/* Steps indicator */}
-          <div className="hidden md:flex items-center gap-1 mx-auto">
-            {STEPS.map((s, i) => (
-              <div key={s.id} className="flex items-center">
-                <div className={[
-                  'flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold transition-all duration-300',
-                  i < stepIndex  ? 'bg-green-500/20 text-green-400 scale-90'
-                  : i === stepIndex ? 'bg-orange-500 text-white scale-110 shadow-lg shadow-orange-500/30'
-                  : 'bg-gray-800 text-gray-600',
-                ].join(' ')}>
-                  {i < stepIndex ? '✓' : s.icon}
+          {/* Stepper premium com labels */}
+          <div className="hidden md:flex items-end gap-0 -mx-5 px-5">
+            {STEPS.map((s, i) => {
+              const done    = i < stepIndex;
+              const current = i === stepIndex;
+              return (
+                <div key={s.id} className="flex-1 flex flex-col items-center gap-1.5 relative pb-3">
+                  {/* Connector line */}
+                  {i > 0 && (
+                    <div className={[
+                      'absolute left-0 top-3.5 w-1/2 h-px -translate-y-1/2 transition-all duration-500',
+                      done || current ? 'bg-orange-500/40' : 'bg-white/[0.07]',
+                    ].join(' ')} />
+                  )}
+                  {i < STEPS.length - 1 && (
+                    <div className={[
+                      'absolute right-0 top-3.5 w-1/2 h-px -translate-y-1/2 transition-all duration-500',
+                      done ? 'bg-orange-500/40' : 'bg-white/[0.07]',
+                    ].join(' ')} />
+                  )}
+
+                  {/* Circle */}
+                  <div className={[
+                    'w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 z-10 relative',
+                    done    ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/30'
+                    : current ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/40 ring-2 ring-orange-500/30 scale-110'
+                    :           'bg-gray-800 text-gray-600 ring-1 ring-white/[0.06]',
+                  ].join(' ')}>
+                    {done ? '✓' : <span className="text-xs">{i + 1}</span>}
+                  </div>
+
+                  {/* Label */}
+                  <div className="text-center">
+                    <p className={`text-[11px] font-semibold leading-none transition-colors ${current ? 'text-orange-400' : done ? 'text-green-500/70' : 'text-gray-600'}`}>
+                      {s.label}
+                    </p>
+                  </div>
                 </div>
-                {i < STEPS.length - 1 && (
-                  <div className={`w-8 h-0.5 mx-1 rounded transition-all duration-500 ${i < stepIndex ? 'bg-green-500/40' : 'bg-gray-800'}`} />
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
-
-          <button onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
 
         {/* Caixa fechado */}
@@ -1019,7 +1346,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
         {/* Step content */}
         {caixaOpen !== false && (
           <>
-            <div className={`flex-1 relative ${stepIndex === 1 ? 'overflow-hidden p-4' : 'overflow-y-auto p-5'}`}>
+            <div className={`flex-1 relative ${stepIndex === 1 ? 'overflow-hidden p-4' : stepIndex === 0 ? 'overflow-hidden p-5' : 'overflow-y-auto p-5'}`}>
               <AnimatePresence mode="wait" custom={direction}>
                 <motion.div
                   key={currentStep.id}
@@ -1034,7 +1361,10 @@ export default function NewOrderModal({ onClose, onCreated }) {
                   {stepIndex === 0 && (
                     <StepCustomer name={name} setName={setName} phone={phone} setPhone={setPhone}
                       fetchSuggestions={fetchSuggestions} showSug={showSug} suggestions={suggestions}
-                      applySuggestion={applySuggestion} />
+                      applySuggestion={applySuggestion}
+                      pickupMode={pickupMode} setPickupMode={setPickupMode}
+                      deliveryType={deliveryType}
+                      allCustomers={allCustomers} custLoading={custLoading} />
                   )}
                   {stepIndex === 1 && (
                     <StepItems products={products} loading={loading} search={search} setSearch={setSearch}
@@ -1060,7 +1390,8 @@ export default function NewOrderModal({ onClose, onCreated }) {
                       orderTotal={cartTotal(cart) + (deliveryType === 'delivery' ? parseFloat(deliveryFee)||0 : 0)}
                       fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId}
                       setFiadoClienteId={setFiadoClienteId}
-                      fiadoClienteSearch={fiadoClienteSearch} setFiadoClienteSearch={setFiadoClienteSearch} />
+                      fiadoClienteSearch={fiadoClienteSearch} setFiadoClienteSearch={setFiadoClienteSearch}
+                      phoneOk={pickupMode || !!phone.trim()} />
                   )}
                   {stepIndex === 3 && (
                     <StepReview name={name} phone={phone} cart={cart} deliveryType={deliveryType}
@@ -1075,9 +1406,10 @@ export default function NewOrderModal({ onClose, onCreated }) {
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-3.5 border-t border-white/10 flex items-center justify-between shrink-0 bg-gray-900/80">
+            <div className="px-5 py-3.5 border-t border-white/[0.06] flex items-center justify-between shrink-0"
+              style={{ background: 'linear-gradient(0deg, #141f2e 0%, #1a2332 100%)' }}>
               <button onClick={goBack}
-                className="px-5 py-2 rounded-xl text-sm text-gray-400 hover:text-white hover:bg-white/10 transition-colors font-semibold">
+                className="px-5 py-2.5 rounded-xl text-sm text-gray-500 hover:text-white hover:bg-white/[0.07] transition-all font-semibold border border-transparent hover:border-white/10">
                 {stepIndex === 0 ? 'Cancelar' : '← Voltar'}
               </button>
 
@@ -1088,32 +1420,40 @@ export default function NewOrderModal({ onClose, onCreated }) {
                 </motion.p>
               )}
 
-              <button
+              <motion.button
                 onClick={goNext}
                 disabled={!canAdvance() || submitting}
+                whileHover={canAdvance() && !submitting ? { scale: 1.02 } : {}}
+                whileTap={canAdvance() && !submitting ? { scale: 0.98 } : {}}
                 className={[
-                  'px-6 py-2 rounded-xl text-sm font-bold transition-all',
+                  'px-6 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden',
                   canAdvance() && !submitting
                     ? isLastStep
-                      ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-600/20'
-                      : 'bg-orange-500 hover:bg-orange-400 text-white shadow-lg shadow-orange-500/20'
-                    : 'bg-gray-800 text-gray-600 cursor-not-allowed',
+                      ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-600/30'
+                      : 'bg-orange-500 hover:bg-orange-400 text-white shadow-lg shadow-orange-500/30'
+                    : 'bg-gray-800/80 text-gray-600 cursor-not-allowed',
                 ].join(' ')}
               >
-                {submitting ? (
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Enviando...
-                  </span>
-                ) : isLastStep ? '✓ Confirmar Pedido' : (
-                  <span className="flex items-center gap-1.5">
-                    {stepIndex === 1 && cartCount > 0 && (
-                      <span className="bg-white/20 text-white text-xs px-1.5 py-0.5 rounded-full">{cartCount}</span>
-                    )}
-                    Próximo →
-                  </span>
+                {/* Glow pulse quando válido */}
+                {canAdvance() && !submitting && !isLastStep && (
+                  <span className="absolute inset-0 rounded-xl bg-orange-400/20 animate-pulse pointer-events-none" />
                 )}
-              </button>
+                <span className="relative flex items-center gap-1.5">
+                  {submitting ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Enviando...
+                    </>
+                  ) : isLastStep ? '✓ Confirmar Pedido' : (
+                    <>
+                      {stepIndex === 1 && cartCount > 0 && (
+                        <span className="bg-white/20 text-white text-xs px-1.5 py-0.5 rounded-full">{cartCount}</span>
+                      )}
+                      Próximo →
+                    </>
+                  )}
+                </span>
+              </motion.button>
             </div>
           </>
         )}
