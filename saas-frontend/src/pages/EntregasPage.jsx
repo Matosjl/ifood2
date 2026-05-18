@@ -22,6 +22,20 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 
+// Normaliza campos snake_case → camelCase vindos da REST API
+const normOrder = (o) => ({
+  ...o,
+  orderNumber:     o.orderNumber     ?? o.order_number,
+  customerName:    o.customerName    ?? o.customer_name,
+  customerPhone:   o.customerPhone   ?? o.customer_phone,
+  customerAddress: o.customerAddress ?? o.customer_address,
+  deliveryFee:     parseFloat(o.deliveryFee ?? o.delivery_fee ?? 0),
+  total:           parseFloat(o.total ?? 0),
+  items:           o.items ?? [],
+  neighborhood:    o.neighborhood    ?? null,
+  payment_method:  o.payment_method  ?? o.paymentMethod,
+});
+
 // Status label map
 const STATUS_LABELS = {
   pending:    'Pendente',
@@ -106,7 +120,7 @@ const PAYMENT_LABELS = {
 function OrderPopup({ order, delivering, onDeliver, onRoute, onPin, isPinning }) {
   const items     = order.items ?? [];
   const payment   = PAYMENT_LABELS[order.payment_method] ?? order.payment_method ?? '—';
-  const address   = order.customer_address ?? '';
+  const address   = order.customerAddress ?? '';
   const mapsUrl   = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
   const wazeUrl   = `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
 
@@ -369,9 +383,9 @@ export default function EntregasPage() {
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const { data } = await getOrders({ limit: 100, startDate: today.toISOString() });
-      const deliveries = (data.data ?? []).filter(
-        (o) => o.delivery_type === 'delivery' && o.status !== 'cancelled'
-      );
+      const deliveries = (data.data ?? [])
+        .filter((o) => (o.delivery_type ?? o.deliveryType) === 'delivery' && o.status !== 'cancelled')
+        .map(normOrder);
       // Só atualiza se algo mudou — evita re-renders desnecessários no polling
       setOrders((prev) => {
         const prevSig = prev.map((o) => `${o.id}:${o.status}`).join(',');
@@ -442,10 +456,10 @@ export default function EntregasPage() {
   // ── Geocode delivery addresses ────────────────────────────
   useEffect(() => {
     const pending = orders.filter(
-      (o) => o.customer_address && !coords[o.id]
+      (o) => o.customerAddress && !coords[o.id]
     );
     pending.forEach(async (o) => {
-      const c = await geocodeAddress(o.customer_address, o.neighborhood);
+      const c = await geocodeAddress(o.customerAddress, o.neighborhood);
       if (c) setCoords((prev) => ({ ...prev, [o.id]: c }));
     });
   }, [orders]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -606,7 +620,7 @@ export default function EntregasPage() {
                 📦 #{activeOrder.orderNumber} · {activeOrder.customerName ?? '—'}
               </p>
               <p className="text-[11px] text-gray-400 truncate mt-0.5">
-                {activeOrder.customer_address ?? 'Endereço não informado'}
+                {activeOrder.customerAddress ?? 'Endereço não informado'}
               </p>
               {routeLoading && (
                 <p className="text-xs text-gray-500 mt-1 animate-pulse">Calculando rota...</p>
@@ -703,7 +717,7 @@ export default function EntregasPage() {
                   onClick={() => handleSelect(order)}
                 >
                   <MarkerContent>
-                    <DeliveryMarkerContent orderNumber={order.order_number ?? order.orderNumber} active={isActive} />
+                    <DeliveryMarkerContent orderNumber={order.orderNumber} active={isActive} />
                   </MarkerContent>
                   {isActive && (
                     <MarkerPopup closeButton onClose={() => { setActiveOrder(null); setRoute([]); }}>

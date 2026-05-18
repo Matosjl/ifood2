@@ -6,7 +6,7 @@ const STATUS_TRANSITIONS = {
   pending:    ['confirmed', 'preparing', 'cancelled'], // aceitar + já iniciar preparo (atalho)
   confirmed:  ['preparing', 'cancelled'],
   preparing:  ['ready',     'cancelled'],
-  ready:      ['delivered', 'delivering', 'cancelled'], // delivery: saiu para entrega
+  ready:      ['preparing', 'delivered', 'delivering', 'cancelled'], // delivery: saiu para entrega
   delivering: ['delivered', 'cancelled'],               // motoboy confirma entrega
   delivered:  [],
   cancelled:  [],
@@ -165,6 +165,16 @@ class Order {
     if (!current[0]) throw new AppError('Pedido não encontrado.', 404);
 
     const currentStatus = current[0].status;
+
+    // Mesmo status → operação idempotente, retorna sem alterar nem lançar erro
+    if (currentStatus === newStatus) {
+      const { rows: same } = await dbClient.query(
+        `SELECT * FROM orders WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      return same[0];
+    }
+
     const allowed = STATUS_TRANSITIONS[currentStatus] || [];
 
     if (!allowed.includes(newStatus)) {

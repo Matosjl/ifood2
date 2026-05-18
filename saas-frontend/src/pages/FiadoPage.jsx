@@ -81,6 +81,7 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
   const [novaCompra, setNovaCompra] = useState(false);
   const [novaDescricao, setNovaDescricao] = useState('');
   const [novoValor, setNovoValor] = useState('');
+  const [novoTipo, setNovoTipo] = useState('compra');
   const [saving, setSaving] = useState(false);
 
   const fetchCompras = useCallback(async () => {
@@ -93,7 +94,9 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
 
   useEffect(() => { fetchCompras(); }, [fetchCompras]);
 
-  const totalAberto    = compras.filter(c => c.status === 'pendente').reduce((s, c) => s + Number(c.valor), 0);
+  const totalDevido    = compras.filter(c => c.status === 'pendente' && c.tipo !== 'adiantamento').reduce((s, c) => s + Number(c.valor), 0);
+  const totalCredito   = compras.filter(c => c.status === 'pendente' && c.tipo === 'adiantamento').reduce((s, c) => s + Number(c.valor), 0);
+  const totalAberto    = totalDevido - totalCredito;
   const totalPago      = compras.filter(c => c.status === 'pago').reduce((s, c) => s + Number(c.valor), 0);
   const totalCancelado = compras.filter(c => c.status === 'cancelado').reduce((s, c) => s + Number(c.valor), 0);
   const ultimoPagamento = compras.filter(c => c.status === 'pago').sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at))[0];
@@ -117,8 +120,9 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
     if (!novoValor) return;
     setSaving(true);
     try {
-      await createFiadoCompra({ cliente_id: cliente.id, descricao: novaDescricao || 'Compra avulsa', valor: novoValor });
-      setNovaCompra(false); setNovaDescricao(''); setNovoValor('');
+      const defaultDesc = novoTipo === 'adiantamento' ? 'Pagamento adiantado' : 'Compra avulsa';
+      await createFiadoCompra({ cliente_id: cliente.id, descricao: novaDescricao || defaultDesc, valor: novoValor, tipo: novoTipo });
+      setNovaCompra(false); setNovaDescricao(''); setNovoValor(''); setNovoTipo('compra');
       fetchCompras(); onUpdate();
     } finally { setSaving(false); }
   };
@@ -128,6 +132,10 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
     pago:      'bg-green-500/20 text-green-300',
     cancelado: 'bg-red-500/20 text-red-400',
   }[s] ?? '');
+
+  const tipoBadge = (t) => t === 'adiantamento'
+    ? 'bg-blue-500/20 text-blue-300'
+    : '';
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -150,9 +158,9 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
         {/* Resumo financeiro */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 border-b border-white/10">
           {[
-            { label: 'Em aberto', value: fmt(totalAberto), color: 'text-yellow-400' },
+            { label: totalAberto < 0 ? 'Crédito disponível' : 'Em aberto', value: fmt(Math.abs(totalAberto)), color: totalAberto < 0 ? 'text-blue-400' : totalAberto > 0 ? 'text-yellow-400' : 'text-green-400' },
+            { label: 'Crédito (adiant.)', value: fmt(totalCredito), color: 'text-blue-400' },
             { label: 'Recebido', value: fmt(totalPago), color: 'text-green-400' },
-            { label: 'Cancelado', value: fmt(totalCancelado), color: 'text-red-400' },
             { label: 'Último pag.', value: ultimoPagamento ? fmtDate(ultimoPagamento.paid_at) : '—', color: 'text-gray-300' },
           ].map(({ label, value, color }) => (
             <div key={label} className="bg-gray-800/50 rounded-xl p-3">
@@ -179,17 +187,39 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
           </div>
 
           {novaCompra && (
-            <div className="bg-gray-800/50 rounded-xl p-4 mb-4 flex gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-xs text-gray-400 mb-1">Descrição</label>
-                <input value={novaDescricao} onChange={e => setNovaDescricao(e.target.value)} placeholder="Ex: Lanche do dia" className="input w-full" />
+            <div className="bg-gray-800/50 rounded-xl p-4 mb-4 space-y-3">
+              {/* Tipo */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setNovoTipo('compra')}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${novoTipo === 'compra' ? 'bg-orange-500 text-white' : 'border border-white/10 text-gray-400 hover:text-white'}`}
+                >
+                  🛒 Fiado (deve)
+                </button>
+                <button
+                  onClick={() => setNovoTipo('adiantamento')}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${novoTipo === 'adiantamento' ? 'bg-blue-500 text-white' : 'border border-white/10 text-gray-400 hover:text-white'}`}
+                >
+                  💰 Adiantamento (crédito)
+                </button>
               </div>
-              <div className="w-32">
-                <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
-                <input type="number" step="0.01" value={novoValor} onChange={e => setNovoValor(e.target.value)} placeholder="0,00" className="input w-full" />
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs text-gray-400 mb-1">Descrição</label>
+                  <input
+                    value={novaDescricao}
+                    onChange={e => setNovaDescricao(e.target.value)}
+                    placeholder={novoTipo === 'adiantamento' ? 'Ex: Pagamento adiantado' : 'Ex: Lanche do dia'}
+                    className="input w-full"
+                  />
+                </div>
+                <div className="w-32">
+                  <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
+                  <input type="number" step="0.01" value={novoValor} onChange={e => setNovoValor(e.target.value)} placeholder="0,00" className="input w-full" />
+                </div>
+                <button onClick={handleNovaCompra} disabled={saving} className={`px-4 py-2 rounded-xl text-white font-bold text-sm disabled:opacity-50 ${novoTipo === 'adiantamento' ? 'bg-blue-500 hover:bg-blue-400' : 'bg-orange-500 hover:bg-orange-400'}`}>Salvar</button>
+                <button onClick={() => { setNovaCompra(false); setNovoTipo('compra'); }} className="px-3 py-2 rounded-xl border border-white/10 text-gray-400 text-sm">✕</button>
               </div>
-              <button onClick={handleNovaCompra} disabled={saving} className="px-4 py-2 rounded-xl bg-orange-500 text-white font-bold text-sm disabled:opacity-50">Salvar</button>
-              <button onClick={() => setNovaCompra(false)} className="px-3 py-2 rounded-xl border border-white/10 text-gray-400 text-sm">✕</button>
             </div>
           )}
 
@@ -210,14 +240,24 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {compras.map((c) => (
-                    <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
+                  {compras.map((c) => {
+                    const isAdiantamento = c.tipo === 'adiantamento';
+                    return (
+                    <tr key={c.id} className={`border-b border-white/5 hover:bg-white/5 ${isAdiantamento ? 'bg-blue-500/5' : ''}`}>
                       <td className="py-2 text-gray-400">{fmtDateTime(c.created_at)}</td>
                       <td className="py-2 text-gray-300">
-                        {c.descricao}
-                        {c.order_number && <span className="ml-2 text-xs text-gray-500">#{c.order_number}</span>}
+                        <div className="flex items-center gap-2">
+                          {isAdiantamento && <span className="text-blue-400">💰</span>}
+                          <span>{c.descricao}</span>
+                          {c.order_number && <span className="text-xs text-gray-500">#{c.order_number}</span>}
+                          {isAdiantamento && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${tipoBadge(c.tipo)}`}>crédito</span>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-2 text-right font-semibold text-white">{fmt(c.valor)}</td>
+                      <td className={`py-2 text-right font-semibold ${isAdiantamento ? 'text-blue-400' : 'text-white'}`}>
+                        {isAdiantamento ? '+ ' : ''}{fmt(c.valor)}
+                      </td>
                       <td className="py-2 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge(c.status)}`}>
                           {c.status.charAt(0).toUpperCase() + c.status.slice(1)}
@@ -226,13 +266,16 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
                       <td className="py-2 text-center">
                         {c.status === 'pendente' && (
                           <div className="flex gap-1 justify-center">
-                            <button onClick={() => handlePagar(c.id)} className="px-2 py-1 text-xs rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">Pago</button>
+                            <button onClick={() => handlePagar(c.id)} className="px-2 py-1 text-xs rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">
+                              {isAdiantamento ? 'Usar' : 'Pago'}
+                            </button>
                             <button onClick={() => handleCancelar(c.id)} className="px-2 py-1 text-xs rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">Cancelar</button>
                           </div>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

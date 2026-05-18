@@ -30,6 +30,8 @@ const bancoRoutes    = require('./modules/banco/banco.routes');
 const fiadoRoutes    = require('./modules/fiado/fiado.routes');
 const billingRoutes  = require('./modules/billing/billing.routes');
 const driverRoutes   = require('./modules/driver/driver.routes');
+const internalRoutes = require('./modules/internal/internal.routes');
+const aiRoutes       = require('./modules/ai/ai.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -71,12 +73,35 @@ app.use('/uploads', require('express').static(
 ));
 
 // ── Logging ───────────────────────────────────────────────────
-app.use(morgan(env.isDev() ? 'dev' : 'combined'));
+// Morgan em dev para coloração rápida no terminal; requestLogger em todos os ambientes
+// para logs estruturados (JSON em prod, one-liner em dev)
+if (env.isDev()) app.use(morgan('dev'));
+app.use(require('./middleware/requestLogger.middleware'));
 
 // ── Health check (sem auth) ───────────────────────────────────
-app.get('/health', (req, res) =>
-  res.json({ success: true, status: 'ok', timestamp: new Date().toISOString() })
-);
+// Verifica DB, Redis e VPS2. Retorna 200 se tudo ok, 503 se algo falhou.
+app.get('/health', async (req, res) => {
+  try {
+    const { runChecks } = require('./services/healthMonitor');
+    const checks   = await runChecks();
+    const allOk    = Object.values(checks).every((c) => c.ok);
+    const status   = allOk ? 'ok' : 'degraded';
+    const httpCode = allOk ? 200 : 503;
+
+    res.status(httpCode).json({
+      success:   allOk,
+      status,
+      timestamp: new Date().toISOString(),
+      checks: {
+        db:    checks.db.ok    ? 'ok' : `down: ${checks.db.error    ?? '?'}`,
+        redis: checks.redis.ok ? 'ok' : `down: ${checks.redis.error ?? '?'}`,
+        vps2:  checks.vps2.ok  ? 'ok' : `down: ${checks.vps2.error  ?? '?'}`,
+      },
+    });
+  } catch (err) {
+    res.status(503).json({ success: false, status: 'error', error: err.message });
+  }
+});
 
 // ── Rotas da API ──────────────────────────────────────────────
 app.use('/api/auth',       authRoutes);
@@ -91,6 +116,8 @@ app.use('/api/banco',      bancoRoutes);
 app.use('/api/fiado',      fiadoRoutes);
 app.use('/api/billing',    billingRoutes);
 app.use('/api/driver',     driverRoutes);
+app.use('/api/internal',   internalRoutes); // Chamado pelo AI Engine (VPS2) — auth via X-Internal-Key
+app.use('/api/ai',         aiRoutes);       // Agentes IA (VPS2) — auth via JWT
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

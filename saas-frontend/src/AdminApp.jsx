@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { listTenants, createTenant, updateTenant, activateTenant, extendTrial, deactivateTenant, destroyTenant } from './api/admin';
+import { getAdminAiHealth, getAdminAiUsage } from './api/ai';
 
 const PLANS     = ['basic', 'pro', 'premium'];
 const PLAN_PRICES = { basic: 67, pro: 179.99, premium: 370 };
@@ -113,6 +114,172 @@ function ActivateModal({ tenant, adminKey, onClose, onDone }) {
   );
 }
 
+// ── AI Panel ─────────────────────────────────────────────────
+function AiPanel({ adminKey }) {
+  const [health,      setHealth]      = useState(null);
+  const [usage,       setUsage]       = useState(null);
+  const [days,        setDays]        = useState(30);
+  const [loadingH,    setLoadingH]    = useState(false);
+  const [loadingU,    setLoadingU]    = useState(false);
+
+  const checkHealth = async () => {
+    setLoadingH(true);
+    try {
+      const { data } = await getAdminAiHealth(adminKey);
+      setHealth(data.data);
+    } catch {
+      setHealth({ healthy: false });
+    } finally {
+      setLoadingH(false);
+    }
+  };
+
+  const loadUsage = async () => {
+    setLoadingU(true);
+    try {
+      const { data } = await getAdminAiUsage(adminKey, days);
+      setUsage(data.data);
+    } catch {
+      setUsage(null);
+    } finally {
+      setLoadingU(false);
+    }
+  };
+
+  useEffect(() => { checkHealth(); loadUsage(); }, []);
+  useEffect(() => { loadUsage(); }, [days]);
+
+  const fmt = (n) => Number(n ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const fmtN = (n) => Number(n ?? 0).toLocaleString('pt-BR');
+
+  return (
+    <div className="px-6 py-6 space-y-6">
+
+      {/* Engine health */}
+      <div className="bg-gray-900 rounded-2xl border border-white/10 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-black text-white">🧠 AI Engine (VPS2)</h2>
+          <button
+            onClick={checkHealth}
+            disabled={loadingH}
+            className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors disabled:opacity-50"
+          >
+            {loadingH ? 'Verificando...' : '↺ Verificar'}
+          </button>
+        </div>
+        {health === null ? (
+          <div className="flex items-center gap-2 text-gray-500 text-sm">
+            <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
+            Verificando...
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${health.healthy ? 'bg-green-400 shadow-[0_0_8px_#4ade80]' : 'bg-red-400 animate-pulse'}`} />
+            <span className={`text-sm font-bold ${health.healthy ? 'text-green-400' : 'text-red-400'}`}>
+              {health.healthy ? '✅ Online — respondendo normalmente' : '❌ Offline ou sem resposta'}
+            </span>
+            {health.timestamp && (
+              <span className="text-xs text-gray-600 ml-auto">
+                {new Date(health.timestamp).toLocaleTimeString('pt-BR')}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Usage summary */}
+      <div className="bg-gray-900 rounded-2xl border border-white/10 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-black text-white">💸 Custo de IA</h2>
+          <div className="flex items-center gap-2">
+            <select
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+              className="bg-gray-800 text-gray-300 text-xs rounded-lg px-2 py-1.5 border border-white/10 outline-none"
+            >
+              <option value={7}>7 dias</option>
+              <option value={30}>30 dias</option>
+              <option value={90}>90 dias</option>
+            </select>
+          </div>
+        </div>
+
+        {loadingU ? (
+          <div className="flex items-center justify-center h-20">
+            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : usage ? (
+          <div className="space-y-5">
+            {/* Totals */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: 'Custo total',     value: `$${fmt(usage.total_cost_usd)}`,          color: 'text-yellow-400' },
+                { label: 'Requisições',     value: fmtN(usage.total_requests),               color: 'text-blue-400' },
+                { label: 'Tokens entrada',  value: fmtN(usage.total_tokens_in),              color: 'text-gray-300' },
+                { label: 'Tokens saída',    value: fmtN(usage.total_tokens_out),             color: 'text-gray-300' },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-gray-800 rounded-xl p-3">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</p>
+                  <p className={`text-lg font-black ${color} mt-0.5`}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* By agent */}
+            {usage.by_agent?.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-bold mb-2">Por Agente</p>
+                <div className="space-y-2">
+                  {usage.by_agent.map(a => (
+                    <div key={a.agent} className="flex items-center justify-between bg-gray-800 rounded-xl px-4 py-2.5">
+                      <div>
+                        <p className="text-xs font-bold text-white capitalize">{a.agent}</p>
+                        <p className="text-[10px] text-gray-500">{fmtN(a.requests)} req · {fmtN(a.tokens_in + a.tokens_out)} tokens</p>
+                      </div>
+                      <p className="text-sm font-black text-yellow-400">${fmt(a.cost_usd)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* By tenant (top 10) */}
+            {usage.by_tenant?.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-bold mb-2">Por Tenant (top 10)</p>
+                <div className="bg-gray-800/50 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-white/[0.06]">
+                        <th className="px-3 py-2 text-left font-semibold">Tenant ID</th>
+                        <th className="px-3 py-2 text-center font-semibold">Req.</th>
+                        <th className="px-3 py-2 text-right font-semibold">Custo USD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usage.by_tenant.slice(0, 10).map((t, i) => (
+                        <tr key={i} className="border-b border-white/[0.04]">
+                          <td className="px-3 py-2 text-gray-400 font-mono">{t.tenant_id?.slice(0, 8)}…</td>
+                          <td className="px-3 py-2 text-center text-gray-300">{fmtN(t.requests)}</td>
+                          <td className="px-3 py-2 text-right text-yellow-400 font-bold">${fmt(t.cost_usd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-600 text-sm">
+            Sem dados de uso. AI Engine pode estar offline.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Login screen ─────────────────────────────────────────────
 function AdminLogin({ onLogin }) {
   const [key, setKey] = useState('');
@@ -180,6 +347,7 @@ function TrialInfo({ tenant }) {
 export default function AdminApp() {
   const [adminKey,       setAdminKey]       = useState(() => sessionStorage.getItem('adminKey') ?? '');
   const [authed,         setAuthed]         = useState(false);
+  const [activeTab,      setActiveTab]      = useState('tenants'); // tenants | ai
   const [tenants,        setTenants]        = useState([]);
   const [loading,        setLoading]        = useState(false);
   const [showCreate,     setShowCreate]     = useState(false);
@@ -295,6 +463,32 @@ export default function AdminApp() {
           </button>
         </div>
       </header>
+
+      {/* Tabs */}
+      <div className="px-6 pt-4 flex gap-1 border-b border-white/[0.06]">
+        {[
+          { key: 'tenants', label: '🏪 Restaurantes' },
+          { key: 'ai',      label: '🤖 IA & Custos' },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
+              activeTab === tab.key
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-gray-500 hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* AI Panel */}
+      {activeTab === 'ai' && <AiPanel adminKey={adminKey} />}
+
+      {/* Tenants section — only shown when tenants tab is active */}
+      {activeTab === 'tenants' && <>
 
       {/* Stats */}
       <div className="px-6 py-4 grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -430,6 +624,8 @@ export default function AdminApp() {
           </div>
         )}
       </div>
+
+      </>} {/* end activeTab === 'tenants' */}
 
       {showCreate && (
         <CreateModal

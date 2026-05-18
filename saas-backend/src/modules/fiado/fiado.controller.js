@@ -15,8 +15,10 @@ exports.listClientes = async (req, res, next) => {
       `SELECT
          fc.id, fc.name, fc.phone, fc.address, fc.dia_acerto,
          fc.bloqueado, fc.notes, fc.created_at,
-         COALESCE(SUM(CASE WHEN c.status='pendente' THEN c.valor ELSE 0 END), 0) AS total_aberto,
+         COALESCE(SUM(CASE WHEN c.status='pendente' AND COALESCE(c.tipo,'compra')='compra'       THEN c.valor ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor ELSE 0 END), 0) AS total_aberto,
          COALESCE(SUM(CASE WHEN c.status='pago'     THEN c.valor ELSE 0 END), 0) AS total_pago,
+         COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor ELSE 0 END), 0) AS total_credito,
          MAX(CASE WHEN c.status='pendente' THEN c.created_at END) AS ultimo_fiado
        FROM fiado_clientes fc
        LEFT JOIN fiado_compras c ON c.cliente_id = fc.id
@@ -119,21 +121,23 @@ exports.listCompras = async (req, res, next) => {
 exports.createCompra = async (req, res, next) => {
   try {
     const { tenantId } = req.user;
-    const { cliente_id, order_id, descricao, valor } = req.body;
+    const { cliente_id, order_id, descricao, valor, tipo = 'compra' } = req.body;
     if (!cliente_id || !valor) throw new AppError('cliente_id e valor são obrigatórios.', 400);
+    if (!['compra', 'adiantamento'].includes(tipo)) throw new AppError('tipo inválido.', 400);
 
-    // Verifica se cliente está bloqueado
+    // Verifica se cliente está bloqueado (só bloqueia novas compras, não adiantamentos)
     const { rows: cli } = await db.query(
       `SELECT bloqueado FROM fiado_clientes WHERE id=$1 AND tenant_id=$2`,
       [cliente_id, tenantId]
     );
     if (!cli[0]) throw new AppError('Cliente não encontrado.', 404);
-    if (cli[0].bloqueado) throw new AppError('Cliente bloqueado para compras fiadas.', 403);
+    if (cli[0].bloqueado && tipo === 'compra') throw new AppError('Cliente bloqueado para compras fiadas.', 403);
 
+    const defaultDesc = tipo === 'adiantamento' ? 'Pagamento adiantado' : 'Compra fiada';
     const { rows } = await db.query(
-      `INSERT INTO fiado_compras (tenant_id, cliente_id, order_id, descricao, valor)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [tenantId, cliente_id, order_id || null, descricao || 'Compra fiada', valor]
+      `INSERT INTO fiado_compras (tenant_id, cliente_id, order_id, descricao, valor, tipo)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [tenantId, cliente_id, order_id || null, descricao || defaultDesc, valor, tipo]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
@@ -183,7 +187,8 @@ exports.resumo = async (req, res, next) => {
          COUNT(DISTINCT CASE WHEN fc.bloqueado THEN fc.id END)         AS clientes_bloqueados,
          COALESCE(SUM(CASE WHEN c.status='pendente' THEN c.valor END), 0) AS total_aberto,
          COALESCE(SUM(CASE WHEN c.status='pago'     THEN c.valor END), 0) AS total_recebido,
-         COUNT(CASE WHEN c.status='pendente' THEN 1 END)               AS compras_pendentes
+         COUNT(CASE WHEN c.status='pendente' AND COALESCE(c.tipo,'compra')='compra' THEN 1 END) AS compras_pendentes,
+         COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor END), 0) AS total_creditos
        FROM fiado_clientes fc
        LEFT JOIN fiado_compras c ON c.cliente_id = fc.id
        WHERE fc.tenant_id = $1`,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import RouteOptimizerModal from '../components/RouteOptimizerModal';
 
 // ── API — usa a mesma BASE do axios do projeto (resolve VITE_API_URL) ──
 import baseApi from '../api/axios';
@@ -276,84 +277,148 @@ function PayModal({ delivery, onConfirm, onClose }) {
 // DRIVER MAP TAB
 // ─────────────────────────────────────────────────────────────
 
-function DriverMapTab({ active }) {
-  const [coords, setCoords] = useState({}); // { delivery_id: [lng, lat] }
+function DriverMapTab({ active, available, onAccept, loading }) {
+  // coords keyed by unique key: "a-{delivery_id}" or "v-{id}"
+  const [coords,   setCoords]   = useState({});
+  const [filter,   setFilter]   = useState('all'); // 'all' | 'active' | 'available'
   const geocoding = useRef(new Set());
 
-  // Constrói mapa restaurante → cor
-  const restaurants = [...new Set(active.map((d) => d.restaurant_name).filter(Boolean))];
-  const restaurantColor = {};
-  restaurants.forEach((r, i) => {
-    restaurantColor[r] = RESTAURANT_COLORS[i % RESTAURANT_COLORS.length];
-  });
+  // Todos os pedidos combinados
+  const allItems = [
+    ...active.map((d)    => ({ ...d, _type: 'active',    _key: `a-${d.delivery_id}` })),
+    ...available.map((d) => ({ ...d, _type: 'available', _key: `v-${d.id}` })),
+  ];
 
-  // Geocodifica endereços
+  const shown = filter === 'active'    ? allItems.filter((d) => d._type === 'active')
+              : filter === 'available' ? allItems.filter((d) => d._type === 'available')
+              : allItems;
+
+  // Restaurantes únicos → cor
+  const restaurants = [...new Set(allItems.map((d) => d.restaurant_name).filter(Boolean))];
+  const restaurantColor = {};
+  restaurants.forEach((r, i) => { restaurantColor[r] = RESTAURANT_COLORS[i % RESTAURANT_COLORS.length]; });
+
+  // Geocodifica todos os endereços
   useEffect(() => {
-    active.forEach(async (d) => {
-      const key = d.delivery_id;
+    allItems.forEach(async (d) => {
+      const key = d._key;
       if (coords[key] || geocoding.current.has(key)) return;
       geocoding.current.add(key);
       const addr = (d.customer_address || '') + (d.neighborhood ? ', ' + d.neighborhood : '');
       const c = await geocode(addr);
       if (c) setCoords((prev) => ({ ...prev, [key]: c }));
     });
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, available]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (active.length === 0) {
+  if (allItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-gray-400">
         <span className="text-5xl mb-3">🗺️</span>
-        <p className="text-sm font-medium">Nenhuma entrega ativa no mapa</p>
-        <p className="text-xs text-gray-300 mt-1">Aceite um pedido para ver no mapa</p>
+        <p className="text-sm font-medium">Nenhum pedido no mapa</p>
+        <p className="text-xs text-gray-300 mt-1">Fique online para ver pedidos disponíveis</p>
       </div>
     );
   }
 
   return (
     <div className="p-3">
+      {/* Filtros */}
+      <div className="flex gap-2 mb-3">
+        {[
+          { k: 'all',       label: `Todos (${allItems.length})` },
+          { k: 'available', label: `🟢 Disponíveis (${available.length})` },
+          { k: 'active',    label: `🔵 Ativos (${active.length})` },
+        ].map(({ k, label }) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              filter === k
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-600 border-gray-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Legenda restaurantes */}
       {restaurants.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
           {restaurants.map((r) => (
-            <span
-              key={r}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-white border rounded-full px-2.5 py-1 shadow-sm"
-            >
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ background: restaurantColor[r] }}
-              />
+            <span key={r} className="flex items-center gap-1.5 text-xs font-semibold bg-white border rounded-full px-2.5 py-1 shadow-sm">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: restaurantColor[r] }} />
               {r}
             </span>
           ))}
         </div>
       )}
 
+      {/* Legenda tipos */}
+      <div className="flex gap-3 mb-3 text-xs text-gray-500">
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 rounded-full bg-green-500 border border-white shadow inline-block" /> Disponível
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 rounded-full bg-blue-600 border border-white shadow inline-block" /> Em andamento
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 rounded-full bg-orange-500 border border-white shadow inline-block" /> Restaurante
+        </span>
+      </div>
+
       {/* Mapa */}
-      <div className="rounded-2xl overflow-hidden border border-gray-200 shadow-sm"
-        style={{ height: 'calc(100vh - 260px)', minHeight: 300 }}>
-        <Map center={TORRES_CENTER} zoom={12} theme="light" className="h-full w-full">
-          {active.map((d) => {
-            const c     = coords[d.delivery_id];
+      <div className="rounded-2xl overflow-hidden border border-gray-800 shadow-sm"
+        style={{ height: 'calc(100vh - 310px)', minHeight: 320 }}>
+        <Map center={TORRES_CENTER} zoom={12} theme="dark" className="h-full w-full">
+
+          {/* Marcadores de restaurantes */}
+          {[...new Set(shown.map((d) => d.restaurant_name).filter(Boolean))].map((r) => (
+            <MapMarker key={`rest-${r}`} longitude={TORRES_CENTER[0]} latitude={TORRES_CENTER[1]}>
+              <MarkerContent>
+                <div className="w-8 h-8 rounded-full bg-orange-500 border-2 border-white shadow-lg flex items-center justify-center text-sm">🏪</div>
+              </MarkerContent>
+              <MarkerTooltip><span className="text-xs font-bold">{r}</span></MarkerTooltip>
+            </MapMarker>
+          ))}
+
+          {/* Marcadores dos pedidos */}
+          {shown.map((d) => {
+            const c = coords[d._key];
             if (!c) return null;
-            const color = restaurantColor[d.restaurant_name] || '#3b82f6';
+            const isAvail = d._type === 'available';
+            const color   = isAvail ? '#22c55e' : (restaurantColor[d.restaurant_name] || '#3b82f6');
             return (
-              <MapMarker key={d.delivery_id} longitude={c[0]} latitude={c[1]}>
+              <MapMarker key={d._key} longitude={c[0]} latitude={c[1]}>
                 <MarkerContent>
                   <div
-                    className="w-9 h-9 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-xs font-black"
-                    style={{ background: color }}
+                    className="rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white font-black"
+                    style={{ background: color, width: 36, height: 36, fontSize: 11 }}
                   >
                     #{d.order_number}
                   </div>
                 </MarkerContent>
                 <MarkerTooltip>
-                  <div className="text-xs space-y-0.5 min-w-[120px]">
-                    <p className="font-bold text-gray-800">{d.customer_name || 'Cliente'}</p>
-                    <p className="text-gray-600">{d.customer_address}</p>
+                  <div className="text-xs space-y-1 min-w-[140px]">
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                      <span className="font-bold text-white">{isAvail ? 'Disponível' : 'Em andamento'}</span>
+                    </div>
+                    <p className="font-semibold text-gray-100">{d.customer_name || 'Cliente'}</p>
+                    <p className="text-gray-300">{d.customer_address}</p>
                     {d.neighborhood && <p className="text-gray-400">{d.neighborhood}</p>}
-                    <p className="font-semibold mt-1" style={{ color }}>🏪 {d.restaurant_name}</p>
-                    <p className="text-green-600 font-semibold">{fmt(d.total)}</p>
+                    <p className="text-gray-300">🏪 {d.restaurant_name}</p>
+                    <p className="text-green-400 font-bold">{fmt(d.total)}</p>
+                    {isAvail && (
+                      <button
+                        onClick={() => onAccept(d.id)}
+                        disabled={loading}
+                        className="w-full mt-1 py-1 rounded-lg bg-green-500 text-white text-xs font-bold disabled:opacity-60"
+                      >
+                        ✅ Aceitar
+                      </button>
+                    )}
                   </div>
                 </MarkerTooltip>
               </MapMarker>
@@ -364,27 +429,36 @@ function DriverMapTab({ active }) {
 
       {/* Cards abaixo do mapa */}
       <div className="mt-3 space-y-2">
-        {active.map((d) => {
-          const color = restaurantColor[d.restaurant_name] || '#3b82f6';
+        {shown.map((d) => {
+          const isAvail = d._type === 'available';
+          const color   = isAvail ? '#22c55e' : (restaurantColor[d.restaurant_name] || '#3b82f6');
           return (
-            <div
-              key={d.delivery_id}
-              className="bg-white rounded-xl px-3 py-2.5 shadow-sm border-l-4 flex items-center gap-3"
-              style={{ borderLeftColor: color }}
-            >
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0"
-                style={{ background: color }}
-              >
+            <div key={d._key} className="bg-white rounded-xl px-3 py-2.5 shadow-sm border-l-4 flex items-center gap-3"
+              style={{ borderLeftColor: color }}>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0"
+                style={{ background: color }}>
                 #{d.order_number}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-800 truncate">{d.customer_name || 'Cliente'}</p>
                 <p className="text-xs text-gray-500 truncate">{d.customer_address}</p>
+                <p className="text-xs text-gray-400">{d.restaurant_name}</p>
               </div>
-              <div className="text-right shrink-0">
+              <div className="text-right shrink-0 space-y-1">
                 <p className="text-xs font-bold text-green-600">{fmt(d.total)}</p>
-                <p className="text-[10px] text-gray-400 capitalize">{d.delivery_status?.replace('_', ' ')}</p>
+                {isAvail ? (
+                  <button
+                    onClick={() => onAccept(d.id)}
+                    disabled={loading}
+                    className="text-[10px] font-bold bg-green-500 text-white px-2 py-0.5 rounded-full disabled:opacity-60"
+                  >
+                    Aceitar
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-blue-500 font-semibold capitalize">
+                    {d.delivery_status?.replace('_', ' ')}
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -584,18 +658,22 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b bg-gray-50">
           <div className="flex items-center gap-2">
-            <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded-full">
-              #{delivery.order_number}
-            </span>
+            {delivery.order_number ? (
+              <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded-full">
+                #{delivery.order_number}
+              </span>
+            ) : (
+              <span className="bg-gray-400 text-white text-xs font-black px-2 py-0.5 rounded-full">#—</span>
+            )}
             <span className="text-xs text-gray-500">{delivery.restaurant_name}</span>
           </div>
           <div className="flex items-center gap-2">
-            {!isPaid && (
+            {type === 'active' && !isPaid && (
               <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                 <Icon d={ICONS.alert} size={12} /> COBRAR
               </span>
             )}
-            {isPaid && (
+            {type === 'active' && isPaid && (
               <span className="text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                 <Icon d={ICONS.check} size={12} /> PAGO
               </span>
@@ -721,22 +799,22 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
                 🗺 Ir ao cliente
               </button>
 
-              {!isPaid ? (
+              {!isPaid && (
                 <button
                   onClick={() => setShowPayModal(true)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-yellow-500 to-orange-500 text-white"
                 >
                   💰 Cobrar
                 </button>
-              ) : (
-                <button
-                  onClick={() => onComplete(delivery.delivery_id)}
-                  disabled={loading}
-                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-60"
-                >
-                  ✅ Entregue!
-                </button>
               )}
+
+              <button
+                onClick={() => onComplete(delivery.delivery_id)}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-60"
+              >
+                ✅ Entregue!
+              </button>
             </>
           )}
         </div>
@@ -757,6 +835,7 @@ export default function DriverApp() {
 
   const [tab,          setTab]          = useState('deliveries');
   const [subTab,       setSubTab]       = useState(() => localStorage.getItem('driverSubTab') || 'available');
+  const [showMapModal, setShowMapModal] = useState(false);
   const [online,       setOnline]       = useState(() => localStorage.getItem('driverOnline') === 'true');
   const [available,    setAvailable]    = useState([]);
   const [active,       setActive]       = useState([]);
@@ -770,6 +849,7 @@ export default function DriverApp() {
   const [connectMsg,   setConnectMsg]   = useState('');
   const [error,        setError]        = useState('');
   const [acceptToast,  setAcceptToast]  = useState(null); // { orderNumber }
+  const [showRouteOpt, setShowRouteOpt] = useState(false);
 
   const pollRef          = useRef(null);
   const socketRef        = useRef(null);
@@ -829,9 +909,9 @@ export default function DriverApp() {
   useEffect(() => {
     if (!token) return;
     fetchDeliveries();
-    if (online) {
-      pollRef.current = setInterval(fetchDeliveries, 15_000);
-    }
+    // Sempre faz polling: 15s quando online (verifica novos pedidos disponíveis),
+    // 30s quando offline (garante que pedidos atribuídos pelo restaurante apareçam)
+    pollRef.current = setInterval(fetchDeliveries, online ? 15_000 : 30_000);
     return () => clearInterval(pollRef.current);
   }, [token, online, fetchDeliveries]);
 
@@ -1118,7 +1198,59 @@ export default function DriverApp() {
                   )}
                 </button>
               ))}
+              {/* Botão mapa */}
+              <button
+                onClick={() => setShowMapModal(true)}
+                className="px-3 py-3 text-blue-600 flex flex-col items-center justify-center gap-0.5 border-l border-gray-100"
+              >
+                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d={ICONS.mapTab} />
+                </svg>
+                <span className="text-[9px] font-bold leading-none">MAPA</span>
+              </button>
             </div>
+
+            {/* Modal roteirizador */}
+            {showRouteOpt && (
+              <RouteOptimizerModal
+                deliveries={active}
+                driverLat={profile?.lat ?? null}
+                driverLng={profile?.lng ?? null}
+                onClose={() => setShowRouteOpt(false)}
+              />
+            )}
+
+            {/* Modal mapa full-screen */}
+            {showMapModal && (
+              <div className="fixed inset-0 z-[70] bg-white flex flex-col">
+                {/* Header do modal */}
+                <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-4 py-3 flex items-center justify-between shrink-0">
+                  <div>
+                    <p className="text-white font-black text-base">🗺️ Mapa de Pedidos</p>
+                    <p className="text-blue-200 text-xs">
+                      {available.length > 0 && `${available.length} disponível${available.length > 1 ? 'is' : ''}`}
+                      {available.length > 0 && active.length > 0 && ' · '}
+                      {active.length > 0 && `${active.length} em andamento`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowMapModal(false)}
+                    className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-lg"
+                  >
+                    ×
+                  </button>
+                </div>
+                {/* Mapa */}
+                <div className="flex-1 overflow-y-auto">
+                  <DriverMapTab
+                    active={active}
+                    available={available}
+                    onAccept={(id) => { handleAccept(id); setShowMapModal(false); }}
+                    loading={loading}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="p-3">
               {subTab === 'available' && (
@@ -1134,11 +1266,26 @@ export default function DriverApp() {
               {subTab === 'active' && (
                 active.length === 0
                   ? <div className="text-center text-gray-500 text-sm py-16">Nenhuma entrega em andamento</div>
-                  : active.map((d) => (
-                      <DeliveryCard key={d.delivery_id} delivery={d} type="active"
-                        onPickup={handlePickup} onPay={handlePay}
-                        onComplete={handleComplete} loading={loading} />
-                    ))
+                  : <>
+                      {/* Botão Roteirizar — aparece quando há 2+ entregas ativas */}
+                      {active.length >= 2 && (
+                        <button
+                          onClick={() => setShowRouteOpt(true)}
+                          className="w-full mb-3 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-purple-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-md active:scale-95 transition-transform"
+                        >
+                          <svg width={18} height={18} viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6-3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                          </svg>
+                          Roteirizar {active.length} Entregas
+                        </button>
+                      )}
+                      {active.map((d) => (
+                        <DeliveryCard key={d.delivery_id} delivery={d} type="active"
+                          onPickup={handlePickup} onPay={handlePay}
+                          onComplete={handleComplete} loading={loading} />
+                      ))}
+                    </>
               )}
             </div>
           </div>
@@ -1148,10 +1295,10 @@ export default function DriverApp() {
         {tab === 'map' && (
           <div>
             <div className="px-4 pt-4 pb-2">
-              <h2 className="text-base font-black text-gray-800">Mapa de Entregas</h2>
-              <p className="text-xs text-gray-500">Entregas ativas · cores por restaurante</p>
+              <h2 className="text-base font-black text-gray-800">Mapa de Pedidos</h2>
+              <p className="text-xs text-gray-500">Disponíveis + em andamento · toque para ver detalhes</p>
             </div>
-            <DriverMapTab active={active} profile={profile} />
+            <DriverMapTab active={active} available={available} onAccept={handleAccept} loading={loading} />
           </div>
         )}
 

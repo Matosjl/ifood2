@@ -1,16 +1,48 @@
 import { useMemo } from 'react';
 
-const NAV_ITEMS = [
-  { key: 'orders',    emoji: '🍽️', label: 'Pedidos' },
-  { key: 'products',  emoji: '📦', label: 'Produtos' },
-  { key: 'stock',     emoji: '📊', label: 'Estoque' },
-  { key: 'financial', emoji: '💰', label: 'Financeiro' },
-  { key: 'relatorios',emoji: '📈', label: 'Relatórios' },
-{ key: 'fiado',     emoji: '🤝', label: 'Fiado' },
-  { key: 'entregas',  emoji: '🛵',  label: 'Entregas' },
-  { key: 'settings',  emoji: '⚙️',  label: 'Configurações' },
-  { key: 'plans',     emoji: '💎', label: 'Planos' },
+// ── Nav groups ────────────────────────────────────────────────
+
+const NAV_GROUPS = [
+  {
+    label: 'Operação',
+    items: [
+      { key: 'orders',   emoji: '🍽️', label: 'Pedidos' },
+      { key: 'entregas', emoji: '🛵', label: 'Entregas' },
+    ],
+  },
+  {
+    label: 'Catálogo',
+    items: [
+      { key: 'products', emoji: '📦', label: 'Produtos' },
+      { key: 'stock',    emoji: '📊', label: 'Estoque' },
+    ],
+  },
+  {
+    label: 'Gestão',
+    items: [
+      { key: 'financial',  emoji: '💰', label: 'Financeiro' },
+      { key: 'clientes',   emoji: '👥', label: 'Clientes' },
+      { key: 'fiado',      emoji: '🤝', label: 'Fiado' },
+      { key: 'relatorios', emoji: '📈', label: 'Relatórios' },
+    ],
+  },
+  {
+    label: 'Inteligência',
+    items: [
+      { key: 'ai',        emoji: '🤖', label: 'IA ZapFome' },
+      { key: 'marketing', emoji: '📣', label: 'Marketing IA', soon: true },
+    ],
+  },
+  {
+    label: 'Sistema',
+    items: [
+      { key: 'settings', emoji: '⚙️', label: 'Configurações' },
+      { key: 'plans',    emoji: '💎', label: 'Planos', special: 'purple' },
+    ],
+  },
 ];
+
+// ── Helpers ───────────────────────────────────────────────────
 
 const daysLeft = (dateStr) => {
   if (!dateStr) return null;
@@ -38,9 +70,7 @@ function TrialWidget({ onShowPlans }) {
       ? 'text-red-400 bg-red-500/10 border-red-500/20'
       : 'text-orange-400 bg-orange-500/10 border-orange-500/20';
 
-  const label = premiumActive
-    ? `Premium: ${premium}d`
-    : `Trial: ${total}d`;
+  const label = premiumActive ? `Premium: ${premium}d` : `Trial: ${total}d`;
 
   return (
     <button
@@ -54,6 +84,8 @@ function TrialWidget({ onShowPlans }) {
   );
 }
 
+// ── Main component ────────────────────────────────────────────
+
 export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
   const user = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
@@ -64,6 +96,11 @@ export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
     try { return JSON.parse(localStorage.getItem('tenant') ?? '{}'); }
     catch { return {}; }
   }, []);
+
+  const handleNav = (key) => {
+    if (key === 'plans') { onShowPlans?.(); return; }
+    setPage(key);
+  };
 
   return (
     <aside className="w-14 md:w-56 shrink-0 bg-gray-900 border-r border-white/[0.06] flex flex-col h-full z-10">
@@ -86,35 +123,49 @@ export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(({ key, emoji, label, soon }) => (
-          <button
-            key={key}
-            disabled={soon}
-            onClick={() => {
-              if (soon) return;
-              if (key === 'plans') { onShowPlans?.(); return; }
-              setPage(key);
-            }}
-            className={[
-              'w-full flex items-center gap-3 px-2.5 md:px-3 py-2.5 rounded-xl text-sm font-semibold transition-all',
-              page === key
-                ? 'bg-orange-500/15 text-orange-400'
-                : key === 'plans'
-                  ? 'text-purple-400 hover:bg-purple-500/10'
-                  : soon
-                    ? 'text-gray-600 cursor-not-allowed opacity-50'
-                    : 'text-gray-400 hover:text-white hover:bg-white/[0.06]',
-            ].join(' ')}
-          >
-            <span className="text-base shrink-0 w-5 text-center leading-none">{emoji}</span>
-            <span className="hidden md:block flex-1 text-left">{label}</span>
-            {soon && (
-              <span className="hidden md:block text-[10px] bg-gray-800 text-gray-600 px-1.5 py-0.5 rounded-full leading-none shrink-0">
-                em breve
-              </span>
-            )}
-          </button>
+      <nav className="flex-1 py-2 overflow-y-auto">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="mb-1">
+            {/* Group label */}
+            <p className="hidden md:block text-[10px] font-bold text-gray-600 uppercase tracking-widest px-4 pt-3 pb-1 select-none">
+              {group.label}
+            </p>
+
+            <div className="px-2 space-y-0.5">
+              {group.items.map(({ key, emoji, label, soon, special }) => {
+                const isActive = page === key;
+                return (
+                  <button
+                    key={key}
+                    disabled={soon}
+                    onClick={() => { if (!soon) handleNav(key); }}
+                    title={label}
+                    className={[
+                      'w-full flex items-center gap-3 px-2.5 md:px-3 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                      isActive
+                        ? 'bg-orange-500/15 text-orange-400'
+                        : special === 'purple'
+                          ? 'text-purple-400 hover:bg-purple-500/10'
+                          : soon
+                            ? 'text-gray-600 cursor-not-allowed opacity-40'
+                            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]',
+                    ].join(' ')}
+                  >
+                    <span className="text-base shrink-0 w-5 text-center leading-none">{emoji}</span>
+                    <span className="hidden md:block flex-1 text-left truncate">{label}</span>
+                    {soon && (
+                      <span className="hidden md:block text-[10px] bg-gray-800 text-gray-600 px-1.5 py-0.5 rounded-full leading-none shrink-0">
+                        breve
+                      </span>
+                    )}
+                    {isActive && (
+                      <span className="hidden md:block w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         ))}
       </nav>
 

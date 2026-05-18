@@ -11,6 +11,8 @@ import FiadoPage         from './pages/FiadoPage';
 import RelatoriosPage    from './pages/RelatoriosPage';
 import EntregasPage      from './pages/EntregasPage';
 import PlansPage         from './pages/PlansPage';
+import AIInsightsPage    from './pages/AIInsightsPage';
+import ClientesPage      from './pages/ClientesPage';
 import Sidebar           from './components/Sidebar';
 import TrialBanner       from './components/TrialBanner';
 import PlanWall          from './components/PlanWall';
@@ -152,6 +154,8 @@ export default function App() {
               {page === 'relatorios' && <RelatoriosPage />}
               {page === 'fiado'      && <FiadoPage />}
               {page === 'entregas'   && <EntregasPage />}
+              {page === 'ai'         && <AIInsightsPage />}
+              {page === 'clientes'   && <ClientesPage />}
               {page === 'settings'   && <ConfiguracoesPage />}
             </>
           )}

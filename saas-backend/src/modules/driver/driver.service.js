@@ -83,7 +83,7 @@ const getAvailableDeliveries = async (driverId) => {
                   'productName', oi.product_name,
                   'quantity',    oi.quantity,
                   'total',       oi.total
-                ) ORDER BY oi.created_at
+                ) ORDER BY oi.id
               ) FILTER (WHERE oi.id IS NOT NULL), '[]'
             ) AS items
      FROM orders o
@@ -119,7 +119,7 @@ const getActiveDeliveries = async (driverId) => {
                   'productName', oi.product_name,
                   'quantity',    oi.quantity,
                   'total',       oi.total
-                ) ORDER BY oi.created_at
+                ) ORDER BY oi.id
               ) FILTER (WHERE oi.id IS NOT NULL), '[]'
             ) AS items
      FROM deliveries d
@@ -154,10 +154,18 @@ const acceptDelivery = async (driverId, orderId) => {
     if (!orderRows.length) throw new AppError('Pedido não disponível.', 409);
 
     const { rows: existing } = await client.query(
-      `SELECT id FROM deliveries WHERE order_id = $1 AND status != 'cancelled'`,
+      `SELECT id, driver_id FROM deliveries WHERE order_id = $1 AND status != 'cancelled'`,
       [orderId]
     );
-    if (existing.length) throw new AppError('Pedido já aceito por outro motoboy.', 409);
+    if (existing.length) {
+      // Mesmo motoboy clicou duas vezes — retorna idempotente sem erro
+      if (String(existing[0].driver_id) === String(driverId)) {
+        await client.query('ROLLBACK');
+        const { rows: current } = await db.query('SELECT * FROM deliveries WHERE id = $1', [existing[0].id]);
+        return current[0];
+      }
+      throw new AppError('Pedido já aceito por outro motoboy.', 409);
+    }
 
     const driverFee = (parseFloat(orderRows[0].delivery_fee) || 0) * 0.7;
 
@@ -180,14 +188,29 @@ const acceptDelivery = async (driverId, orderId) => {
 // ── Confirmar coleta ──────────────────────────────────────────
 
 const confirmPickup = async (driverId, deliveryId) => {
-  const { rows } = await db.query(
-    `UPDATE deliveries SET status = 'picked_up', picked_up_at = NOW()
-     WHERE id = $1 AND driver_id = $2 AND status = 'accepted'
-     RETURNING *`,
-    [deliveryId, driverId]
-  );
-  if (!rows.length) throw new AppError('Entrega não encontrada ou status inválido.', 404);
-  return rows[0];
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `UPDATE deliveries SET status = 'picked_up', picked_up_at = NOW()
+       WHERE id = $1 AND driver_id = $2 AND status = 'accepted'
+       RETURNING *`,
+      [deliveryId, driverId]
+    );
+    if (!rows.length) throw new AppError('Entrega não encontrada ou status inválido.', 404);
+    // Atualiza pedido para 'delivering' para o kanban do restaurante refletir
+    await client.query(
+      `UPDATE orders SET status = 'delivering', updated_at = NOW() WHERE id = $1`,
+      [rows[0].order_id]
+    );
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 };
 
 // ── Registrar pagamento ───────────────────────────────────────
@@ -219,12 +242,6 @@ const confirmDelivery = async (driverId, deliveryId) => {
   );
   if (!del.length) throw new AppError('Entrega não encontrada.', 404);
   const delivery = del[0];
-
-  // Pix já é confirmado online — não precisa de pagamento presencial
-  const isPix = delivery.payment_method === 'pix';
-  if (!isPix && !delivery.paid_at) {
-    throw new AppError('PEDIDO NÃO ESTÁ PAGO! Registre o pagamento antes de confirmar entrega.', 403);
-  }
 
   const client = await db.getClient();
   try {

@@ -181,6 +181,9 @@ export default function useOrders() {
   //
   // isFetchingRef evita fetches paralelos (inflight lock).
 
+  // Guarda contra double-click: IDs de pedidos com request em voo
+  const pendingStatusRef = useRef(new Set());
+
   const isFetchingRef = useRef(false);
 
   const fetchToday = useCallback(async () => {
@@ -219,6 +222,12 @@ export default function useOrders() {
 
   const changeStatus = useCallback(async (id, status) => {
     const snapshot = orders.find((o) => o.id === id);
+    // Guarda 1: mesmo status = no-op silencioso
+    if (snapshot?.status === status) return;
+    // Guarda 2: request já em voo para este pedido (double-click antes do otimistic commit)
+    if (pendingStatusRef.current.has(id)) return;
+
+    pendingStatusRef.current.add(id);
     setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status } : o));
     acknowledgeOrder(id);
     try {
@@ -226,6 +235,8 @@ export default function useOrders() {
     } catch (err) {
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
       setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao atualizar pedido')}`);
+    } finally {
+      pendingStatusRef.current.delete(id);
     }
   }, [orders, acknowledgeOrder]);
 
