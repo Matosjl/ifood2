@@ -8,7 +8,6 @@
 const axios  = require('axios');
 const db     = require('../config/database');
 const env    = require('../config/env');
-const logger = require('../config/logger');
 
 // Statuses que geram notificação ao cliente
 const NOTIFY_STATUSES = new Set(['confirmed', 'preparing', 'ready', 'delivering']);
@@ -97,12 +96,12 @@ async function notifyCustomer(tenantId, order) {
 
     const instance = await getTenantInstance(tenantId);
     if (!instance) {
-      logger.debug('[waNotify] Instância WhatsApp não configurada para tenant', { tenantId });
+      console.log('[waNotify] Instância WhatsApp não configurada para tenant', { tenantId });
       return;
     }
 
     if (!env.EVOLUTION_API_URL || !env.EVOLUTION_API_KEY) {
-      logger.debug('[waNotify] EVOLUTION_API_URL/KEY não configurados');
+      console.log('[waNotify] EVOLUTION_API_URL/KEY não configurados');
       return;
     }
 
@@ -112,14 +111,14 @@ async function notifyCustomer(tenantId, order) {
       { headers: { apikey: env.EVOLUTION_API_KEY }, timeout: 8000 }
     );
 
-    logger.info('[waNotify] Notificação enviada ao cliente', {
+    console.log('[waNotify] Notificação enviada ao cliente', {
       tenantId,
       status: order.status,
       phone:  `...${phone.slice(-4)}`,
     });
   } catch (err) {
     // Nunca deixa erro de WA quebrar o fluxo principal
-    logger.warn('[waNotify] Falha ao enviar notificação', {
+    console.warn('[waNotify] Falha ao enviar notificação', {
       tenantId,
       status: order?.status,
       error:  err.message,
