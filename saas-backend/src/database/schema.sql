@@ -163,8 +163,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method  VARCHAR(30)  NOT NUL
 ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS featured  BOOLEAN NOT NULL DEFAULT false;
 
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(30);
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address         TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_number   VARCHAR(30);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_instance VARCHAR(100);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address           TEXT;
 
 -- ── EXPENSES (gastos mensais) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS expenses (

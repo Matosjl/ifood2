@@ -88,8 +88,10 @@ async function notifyCustomer(tenantId, order) {
   try {
     if (!NOTIFY_STATUSES.has(order.status)) return;
 
-    const phone = (order.customer_phone || '').replace(/\D/g, '');
+    let phone = (order.customer_phone || '').replace(/\D/g, '');
     if (!phone) return;
+    // Garante prefixo Brasil (55) — Evolution API exige número completo
+    if (!phone.startsWith('55')) phone = '55' + phone;
 
     const message = buildMessage(order);
     if (!message) return;
