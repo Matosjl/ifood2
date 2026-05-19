@@ -212,27 +212,30 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
 
       {/* Footer: total + pagamento */}
       <div className="px-3 pt-1.5 pb-2 border-t border-white/5 space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-base font-black text-white">R$ {parseFloat(order.total).toFixed(2)}</span>
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-base font-black text-white tabular-nums whitespace-nowrap">
+              R$&nbsp;{parseFloat(order.total).toFixed(2).replace('.', ',')}
+            </span>
             {order.deliveryType === 'delivery' ? (
-              <span className="text-xs text-blue-300 font-medium">
-                🛵 Entrega{order.deliveryFee > 0 ? ` +R$${parseFloat(order.deliveryFee).toFixed(2)}` : ''}
+              <span className="text-xs text-blue-300 font-medium whitespace-nowrap">
+                🛵 Entrega{order.deliveryFee > 0 ? ` +R$${parseFloat(order.deliveryFee).toFixed(2).replace('.', ',')}` : ''}
               </span>
             ) : (
-              <span className="text-xs text-gray-500 font-medium">🏪 Retirada</span>
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">🏪 Retirada</span>
             )}
-            <span className="text-xs text-gray-500">·</span>
+          </div>
+          <div className="flex items-center gap-1.5">
             {isPendingPayment ? (
-              <span className="text-xs font-semibold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded">
+              <span className="text-xs font-semibold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded whitespace-nowrap">
                 ⏳ A cobrar
               </span>
             ) : order.paidAt ? (
-              <span className="text-xs font-semibold text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">
+              <span className="text-xs font-semibold text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded whitespace-nowrap">
                 ✓ Pago · {PAY_ICONS[order.paymentMethod] ?? '💵'} {PAY_LABELS[order.paymentMethod] ?? order.paymentMethod}
               </span>
             ) : (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 whitespace-nowrap">
                 {PAY_ICONS[order.paymentMethod] ?? '💵'} {PAY_LABELS[order.paymentMethod] ?? order.paymentMethod}
               </span>
             )}
