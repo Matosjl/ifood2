@@ -28,9 +28,15 @@ CREATE TABLE IF NOT EXISTS tenants (
   billing_period_start  TIMESTAMPTZ  NOT NULL DEFAULT date_trunc('month', NOW()),
   -- reset lazy: plan.middleware verifica e zera quando mes vira
 
+  -- ── Chatbot WhatsApp ──────────────────────────────────────
+  chatbot_enabled      BOOLEAN      NOT NULL DEFAULT true,
+
   created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent migration: add chatbot_enabled if not exists
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS chatbot_enabled BOOLEAN NOT NULL DEFAULT true;
 
 -- ── USERS ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (

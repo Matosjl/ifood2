@@ -27,4 +27,11 @@ router.put('/plan',
   ctrl.updatePlan
 );
 
+// PATCH /api/tenant/chatbot — liga/desliga o chatbot WhatsApp (owner only)
+router.patch('/chatbot',
+  authorize('owner'),
+  body('enabled').isBoolean().withMessage('"enabled" deve ser true ou false.'),
+  ctrl.setChatbot
+);
+
 module.exports = router;

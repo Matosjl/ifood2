@@ -41,4 +41,23 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows[0] });
 });
 
-module.exports = { getMe, updatePlan, updateProfile };
+/**
+ * PATCH /api/tenant/chatbot
+ * Body: { enabled: boolean }
+ * Liga/desliga o chatbot WhatsApp do tenant (owner only).
+ */
+const setChatbot = asyncHandler(async (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') throw new AppError('Campo "enabled" deve ser boolean.', 400);
+
+  const { rows } = await db.query(
+    `UPDATE tenants SET chatbot_enabled = $2, updated_at = NOW()
+     WHERE id = $1 RETURNING id, chatbot_enabled`,
+    [req.user.tenantId, enabled]
+  );
+  if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
+
+  res.json({ success: true, data: rows[0] });
+});
+
+module.exports = { getMe, updatePlan, updateProfile, setChatbot };

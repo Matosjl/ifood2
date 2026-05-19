@@ -14,7 +14,7 @@ const eventService    = require('../../socket/eventService');
 /** GET /api/internal/tenants/:tenantId */
 const getTenant = asyncHandler(async (req, res) => {
   const { rows } = await db.query(
-    `SELECT id, name, plan, active, subscription_status, created_at
+    `SELECT id, name, plan, active, subscription_status, chatbot_enabled, created_at
      FROM tenants WHERE id = $1`,
     [req.params.tenantId]
   );

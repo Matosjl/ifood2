@@ -149,8 +149,10 @@ function RestauranteTab({ currentUser, onToast }) {
   const [defaultFee,   setDefaultFee]   = useState(
     () => localStorage.getItem('defaultDeliveryFee') ?? ''
   );
-  const [saving,       setSaving]       = useState(false);
-  const [tenant,       setTenant]       = useState(null);
+  const [saving,        setSaving]        = useState(false);
+  const [tenant,        setTenant]        = useState(null);
+  const [chatbotEnabled, setChatbotEnabled] = useState(true);
+  const [savingChatbot,  setSavingChatbot]  = useState(false);
 
   useEffect(() => {
     getTenantInfo()
@@ -160,9 +162,23 @@ function RestauranteTab({ currentUser, onToast }) {
         setName(t.name ?? '');
         setWhatsapp(t.whatsapp_number ?? '');
         setAddress(t.address ?? '');
+        setChatbotEnabled(t.chatbot_enabled ?? true);
       })
       .catch(() => {});
   }, []);
+
+  const handleChatbotToggle = async (val) => {
+    setSavingChatbot(true);
+    try {
+      await api.patch('/tenant/chatbot', { enabled: val });
+      setChatbotEnabled(val);
+      onToast(val ? 'Chatbot ativado!' : 'Chatbot desativado.');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao alterar chatbot.', 'error');
+    } finally {
+      setSavingChatbot(false);
+    }
+  };
 
   if (currentUser.role !== 'owner') {
     return (
@@ -244,6 +260,38 @@ function RestauranteTab({ currentUser, onToast }) {
           {saving ? 'Salvando...' : 'Salvar'}
         </button>
       </form>
+
+      {/* Chatbot toggle */}
+      <div className="mt-6 pt-5 border-t border-white/[0.06]">
+        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🤖 Chatbot WhatsApp</p>
+        <div className={`flex items-center justify-between gap-4 px-4 py-4 rounded-2xl border transition-colors ${
+          chatbotEnabled
+            ? 'bg-green-500/10 border-green-500/25'
+            : 'bg-gray-800/60 border-white/[0.06]'
+        }`}>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">
+              {chatbotEnabled ? '✅ Chatbot ativo' : '⏸ Chatbot pausado'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {chatbotEnabled
+                ? 'Respondendo automaticamente no WhatsApp'
+                : 'Não está respondendo mensagens automáticas'}
+            </p>
+          </div>
+          <button
+            onClick={() => handleChatbotToggle(!chatbotEnabled)}
+            disabled={savingChatbot}
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+              chatbotEnabled ? 'bg-green-500' : 'bg-gray-600'
+            }`}
+          >
+            <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${
+              chatbotEnabled ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
