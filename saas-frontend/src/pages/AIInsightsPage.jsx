@@ -294,9 +294,19 @@ export default function AIInsightsPage() {
 
       {/* Page header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black text-white">🤖 IA ZapFome</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Agentes inteligentes para o seu restaurante</p>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl shrink-0 shadow-lg shadow-purple-500/30">
+            🤖
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-black text-white">IA ZapFome</h1>
+              <span className="px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[10px] font-black uppercase tracking-widest">
+                Beta
+              </span>
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">Agentes inteligentes para o seu restaurante</p>
+          </div>
         </div>
         <button
           onClick={() => setShowOcr(true)}

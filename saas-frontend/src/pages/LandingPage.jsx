@@ -1,4 +1,6 @@
 // ── LandingPage.jsx ───────────────────────────────────────────
+import { useState } from 'react';
+
 const OWNER_WHATSAPP = '5551981521264';
 
 const waLink = (planName) => {
@@ -53,6 +55,22 @@ const FEATURES = [
   { icon: '📊', title: 'Financeiro completo', desc: 'Relatório de vendas por produto, ticket médio, período personalizado.' },
   { icon: '📦', title: 'Controle de estoque', desc: 'Dedução automática a cada venda, alertas de estoque baixo.' },
 ];
+
+function FaqItem({ q, a }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-gray-900 border border-white/[0.07] rounded-2xl overflow-hidden">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left hover:bg-white/[0.03] transition-colors">
+        <span className="font-bold text-white text-sm">{q}</span>
+        <span className={`w-7 h-7 rounded-full bg-orange-500/15 text-orange-400 flex items-center justify-center text-lg font-black shrink-0 transition-transform ${open ? 'rotate-45' : ''}`}>+</span>
+      </button>
+      {open && (
+        <div className="px-5 pb-4 text-gray-400 text-sm leading-relaxed border-t border-white/[0.06] pt-3">{a}</div>
+      )}
+    </div>
+  );
+}
 
 export default function LandingPage({ onGoLogin, onGoRegister }) {
   return (
@@ -147,7 +165,7 @@ export default function LandingPage({ onGoLogin, onGoRegister }) {
       {/* ── Features ───────────────────────────────────────── */}
       <section className="max-w-6xl mx-auto px-4 py-24">
         <div className="text-center mb-14">
-          <h2 className="text-4xl font-black mb-3">Tudo que seu restaurante precisa</h2>
+          <h2 className="text-4xl font-black mb-3 tracking-tight">Tudo que seu restaurante precisa</h2>
           <p className="text-gray-500 text-lg">Uma plataforma, todas as ferramentas.</p>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -178,6 +196,71 @@ export default function LandingPage({ onGoLogin, onGoRegister }) {
           >
             Criar conta grátis
           </button>
+        </div>
+      </section>
+
+      {/* ── Testimonials ───────────────────────────────────── */}
+      <section className="py-20 bg-white/[0.02] border-y border-white/[0.06]">
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold uppercase tracking-widest text-orange-400 mb-2">Quem já usa</p>
+            <h2 className="text-3xl md:text-4xl font-black tracking-tight">
+              Donos brasileiros, problemas reais, resultado prático.
+            </h2>
+          </div>
+          <div className="grid md:grid-cols-3 gap-5">
+            {[
+              { name: 'Léo da Lanchonete', biz: 'Lancheria do Léo · Torres/RS', emoji: '🍔', stars: 5, quote: 'Antes eu perdia uns 4-5 pedidos por noite no WhatsApp. Hoje cai tudo num painel só, com som. Já me pagou.' },
+              { name: 'Dona Cida', biz: 'Padaria Pão Quente · Caxias/RS', emoji: '🥖', stars: 5, quote: 'O fiado era minha tristeza. Agora o ZapFome lembra quem tá devendo e ainda manda a cobrança pelo Zap pra mim.' },
+              { name: 'Bruno do Açaí', biz: 'Açaí Tropical · Capão/RS', emoji: '🍨', stars: 5, quote: 'O QR Code na fachada mudou meu fim de semana. Cliente chega, escaneia e pede sentado. Subi 30% no mês.' },
+            ].map((t) => (
+              <div key={t.name} className="bg-gray-900 border border-white/[0.07] rounded-2xl p-6 flex flex-col hover:border-orange-500/20 transition-colors">
+                <div className="text-yellow-400 text-lg mb-3 tracking-tight">{'★'.repeat(t.stars)}</div>
+                <p className="text-gray-300 text-base leading-relaxed mb-5 flex-1">"{t.quote}"</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-300 to-amber-400 flex items-center justify-center text-2xl shrink-0">
+                    {t.emoji}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-black text-white text-sm truncate">{t.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{t.biz}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ─────────────────────────────────────────────── */}
+      <section id="duvidas" className="py-24">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold uppercase tracking-widest text-orange-400 mb-2">Dúvidas honestas, respostas honestas</p>
+            <h2 className="text-3xl md:text-4xl font-black tracking-tight">Antes de você perguntar</h2>
+          </div>
+          <div className="space-y-2">
+            {[
+              { q: 'Preciso de algum equipamento ou instalação?', a: 'Não. ZapFome roda no navegador (celular, tablet, computador). Se você tem WhatsApp funcionando, você tem ZapFome funcionando.' },
+              { q: 'Como funciona o pagamento via WhatsApp?', a: 'Você testa 10 dias grátis. Se gostou, manda mensagem no nosso Zap, a gente passa o Pix e libera seu acesso em minutos. Sem cartão preso, sem assinatura automática.' },
+              { q: 'O cardápio digital tem mesmo custo zero pra sempre?', a: 'Pros 100 primeiros restaurantes que se inscreverem, sim — pra sempre, sem cobrar setup nem mensalidade do cardápio. Depois das 100 vagas, vira pago.' },
+              { q: 'E se eu não souber mexer em computador?', a: 'A gente liga, mostra, e te ajuda a cadastrar o cardápio. Em 1 hora você tá vendendo. Vídeos curtos pra cada função, e suporte humano por WhatsApp em horário comercial.' },
+              { q: 'Funciona pra pedidos do iFood/99Food?', a: 'Sim. Pedidos do iFood, WhatsApp, mesa e balcão caem no mesmo painel, separados por canal. Você não precisa ficar pulando de tela.' },
+              { q: 'Posso cancelar quando quiser?', a: 'Pode. Não tem fidelidade, não tem multa, não tem letra miúda. Cancela pelo Zap, e pronto. Seu cardápio digital fica preservado.' },
+            ].map((item, i) => (
+              <FaqItem key={i} q={item.q} a={item.a} />
+            ))}
+          </div>
+          <div className="mt-10 text-center">
+            <p className="text-gray-500 text-sm mb-3">Não encontrou sua dúvida?</p>
+            <a href={waLink('Tenho uma dúvida')} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-3 bg-green-600 hover:bg-green-500 text-white font-bold text-sm rounded-2xl transition-colors active:scale-95 shadow-lg shadow-green-900/40">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0a12 12 0 00-10.4 18l-1.6 6 6.2-1.6A12 12 0 1012 0zm5.5 14.4c-.3-.1-1.8-.9-2-1-.3-.1-.5-.2-.7.1-.2.3-.8 1-1 1.2-.2.2-.3.2-.6.1-.3-.2-1.2-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2-.2-.3 0-.5.1-.6l.4-.5c.1-.2.2-.3.3-.5 0-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4s-1 1-1 2.5 1.1 2.9 1.2 3 2.1 3.3 5.1 4.6c.7.3 1.3.5 1.7.6.7.2 1.3.2 1.8.1.6-.1 1.8-.7 2-1.4.2-.7.2-1.3.1-1.4-.1-.1-.3-.2-.5-.3z"/>
+              </svg>
+              Pergunte direto no WhatsApp
+            </a>
+          </div>
         </div>
       </section>
 

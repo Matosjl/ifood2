@@ -107,11 +107,11 @@ function BarChart({ data, formatX, formatTooltip, color = '#3b82f6' }) {
 
 function MetricCard({ label, value, sub, icon, color = 'blue' }) {
   const colors = {
-    blue:   'bg-blue-500/10  border-blue-500/25  text-blue-400',
-    green:  'bg-green-500/10 border-green-500/25 text-green-400',
-    orange: 'bg-orange-500/10 border-orange-500/25 text-orange-400',
-    red:    'bg-red-500/10   border-red-500/25   text-red-400',
-    purple: 'bg-purple-500/10 border-purple-500/25 text-purple-400',
+    blue:   'bg-gradient-to-br from-blue-500/20 to-blue-600/10 border-blue-500/25 text-blue-400',
+    green:  'bg-gradient-to-br from-green-500/20 to-emerald-600/10 border-green-500/25 text-green-400',
+    orange: 'bg-gradient-to-br from-orange-500/20 to-amber-600/10 border-orange-500/25 text-orange-400',
+    red:    'bg-gradient-to-br from-red-500/20 to-rose-600/10 border-red-500/25 text-red-400',
+    purple: 'bg-gradient-to-br from-purple-500/20 to-pink-600/10 border-purple-500/25 text-purple-400',
   };
   return (
     <div className={`rounded-2xl border p-4 ${colors[color] ?? colors.blue}`}>
@@ -446,7 +446,7 @@ function TabReceitas() {
                   Nenhuma venda neste período
                 </div>
               ) : (
-                <BarChart data={chartData} color="#3b82f6"
+                <BarChart data={chartData} color="#f97316"
                   formatTooltip={(d) => `${d.label}: ${fmtBRL(d.value)} (${d.count} ped.)`} />
               )}
             </div>
@@ -1345,7 +1345,7 @@ export default function FinanceiroPage() {
             onClick={() => setTab(id)}
             className={`shrink-0 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
               tab === id
-                ? 'border-blue-500 text-white'
+                ? 'border-orange-500 text-white'
                 : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
