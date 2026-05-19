@@ -920,9 +920,9 @@ export default function CustomerApp({ slug }) {
 
       {/* Sticky cart bar */}
       {count > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 p-4">
+        <div className="fixed bottom-0 left-0 right-0 z-20 p-4 pointer-events-none">
           <button onClick={() => setCartOpen(true)}
-            className="w-full max-w-lg mx-auto flex items-center justify-between bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-4 rounded-2xl shadow-2xl shadow-orange-300/50 transition-colors active:scale-95">
+            className="pointer-events-auto w-full max-w-lg mx-auto flex items-center justify-between bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-4 rounded-2xl shadow-2xl shadow-orange-300/50 transition-colors active:scale-95">
             <span className="bg-white/25 rounded-full w-7 h-7 flex items-center justify-center font-black text-sm">{count}</span>
             <span className="flex items-center gap-2">
               <IconCart />
@@ -937,7 +937,8 @@ export default function CustomerApp({ slug }) {
       {cartOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setCartOpen(false)} />
-          <div className="relative w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[85vh] flex flex-col">
+          <div className="relative w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[85vh] flex flex-col"
+            style={{ animation: 'slideUp 0.3s cubic-bezier(0.16,1,0.3,1)' }}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
               <div>
                 <h3 className="font-black text-gray-900 text-lg">Seu Carrinho</h3>
@@ -1000,6 +1001,7 @@ export default function CustomerApp({ slug }) {
               </button>
             </div>
           </div>
+          <style>{`@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }`}</style>
         </div>
       )}
     </div>
