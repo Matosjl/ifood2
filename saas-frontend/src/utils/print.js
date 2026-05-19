@@ -219,7 +219,7 @@ export function printOrder(order) {
 
 </body></html>`;
 
-  // ── Impressão via window.open (mais confiável que iframe) ───────
+  // ── Impressão via window.open ────────────────────────────────
   const w = window.open('', '_blank', 'width=300,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
 
   if (!w) {
@@ -238,24 +238,29 @@ export function printOrder(order) {
   w.document.write(html);
   w.document.close();
 
-  // Aguarda carregar e imprime
-  w.onload = () => {
-    setTimeout(() => {
-      w.focus();
-      w.print();
-      // Fecha a janela após impressão
-      setTimeout(() => { try { w.close(); } catch(e){} }, 2000);
-    }, 300);
+  // FIX: usa afterprint para fechar SOMENTE após o dialog ser dispensado.
+  // Evita double-print (onload + fallback setTimeout) e evita fechar
+  // a janela no meio da impressão com timer fixo.
+  let printed = false;
+
+  const doPrint = () => {
+    if (printed) return;   // guarda: nunca imprime duas vezes
+    printed = true;
+
+    // Fecha a janela quando o usuário dispensar o dialog (imprimir ou cancelar)
+    w.addEventListener('afterprint', () => {
+      try { w.close(); } catch (e) { /* já fechada */ }
+    });
+
+    w.focus();
+    w.print();
   };
 
-  // Fallback caso onload não dispare
-  setTimeout(() => {
-    if (!w.closed) {
-      w.focus();
-      w.print();
-      setTimeout(() => { try { w.close(); } catch(e){} }, 2000);
-    }
-  }, 1000);
+  // Dispara via onload (caminho normal)
+  w.onload = () => setTimeout(doPrint, 250);
+
+  // Fallback para browsers que não disparam onload em document.write
+  setTimeout(() => { if (!w.closed) doPrint(); }, 900);
 
   return true;
 }
