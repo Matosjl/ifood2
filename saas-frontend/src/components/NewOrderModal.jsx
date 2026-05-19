@@ -643,31 +643,34 @@ function StepPayment({
           onChange={(e) => setScheduledFor(e.target.value)} className="input w-full text-sm" />
       </div>
 
-      {/* Tipo entrega */}
+      {/* Tipo entrega — cards iFood-style */}
       <div>
-        <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Tipo de pedido</label>
-        <div className="flex gap-2">
+        <label className="text-xs text-gray-400 font-semibold mb-2 block">Como quer receber?</label>
+        <div className="grid grid-cols-2 gap-3">
           {[
-            { v: 'pickup',   label: '🏪 Retirada', color: 'orange' },
-            { v: 'delivery', label: '🛵 Entrega',  color: 'blue'   },
-          ].map(({ v, label, color }) => (
-            <button key={v} type="button" onClick={() => setDeliveryType(v)}
-              className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
-                deliveryType === v
-                  ? color === 'orange'
-                    ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40 scale-[1.02]'
-                    : 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/40 scale-[1.02]'
-                  : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
-              }`}>
-              {label}
-            </button>
-          ))}
+            { v: 'pickup',   emoji: '🏪', label: 'Retirar no local', color: 'orange' },
+            { v: 'delivery', emoji: '🛵', label: 'Receber em casa',  color: 'blue'   },
+          ].map(({ v, emoji, label, color }) => {
+            const active = deliveryType === v;
+            return (
+              <button key={v} type="button" onClick={() => setDeliveryType(v)}
+                className={[
+                  'flex flex-col items-center gap-1.5 py-4 rounded-2xl font-bold text-sm border-2 transition-all active:scale-95',
+                  active && color === 'orange' ? 'border-orange-400 bg-orange-500/15 text-orange-300 shadow-lg shadow-orange-500/10' :
+                  active && color === 'blue'   ? 'border-blue-400   bg-blue-500/15   text-blue-300   shadow-lg shadow-blue-500/10'   :
+                  'border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300 bg-gray-800/40',
+                ].join(' ')}>
+                <span className="text-2xl">{emoji}</span>
+                <span className="text-xs font-semibold">{label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <AnimatePresence>
           {deliveryType === 'delivery' && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className="mt-2 space-y-2 overflow-hidden">
+              className="mt-3 space-y-2 overflow-hidden">
 
               {/* Aviso: telefone obrigatório */}
               {!phoneOk && (
@@ -680,61 +683,91 @@ function StepPayment({
                 </div>
               )}
 
-              {/* Bairro */}
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Bairro *</label>
-                <select value={neighborhood}
-                  onChange={(e) => {
-                    const b = e.target.value;
-                    setNeighborhood(b);
-                    const found = NEIGHBORHOODS.find((n) => n.bairro === b);
-                    setDeliveryFee(found ? String(found.taxa) : '');
-                  }}
-                  className="input w-full text-sm">
-                  <option value="">— Selecione o bairro —</option>
-                  {NEIGHBORHOODS.map(({ bairro, taxa }) => (
-                    <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
-                  ))}
-                  <option value="outro">Outro (taxa manual)</option>
-                </select>
-              </div>
-
-              {/* Rua */}
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Rua</label>
-                <div className="flex gap-1.5">
-                  <input type="text" placeholder="Nome da rua..." value={street}
-                    onChange={(e) => setStreet(e.target.value)} className="input flex-1 text-sm" />
+              {/* CTA de endereço no mapa — iFood-style */}
+              {!street ? (
+                <button type="button" onClick={() => setShowMapPicker(true)}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 border-dashed border-orange-500/40 bg-orange-500/5 hover:bg-orange-500/10 hover:border-orange-500/60 transition-all active:scale-[0.98] group">
+                  <span className="text-2xl shrink-0">📍</span>
+                  <div className="text-left min-w-0">
+                    <p className="text-sm font-bold text-orange-400 group-hover:text-orange-300">Escolher endereço no mapa</p>
+                    <p className="text-xs text-gray-500">Arraste o alfinete para o local exato</p>
+                  </div>
+                  <svg className="w-4 h-4 text-orange-400/60 shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ) : (
+                /* Endereço já selecionado — chip resumo */
+                <div className="flex items-start gap-3 px-4 py-3 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+                  <span className="text-lg shrink-0 mt-0.5">📍</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">
+                      {[street, streetNumber].filter(Boolean).join(', ')}
+                    </p>
+                    {neighborhood && (
+                      <p className="text-xs text-blue-300 truncate">
+                        {neighborhood}{parseFloat(deliveryFee) > 0 ? ` · R$ ${parseFloat(deliveryFee).toFixed(2)}` : ''}
+                      </p>
+                    )}
+                  </div>
                   <button type="button" onClick={() => setShowMapPicker(true)}
-                    title="Escolher no mapa"
-                    className="px-3 py-2 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 text-sm font-bold transition-colors border border-orange-500/20 shrink-0">
-                    🗺️
+                    className="shrink-0 text-xs text-blue-400 hover:text-blue-300 font-semibold px-2 py-1 rounded-lg hover:bg-blue-500/10 transition-colors">
+                    Editar
                   </button>
                 </div>
-              </div>
+              )}
 
-              {/* Número + Complemento */}
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-xs text-gray-400 mb-1 block">Número</label>
-                  <input type="text" placeholder="123" value={streetNumber}
-                    onChange={(e) => setStreetNumber(e.target.value)} className="input w-full text-sm" />
+              {/* Número + Complemento (sempre visível após endereço escolhido) */}
+              {street && (
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 mb-1 block">Número</label>
+                    <input type="text" placeholder="123" value={streetNumber}
+                      onChange={(e) => setStreetNumber(e.target.value)} className="input w-full text-sm" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 mb-1 block">Complemento</label>
+                    <input type="text" placeholder="Apto, casa..." value={complement}
+                      onChange={(e) => setComplement(e.target.value)} className="input w-full text-sm" />
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <label className="text-xs text-gray-400 mb-1 block">Complemento</label>
-                  <input type="text" placeholder="Apto, casa..." value={complement}
-                    onChange={(e) => setComplement(e.target.value)} className="input w-full text-sm" />
+              )}
+
+              {/* Bairro + Taxa (colapsados em linha só para ajuste manual) */}
+              <details className="group">
+                <summary className="text-xs text-gray-500 hover:text-gray-400 cursor-pointer select-none list-none flex items-center gap-1 py-1">
+                  <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  Ajustar bairro / taxa manualmente
+                </summary>
+                <div className="mt-2 space-y-2 pl-1">
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Bairro</label>
+                    <select value={neighborhood}
+                      onChange={(e) => {
+                        const b = e.target.value;
+                        setNeighborhood(b);
+                        const found = NEIGHBORHOODS.find((n) => n.bairro === b);
+                        setDeliveryFee(found ? String(found.taxa) : '');
+                      }}
+                      className="input w-full text-sm">
+                      <option value="">— Selecione o bairro —</option>
+                      {NEIGHBORHOODS.map(({ bairro, taxa }) => (
+                        <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
+                      ))}
+                      <option value="outro">Outro (taxa manual)</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-400 whitespace-nowrap shrink-0">Taxa (R$)</label>
+                    <input type="number" min="0" step="0.50" placeholder="0,00" value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(e.target.value)} className="input flex-1 text-sm text-right" />
+                  </div>
                 </div>
-              </div>
+              </details>
 
-              {/* Taxa */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-400 whitespace-nowrap shrink-0">Taxa de entrega (R$)</label>
-                <input type="number" min="0" step="0.50" placeholder="0,00" value={deliveryFee}
-                  onChange={(e) => setDeliveryFee(e.target.value)} className="input flex-1 text-sm text-right" />
-              </div>
-
-              {neighborhood && neighborhood !== 'outro' && parseFloat(deliveryFee) > 0 && (
+              {neighborhood && neighborhood !== 'outro' && parseFloat(deliveryFee) > 0 && !street && (
                 <p className="text-xs text-blue-400 bg-blue-500/10 rounded-lg px-2.5 py-1.5">
                   🛵 Taxa para <b>{neighborhood}</b>: R$ {parseFloat(deliveryFee).toFixed(2)}
                 </p>
@@ -759,20 +792,29 @@ function StepPayment({
         {/* Modo simples */}
         {!splitMode && (
           <>
-            <div className="grid grid-cols-4 gap-1.5">
-              {PAY_OPTIONS.map(({ value, label }) => (
-                <button key={value} type="button"
-                  onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
-                  className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
-                    paymentMethod === value
-                      ? value === 'fiado'   ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40 scale-[1.03]'
-                      : value === 'pending' ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40 scale-[1.03]'
-                      :                      'bg-green-500/20 text-green-300 ring-1 ring-green-500/40 scale-[1.03]'
-                      : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
-                  }`}>
-                  {label}
-                </button>
-              ))}
+            <div className="grid grid-cols-3 gap-2">
+              {PAY_OPTIONS.map(({ value, label, color }) => {
+                const active = paymentMethod === value;
+                const [emoji, ...rest] = label.split(' ');
+                const name = rest.join(' ');
+                const activeCls =
+                  value === 'fiado'   ? 'border-purple-400 bg-purple-500/15 text-purple-300' :
+                  value === 'pending' ? 'border-orange-400 bg-orange-500/15 text-orange-300' :
+                  value === 'pix'     ? 'border-blue-400   bg-blue-500/15   text-blue-300'   :
+                  value === 'credit' || value === 'debit' ? 'border-violet-400 bg-violet-500/15 text-violet-300' :
+                  'border-green-400 bg-green-500/15 text-green-300';
+                return (
+                  <button key={value} type="button"
+                    onClick={() => { setPaymentMethod(value); setFiadoClienteId(''); setFiadoClienteSearch(''); }}
+                    className={[
+                      'flex flex-col items-center gap-1 py-3 rounded-2xl text-sm font-semibold border-2 transition-all active:scale-95',
+                      active ? activeCls : 'border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300 bg-gray-800/40',
+                    ].join(' ')}>
+                    <span className="text-xl">{emoji}</span>
+                    <span className="text-xs">{name}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <AnimatePresence>
