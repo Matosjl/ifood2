@@ -4,6 +4,7 @@ const Product      = require('../../models/Product');
 const Tenant       = require('../../models/Tenant');
 const AppError     = require('../../utils/AppError');
 const eventService = require('../../socket/eventService');
+const orderCache   = require('../../cache/orderCache');
 
 // ── Cashback helpers (compartilhados com public.controller) ───
 
@@ -318,6 +319,10 @@ const createOrder = async (tenantId, {
 const updateStatus = async (id, tenantId, status) => {
   const updatedOrder = await Order.updateStatus(id, tenantId, status);
 
+  // Sincroniza cache Redis imediatamente — remove pedidos terminais (delivered/cancelled)
+  // para que reconexão do socket não ressuscite pedidos já concluídos.
+  orderCache.upsertOrder(tenantId, updatedOrder).catch(() => {});
+
   // Deduz insumos quando pedido é confirmado
   if (status === 'confirmed') {
     const insumosSvc = require('../insumos/insumos.service');
@@ -367,6 +372,9 @@ const cancelOrder = async (id, tenantId) => {
       client.release();
     }
   }
+
+  // Remove do cache Redis (status = cancelled → hdel automático via upsertOrder)
+  orderCache.upsertOrder(tenantId, updated).catch(() => {});
 
   return updated;
 };

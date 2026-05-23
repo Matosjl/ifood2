@@ -125,13 +125,19 @@ export default function useOrders() {
 
   // ── Socket handlers ────────────────────────────────────────
 
+  const TERMINAL = new Set(['delivered', 'cancelled']);
+
   const handleActiveOrders = useCallback((list) => {
     const active = list.map(norm);
     const activeIds = new Set(active.map((o) => o.id));
     setOrders((prev) => {
       if (active.length === 0 && prev.length > 0) return prev;
-      const preserved = prev.filter((o) => !activeIds.has(o.id));
-      return [...active, ...preserved];
+      // Pedidos que o frontend já conhece como terminais (delivered/cancelled)
+      // não podem ser sobrescritos pelo snapshot do socket (cache Redis pode estar stale)
+      const terminalIds = new Set(prev.filter((o) => TERMINAL.has(o.status)).map((o) => o.id));
+      const safeActive = active.filter((o) => !terminalIds.has(o.id));
+      const preserved  = prev.filter((o) => !activeIds.has(o.id));
+      return [...safeActive, ...preserved];
     });
     setLoading(false);
   }, []);
