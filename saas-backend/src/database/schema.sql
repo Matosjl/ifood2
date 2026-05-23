@@ -578,6 +578,31 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zones      JSONB DEFAULT '
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zone_type  VARCHAR(10) DEFAULT 'named';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_hours      JSONB DEFAULT NULL;
 
+-- ── VARIAÇÕES DE PRODUTO ──────────────────────────────────────
+-- Grupo: ex. "Tamanho", "Sabor", "Borda"
+CREATE TABLE IF NOT EXISTS product_variation_groups (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id)   ON DELETE CASCADE,
+  product_id  UUID        NOT NULL REFERENCES products(id)  ON DELETE CASCADE,
+  name        VARCHAR(100) NOT NULL,
+  required    BOOLEAN     NOT NULL DEFAULT true,
+  sort_order  INT         NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_var_groups_product ON product_variation_groups(product_id);
+
+-- Opção: ex. "Pequena R$20", "Média R$25", "Grande R$30"
+CREATE TABLE IF NOT EXISTS product_variation_options (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id    UUID         NOT NULL REFERENCES product_variation_groups(id) ON DELETE CASCADE,
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id)  ON DELETE CASCADE,
+  name        VARCHAR(100) NOT NULL,
+  price       NUMERIC(10,2) NOT NULL DEFAULT 0,
+  available   BOOLEAN      NOT NULL DEFAULT true,
+  sort_order  INT          NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_var_options_group ON product_variation_options(group_id);
+
 -- ── COUPONS ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS coupons (
   id             UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),

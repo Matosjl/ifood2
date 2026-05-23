@@ -46,4 +46,13 @@ router.get('/:id/movements',    ctrl.movements);
 
 router.post('/:id/image', authenticate, upload.single('image'), ctrl.uploadImage);
 
+// ── Variações ─────────────────────────────────────────────────
+// Grupos
+router.post('/variations/groups/:gid/options', authorize('owner','manager'), ctrl.createOption);
+router.put('/variations/options/:oid',         authorize('owner','manager'), ctrl.updateOption);
+router.delete('/variations/options/:oid',      authorize('owner','manager'), ctrl.deleteOption);
+router.put('/variations/groups/:gid',          authorize('owner','manager'), ctrl.updateGroup);
+router.delete('/variations/groups/:gid',       authorize('owner','manager'), ctrl.deleteGroup);
+router.post('/:id/variations/groups',          authorize('owner','manager'), ctrl.createGroup);
+
 module.exports = router;

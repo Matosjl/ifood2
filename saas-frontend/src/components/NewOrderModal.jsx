@@ -528,6 +528,100 @@ function StepCustomer({
   );
 }
 
+// ── Variation Picker Modal ─────────────────────────────────────
+
+function VariationPicker({ product, selections, onSelect, onConfirm, onClose }) {
+  const groups = (product.variations ?? []).filter((g) => g.options?.some((o) => o.available));
+  const fmt = (v) => `R$ ${parseFloat(v).toFixed(2).replace('.', ',')}`;
+
+  // Todas as obrigatórias preenchidas?
+  const canConfirm = groups
+    .filter((g) => g.required)
+    .every((g) => selections[g.id]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-sm bg-gray-900 rounded-2xl shadow-2xl border border-white/10 overflow-hidden flex flex-col max-h-[85vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+          <div>
+            <h2 className="text-base font-black text-white">{product.name}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Selecione as opções</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Groups */}
+        <div className="flex-1 overflow-auto p-4 space-y-5">
+          {groups.map((g) => (
+            <div key={g.id}>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-bold text-gray-200">{g.name}</p>
+                {g.required
+                  ? <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-semibold">Obrigatório</span>
+                  : <span className="text-[10px] bg-gray-700/60 text-gray-500 px-1.5 py-0.5 rounded-full">Opcional</span>
+                }
+              </div>
+              <div className="space-y-1.5">
+                {g.options.filter((o) => o.available).map((opt) => {
+                  const selected = selections[g.id]?.optionId === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSelect(g.id, { optionId: opt.id, optionName: opt.name, price: parseFloat(opt.price) })}
+                      className={[
+                        'w-full flex items-center justify-between px-4 py-2.5 rounded-xl border-2 transition-all text-left',
+                        selected
+                          ? 'border-orange-500 bg-orange-500/10'
+                          : 'border-white/10 hover:border-white/20 bg-gray-800/40',
+                      ].join(' ')}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          selected ? 'border-orange-500 bg-orange-500' : 'border-gray-600'
+                        }`}>
+                          {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+                        </div>
+                        <span className="text-sm font-semibold text-gray-200">{opt.name}</span>
+                      </div>
+                      <span className={`text-sm font-bold shrink-0 ${selected ? 'text-orange-400' : 'text-gray-400'}`}>
+                        {fmt(opt.price)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-white/10 shrink-0">
+          {canConfirm && (
+            <p className="text-xs text-center text-gray-400 mb-2">
+              Total: <span className="text-white font-bold">
+                {fmt(Object.values(selections).reduce((s, sel) => s + (sel.price || 0), 0))}
+              </span>
+            </p>
+          )}
+          <button
+            onClick={onConfirm}
+            disabled={!canConfirm}
+            className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {canConfirm ? 'Adicionar ao Carrinho' : 'Selecione todas as opções obrigatórias'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Addon Picker Modal ─────────────────────────────────────────
 
 function AddonPicker({ product, groups, currentAddons = [], onConfirm, onClose }) {
@@ -701,10 +795,20 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
               <span className="text-3xl">🛒</span>
               <p className="text-xs italic text-center">Adicione itens ao pedido</p>
             </div>
-          ) : cartEntries.map(({ product: p, qty, weightKg, addons, notes: itemNotes }) => (
+          ) : cartEntries.map(({ product: p, qty, weightKg, addons, notes: itemNotes, variation }) => {
+            const varPrice = variation?.length ? variation.reduce((s, sel) => s + (parseFloat(sel.price) || 0), 0) : null;
+            const unitPrice = varPrice ?? parseFloat(p.sale_price);
+            return (
             <div key={p.id} className="bg-gray-800/60 rounded-xl p-2 space-y-1">
               <div className="flex items-start justify-between gap-1">
-                <p className="text-xs font-semibold text-gray-200 leading-tight flex-1 min-w-0 truncate">{p.name}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-gray-200 leading-tight truncate">{p.name}</p>
+                  {variation?.length > 0 && (
+                    <p className="text-[10px] text-orange-400 leading-none mt-0.5">
+                      {variation.map((s) => s.optionName).join(' · ')}
+                    </p>
+                  )}
+                </div>
                 <button onClick={() => onRemove(p.id)} className="text-gray-600 hover:text-red-400 shrink-0 transition-colors">
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -716,7 +820,7 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
                   <input type="number" min="0.1" step="0.1" value={weightKg}
                     onChange={(e) => onWeight(p.id, e.target.value)}
                     className="input w-14 text-xs py-0.5" placeholder="kg" />
-                  {weightKg && <span className="text-xs text-green-400">{fmt(parseFloat(p.sale_price) * parseFloat(weightKg))}</span>}
+                  {weightKg && <span className="text-xs text-green-400">{fmt(unitPrice * parseFloat(weightKg))}</span>}
                 </div>
               ) : (
                 <div className="flex items-center justify-between">
@@ -725,7 +829,7 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
                     <span className="w-5 text-center text-xs font-bold text-white">{qty}</span>
                     <button onClick={() => onQty(p.id, qty + 1)} className="w-5 h-5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold flex items-center justify-center">+</button>
                   </div>
-                  <span className="text-xs text-green-400 font-semibold">{fmt(parseFloat(p.sale_price) * qty)}</span>
+                  <span className="text-xs text-green-400 font-semibold">{fmt(unitPrice * qty)}</span>
                 </div>
               )}
               {addons?.length > 0 && (
@@ -746,7 +850,8 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
                 className="w-full text-[11px] bg-gray-700/60 border border-white/10 rounded-lg px-2 py-1 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/50 transition-colors"
               />
             </div>
-          ))}
+            );
+          })}
         </div>
         {cartEntries.length > 0 && (
           <div className="pt-2 border-t border-white/10 shrink-0">
@@ -1324,6 +1429,10 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [addonPickerGroups,   setAddonPickerGroups]   = useState([]);
   const addonGroupsCache = useRef({});  // productId → groups[]
 
+  // Variation picker
+  const [varPickerProduct,    setVarPickerProduct]    = useState(null);
+  const [varSelections,       setVarSelections]       = useState({});  // { groupId: { optionId, optionName, price } }
+
   // ── Load ──────────────────────────────────────────────────
   useEffect(() => {
     getProducts({ active: true, limit: 200 })
@@ -1409,7 +1518,15 @@ export default function NewOrderModal({ onClose, onCreated }) {
 
   // ── Cart ──────────────────────────────────────────────────
   const handleAdd = useCallback(async (p) => {
-    // Check if this product has addon groups (use cache)
+    // 1. Variações obrigatórias têm prioridade — abre o picker
+    const varGroups = Array.isArray(p.variations) ? p.variations : [];
+    if (varGroups.some((g) => g.required && g.options?.some((o) => o.available))) {
+      setVarPickerProduct(p);
+      setVarSelections({});
+      return;
+    }
+
+    // 2. Addons (grupos opcionais)
     if (!(p.id in addonGroupsCache.current)) {
       try {
         const { data } = await getProductAddonGroups(p.id);
@@ -1563,12 +1680,22 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setError(null);
     setSubmitting(true);
 
-    const items = cartEntries.map(({ product, qty, weightKg, addons, notes: itemNotes }) => ({
-      productId: product.id,
-      ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
-      ...(addons?.length ? { addons } : {}),
-      ...(itemNotes?.trim() ? { notes: itemNotes.trim() } : {}),
-    }));
+    const items = cartEntries.map(({ product, qty, weightKg, addons, notes: itemNotes, variation }) => {
+      const varLabel = variation?.length
+        ? ` (${variation.map((s) => s.optionName).join(', ')})`
+        : '';
+      const varPrice = variation?.length
+        ? variation.reduce((s, sel) => s + (parseFloat(sel.price) || 0), 0)
+        : null;
+      return {
+        productId:   product.id,
+        productName: product.name + varLabel,
+        ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
+        ...(varPrice != null ? { unitPrice: varPrice } : {}),
+        ...(addons?.length ? { addons } : {}),
+        ...(itemNotes?.trim() ? { notes: itemNotes.trim() } : {}),
+      };
+    });
 
     const customerAddress = [street, streetNumber, complement].filter(Boolean).join(', ');
 
@@ -1716,6 +1843,26 @@ export default function NewOrderModal({ onClose, onCreated }) {
                 setDeliveryFee(String(matchedZone.taxa));
               }
               setShowMapPicker(false);
+            }}
+          />
+        )}
+
+        {/* Variation picker overlay */}
+        {varPickerProduct && (
+          <VariationPicker
+            product={varPickerProduct}
+            selections={varSelections}
+            onSelect={(groupId, sel) => setVarSelections((prev) => ({ ...prev, [groupId]: sel }))}
+            onClose={() => { setVarPickerProduct(null); setVarSelections({}); }}
+            onConfirm={() => {
+              const selArr = Object.entries(varSelections).map(([gid, sel]) => ({
+                groupId: gid,
+                groupName: varPickerProduct.variations.find((g) => g.id === gid)?.name ?? '',
+                ...sel,
+              }));
+              setCart((c) => addToCart(c, varPickerProduct, [], selArr));
+              setVarPickerProduct(null);
+              setVarSelections({});
             }}
           />
         )}

@@ -8,6 +8,37 @@ class Product {
    * Lista produtos do tenant com filtros opcionais.
    * @param {object} filters - { categoryId, search, active, page, limit }
    */
+  // Sub-query que retorna grupos + opções de variação de um produto como JSON
+  static _variationsSql() {
+    return `
+      COALESCE((
+        SELECT json_agg(
+          json_build_object(
+            'id',         pvg.id,
+            'name',       pvg.name,
+            'required',   pvg.required,
+            'sort_order', pvg.sort_order,
+            'options', (
+              SELECT COALESCE(json_agg(
+                json_build_object(
+                  'id',         pvo.id,
+                  'name',       pvo.name,
+                  'price',      pvo.price,
+                  'available',  pvo.available,
+                  'sort_order', pvo.sort_order
+                ) ORDER BY pvo.sort_order, pvo.name
+              ), '[]'::json)
+              FROM product_variation_options pvo
+              WHERE pvo.group_id = pvg.id
+            )
+          ) ORDER BY pvg.sort_order, pvg.name
+        )
+        FROM product_variation_groups pvg
+        WHERE pvg.product_id = p.id
+      ), '[]'::json) AS variations
+    `.trim();
+  }
+
   static async findAll(tenantId, filters = {}, dbClient = db) {
     const { categoryId, search, active = true, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
@@ -33,7 +64,8 @@ class Product {
     const { rows } = await dbClient.query(
       `SELECT p.*,
               c.name AS category_name,
-              ROUND(((p.sale_price - p.cost_price) / NULLIF(p.cost_price, 0)) * 100, 2) AS margin_pct
+              ROUND(((p.sale_price - p.cost_price) / NULLIF(p.cost_price, 0)) * 100, 2) AS margin_pct,
+              ${Product._variationsSql()}
        FROM   products p
        LEFT   JOIN categories c ON c.id = p.category_id
        WHERE  ${conditions.join(' AND ')}
@@ -49,7 +81,8 @@ class Product {
     const { rows } = await dbClient.query(
       `SELECT p.*,
               c.name AS category_name,
-              ROUND(((p.sale_price - p.cost_price) / NULLIF(p.cost_price, 0)) * 100, 2) AS margin_pct
+              ROUND(((p.sale_price - p.cost_price) / NULLIF(p.cost_price, 0)) * 100, 2) AS margin_pct,
+              ${Product._variationsSql()}
        FROM   products p
        LEFT   JOIN categories c ON c.id = p.category_id
        WHERE  p.id = $1 AND p.tenant_id = $2`,

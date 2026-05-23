@@ -2,11 +2,174 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   listProducts, createProduct, updateProduct, deleteProduct,
   listCategories, createCategory, deleteCategory,
+  createVarGroup, updateVarGroup, deleteVarGroup,
+  createVarOption, updateVarOption, deleteVarOption,
 } from '../api/products';
 import { uploadProductImage } from '../api/products_upload';
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtPct = (n) => (n != null && n !== '' ? `${parseFloat(n).toFixed(1)}%` : '—');
+
+// ─────────────────────────────────────────────────────────────
+// Product modal (create / edit)
+// ─────────────────────────────────────────────────────────────
+
+// ── Variation Manager (usado dentro do ProductModal) ──────────
+
+function VariationManager({ productId }) {
+  const [groups,    setGroups]    = useState([]);
+  const [newGroup,  setNewGroup]  = useState('');
+  const [addingGrp, setAddingGrp] = useState(false);
+  // Per-group: { [groupId]: { name: '', price: '' } }
+  const [newOpt,    setNewOpt]    = useState({});
+  const [addingOpt, setAddingOpt] = useState({});
+
+  // Fetch current variations from product
+  const reload = useCallback(async () => {
+    try {
+      const { data } = await import('../api/products').then((m) => m.listProducts({ limit: 1 }));
+      // Use getProduct instead
+      const mod = await import('../api/products');
+      const res = await mod.getProduct(productId);
+      setGroups(res.data.data?.variations ?? []);
+    } catch { /* non-fatal */ }
+  }, [productId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleAddGroup = async () => {
+    if (!newGroup.trim()) return;
+    setAddingGrp(true);
+    try {
+      await createVarGroup(productId, { name: newGroup.trim(), required: true });
+      setNewGroup('');
+      await reload();
+    } catch { /* non-fatal */ }
+    finally { setAddingGrp(false); }
+  };
+
+  const handleDeleteGroup = async (gid) => {
+    if (!confirm('Remover este grupo e todas as opções?')) return;
+    try { await deleteVarGroup(gid); await reload(); } catch { /* non-fatal */ }
+  };
+
+  const handleAddOption = async (gid) => {
+    const o = newOpt[gid] ?? {};
+    if (!o.name?.trim() || o.price === '' || o.price === undefined) return;
+    setAddingOpt((prev) => ({ ...prev, [gid]: true }));
+    try {
+      await createVarOption(gid, { name: o.name.trim(), price: parseFloat(o.price) || 0 });
+      setNewOpt((prev) => ({ ...prev, [gid]: { name: '', price: '' } }));
+      await reload();
+    } catch { /* non-fatal */ }
+    finally { setAddingOpt((prev) => ({ ...prev, [gid]: false })); }
+  };
+
+  const handleDeleteOption = async (oid) => {
+    try { await deleteVarOption(oid); await reload(); } catch { /* non-fatal */ }
+  };
+
+  const handleToggleOption = async (oid, available) => {
+    try { await updateVarOption(oid, { available: !available }); await reload(); } catch { /* non-fatal */ }
+  };
+
+  const fmt = (v) => `R$ ${parseFloat(v ?? 0).toFixed(2)}`;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        Variações obrigatórias (tamanho, sabor...) abrem um seletor ao adicionar o produto.
+        O preço de cada opção <strong className="text-gray-300">substitui</strong> o preço base.
+      </p>
+
+      {/* Grupos existentes */}
+      {groups.map((g) => (
+        <div key={g.id} className="bg-gray-800/40 rounded-xl border border-white/[0.06] overflow-hidden">
+          {/* Header do grupo */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.05]">
+            <p className="text-xs font-bold text-gray-200">{g.name}
+              <span className="ml-1.5 text-[10px] text-red-400 font-normal">obrigatório</span>
+            </p>
+            <button onClick={() => handleDeleteGroup(g.id)}
+              className="text-gray-600 hover:text-red-400 transition-colors text-xs">✕</button>
+          </div>
+
+          {/* Opções */}
+          <div className="divide-y divide-white/[0.04]">
+            {(g.options ?? []).map((opt) => (
+              <div key={opt.id} className="flex items-center justify-between px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleToggleOption(opt.id, opt.available)}
+                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      opt.available ? 'border-green-500 bg-green-500' : 'border-gray-600'
+                    }`}
+                  >
+                    {opt.available && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </button>
+                  <span className={`text-xs font-semibold ${opt.available ? 'text-gray-200' : 'text-gray-600 line-through'}`}>
+                    {opt.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-green-400 font-bold">{fmt(opt.price)}</span>
+                  <button onClick={() => handleDeleteOption(opt.id)}
+                    className="text-gray-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Adicionar opção */}
+          <div className="flex gap-2 px-3 py-2 bg-gray-800/60 border-t border-white/[0.04]">
+            <input
+              type="text"
+              placeholder="Nome (ex: Grande)"
+              value={newOpt[g.id]?.name ?? ''}
+              onChange={(e) => setNewOpt((prev) => ({ ...prev, [g.id]: { ...prev[g.id], name: e.target.value } }))}
+              className="input flex-1 text-xs py-1"
+              onKeyDown={(e) => e.key === 'Enter' && handleAddOption(g.id)}
+            />
+            <input
+              type="number" min="0" step="0.50" placeholder="R$"
+              value={newOpt[g.id]?.price ?? ''}
+              onChange={(e) => setNewOpt((prev) => ({ ...prev, [g.id]: { ...prev[g.id], price: e.target.value } }))}
+              className="input w-20 text-xs py-1"
+              onKeyDown={(e) => e.key === 'Enter' && handleAddOption(g.id)}
+            />
+            <button
+              onClick={() => handleAddOption(g.id)}
+              disabled={addingOpt[g.id]}
+              className="px-2 py-1 rounded-lg bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold disabled:opacity-50 transition-colors shrink-0"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Adicionar grupo */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Nome do grupo (ex: Tamanho, Sabor)"
+          value={newGroup}
+          onChange={(e) => setNewGroup(e.target.value)}
+          className="input flex-1 text-sm"
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddGroup())}
+        />
+        <button
+          type="button"
+          onClick={handleAddGroup}
+          disabled={addingGrp || !newGroup.trim()}
+          className="px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm font-semibold disabled:opacity-50 transition-colors shrink-0"
+        >
+          {addingGrp ? '...' : '+ Grupo'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────
 // Product modal (create / edit)
@@ -294,6 +457,14 @@ function ProductModal({ product, categories, onClose, onSaved }) {
               />
               <span className="text-sm text-gray-300">Produto ativo (aparece ao criar pedidos)</span>
             </label>
+          )}
+
+          {/* Variações — somente na edição */}
+          {isEdit && (
+            <div className="pt-4 border-t border-white/[0.06]">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🎛️ Variações</p>
+              <VariationManager productId={product.id} />
+            </div>
           )}
 
           {error && (

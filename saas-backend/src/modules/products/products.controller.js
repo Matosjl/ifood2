@@ -118,9 +118,109 @@ const uploadImage = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { image_url: imageUrl } });
 });
 
+// ── Variações ─────────────────────────────────────────────────
+
+const db = require('../../config/database');
+
+/** POST /api/products/:id/variations/groups */
+const createGroup = asyncHandler(async (req, res) => {
+  const { name, required = true, sortOrder = 0 } = req.body;
+  if (!name?.trim()) throw new AppError('Nome do grupo é obrigatório.', 400);
+
+  const { rows } = await db.query(
+    `INSERT INTO product_variation_groups (tenant_id, product_id, name, required, sort_order)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [req.user.tenantId, req.params.id, name.trim(), required, sortOrder]
+  );
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
+/** PUT /api/products/variations/groups/:gid */
+const updateGroup = asyncHandler(async (req, res) => {
+  const { name, required, sortOrder } = req.body;
+  const setClauses = [];
+  const params = [req.params.gid, req.user.tenantId];
+
+  if (name !== undefined)      { params.push(name.trim());  setClauses.push(`name = $${params.length}`); }
+  if (required !== undefined)  { params.push(required);     setClauses.push(`required = $${params.length}`); }
+  if (sortOrder !== undefined) { params.push(sortOrder);    setClauses.push(`sort_order = $${params.length}`); }
+  if (!setClauses.length) throw new AppError('Nenhum campo para atualizar.', 400);
+
+  const { rows } = await db.query(
+    `UPDATE product_variation_groups SET ${setClauses.join(', ')}
+     WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+    params
+  );
+  if (!rows[0]) throw new AppError('Grupo não encontrado.', 404);
+  res.json({ success: true, data: rows[0] });
+});
+
+/** DELETE /api/products/variations/groups/:gid */
+const deleteGroup = asyncHandler(async (req, res) => {
+  const { rows } = await db.query(
+    `DELETE FROM product_variation_groups WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+    [req.params.gid, req.user.tenantId]
+  );
+  if (!rows[0]) throw new AppError('Grupo não encontrado.', 404);
+  res.json({ success: true });
+});
+
+/** POST /api/products/variations/groups/:gid/options */
+const createOption = asyncHandler(async (req, res) => {
+  const { name, price = 0, sortOrder = 0 } = req.body;
+  if (!name?.trim()) throw new AppError('Nome da opção é obrigatório.', 400);
+
+  // Valida que o grupo pertence ao tenant
+  const { rows: [group] } = await db.query(
+    `SELECT id FROM product_variation_groups WHERE id = $1 AND tenant_id = $2`,
+    [req.params.gid, req.user.tenantId]
+  );
+  if (!group) throw new AppError('Grupo não encontrado.', 404);
+
+  const { rows } = await db.query(
+    `INSERT INTO product_variation_options (group_id, tenant_id, name, price, sort_order)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [req.params.gid, req.user.tenantId, name.trim(), parseFloat(price) || 0, sortOrder]
+  );
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
+/** PUT /api/products/variations/options/:oid */
+const updateOption = asyncHandler(async (req, res) => {
+  const { name, price, available, sortOrder } = req.body;
+  const setClauses = [];
+  const params = [req.params.oid, req.user.tenantId];
+
+  if (name !== undefined)      { params.push(name.trim());           setClauses.push(`name = $${params.length}`); }
+  if (price !== undefined)     { params.push(parseFloat(price) || 0); setClauses.push(`price = $${params.length}`); }
+  if (available !== undefined) { params.push(available);             setClauses.push(`available = $${params.length}`); }
+  if (sortOrder !== undefined) { params.push(sortOrder);             setClauses.push(`sort_order = $${params.length}`); }
+  if (!setClauses.length) throw new AppError('Nenhum campo para atualizar.', 400);
+
+  const { rows } = await db.query(
+    `UPDATE product_variation_options SET ${setClauses.join(', ')}
+     WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+    params
+  );
+  if (!rows[0]) throw new AppError('Opção não encontrada.', 404);
+  res.json({ success: true, data: rows[0] });
+});
+
+/** DELETE /api/products/variations/options/:oid */
+const deleteOption = asyncHandler(async (req, res) => {
+  const { rows } = await db.query(
+    `DELETE FROM product_variation_options WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+    [req.params.oid, req.user.tenantId]
+  );
+  if (!rows[0]) throw new AppError('Opção não encontrada.', 404);
+  res.json({ success: true });
+});
+
 module.exports = {
   list, getOne, create, update, remove,
   replenish, movements, allMovements,
   listCats, createCat, deleteCat,
   uploadImage,
+  createGroup, updateGroup, deleteGroup,
+  createOption, updateOption, deleteOption,
 };

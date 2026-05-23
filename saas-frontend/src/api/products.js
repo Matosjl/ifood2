@@ -18,3 +18,11 @@ export const listMovements    = (productId, params) =>
   api.get(`/products/${productId}/movements`, { params });
 export const listAllMovements = (params) =>
   api.get('/stock/movements', { params });
+
+// ── Variações ─────────────────────────────────────────────────
+export const createVarGroup  = (productId, data)  => api.post(`/products/${productId}/variations/groups`, data);
+export const updateVarGroup  = (gid, data)         => api.put(`/products/variations/groups/${gid}`, data);
+export const deleteVarGroup  = (gid)               => api.delete(`/products/variations/groups/${gid}`);
+export const createVarOption = (gid, data)         => api.post(`/products/variations/groups/${gid}/options`, data);
+export const updateVarOption = (oid, data)         => api.put(`/products/variations/options/${oid}`, data);
+export const deleteVarOption = (oid)               => api.delete(`/products/variations/options/${oid}`);
