@@ -314,6 +314,74 @@ const createOrder = async (tenantId, {
   }
 };
 
+// ── External order (iFood, Rappi, etc.) ──────────────────────
+// Cria pedido com items em formato livre (sem productId / sem estoque)
+const createExternalOrder = async (tenantId, {
+  externalId, channel = 'ifood',
+  customerName, customerPhone, customerAddress, neighborhood,
+  notes, items, deliveryType = 'delivery', paymentMethod = 'pix',
+  deliveryFee = 0, total,
+}) => {
+  // Idempotência: se já existe, retorna existente
+  const { rows: existing } = await db.query(
+    `SELECT id FROM orders WHERE external_id = $1 AND tenant_id = $2`,
+    [externalId, tenantId]
+  );
+  if (existing[0]) return Order.findById(existing[0].id, tenantId);
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const orderNumber = await Order.nextOrderNumber(tenantId, client);
+
+    const order = await Order.createOrder({
+      tenantId, orderNumber,
+      customerName, customerPhone, customerAddress,
+      channel, total: parseFloat(total) || 0, notes,
+      deliveryType, paymentMethod,
+      deliveryFee: parseFloat(deliveryFee) || 0,
+      neighborhood: neighborhood || null,
+      initialStatus: 'pending',
+      idempotencyKey: null,
+      loyaltyCustomerId: null,
+      cashbackUsed: 0,
+    }, client);
+
+    // Grava external_id
+    await client.query(
+      `UPDATE orders SET external_id = $2 WHERE id = $1`,
+      [order.id, externalId]
+    );
+
+    for (const item of items) {
+      await Order.createItem({
+        orderId:     order.id,
+        productId:   null,
+        productName: String(item.name ?? 'Item').substring(0, 200),
+        quantity:    parseInt(item.quantity, 10) || 1,
+        weightKg:    null,
+        unitPrice:   parseFloat(item.unitPrice) || 0,
+        total:       parseFloat(item.total ?? item.unitPrice * (item.quantity || 1)) || 0,
+        notes:       item.notes ?? null,
+      }, client);
+    }
+
+    await client.query('COMMIT');
+
+    Tenant.incrementOrderCount(tenantId).catch(() => {});
+    const createdOrder = await Order.findById(order.id, tenantId);
+    eventService.orderCreated(tenantId, createdOrder);
+    orderCache.upsertOrder(tenantId, createdOrder).catch(() => {});
+    return createdOrder;
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 // ── Status ────────────────────────────────────────────────────
 
 const updateStatus = async (id, tenantId, status) => {
@@ -564,4 +632,4 @@ const updateOrderInfo = async (id, tenantId, {
   return Order.findById(id, tenantId);
 };
 
-module.exports = { listOrders, getOrder, createOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems, updateOrderInfo };
+module.exports = { listOrders, getOrder, createOrder, createExternalOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems, updateOrderInfo };

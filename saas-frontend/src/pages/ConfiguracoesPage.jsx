@@ -1452,6 +1452,179 @@ const DAYS = [
 
 const DEFAULT_HOURS = DAYS.map(() => ({ open: true, start: '08:00', end: '22:00' }));
 
+// ── Integrações Tab ──────────────────────────────────────────
+
+function IntegracoesTab({ onToast }) {
+  const [form,        setForm]        = useState({ clientId: '', clientSecret: '', merchantId: '' });
+  const [connected,   setConnected]   = useState(false);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [syncing,     setSyncing]     = useState(false);
+
+  useEffect(() => {
+    api.get('/integrations/ifood/config')
+      .then(({ data }) => {
+        if (data.data?.ifood_client_id) {
+          setConnected(true);
+          setForm((f) => ({
+            ...f,
+            clientId:   data.data.ifood_client_id    ?? '',
+            merchantId: data.data.ifood_merchant_id  ?? '',
+            clientSecret: data.data.ifood_client_secret ?? '',
+          }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put('/integrations/ifood/config', {
+        clientId:     form.clientId,
+        clientSecret: form.clientSecret,
+        merchantId:   form.merchantId,
+      });
+      setConnected(true);
+      onToast('iFood conectado! Pedidos chegarão automaticamente.', 'success');
+    } catch (e) {
+      onToast(e?.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    await api.delete('/integrations/ifood/config').catch(() => {});
+    setConnected(false);
+    setForm({ clientId: '', clientSecret: '', merchantId: '' });
+    onToast('iFood desconectado.', 'success');
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await api.post('/integrations/ifood/sync');
+      onToast('Sincronização manual concluída!', 'success');
+    } catch (e) {
+      onToast(e?.response?.data?.message ?? 'Erro na sincronização.', 'error');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (loading) return <p className="text-gray-500 text-sm">Carregando...</p>;
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-1">📱 Integrações</h3>
+        <p className="text-sm text-gray-400">
+          Receba pedidos do iFood diretamente no kanban, sem redigitar nada.
+          Polling automático a cada 30 segundos.
+        </p>
+      </div>
+
+      {/* iFood */}
+      <div className="bg-gray-800/60 rounded-xl border border-white/10 p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🍔</span>
+            <div>
+              <p className="font-semibold text-white">iFood</p>
+              <p className="text-xs text-gray-400">Merchant API — pedidos entram automaticamente</p>
+            </div>
+          </div>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+            connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-gray-700 text-gray-400'
+          }`}>
+            {connected ? '● Conectado' : '○ Desconectado'}
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Client ID</label>
+            <input
+              value={form.clientId}
+              onChange={(e) => setForm((f) => ({ ...f, clientId: e.target.value }))}
+              placeholder="ex: a1b2c3d4-..."
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Client Secret</label>
+            <input
+              type="password"
+              value={form.clientSecret}
+              onChange={(e) => setForm((f) => ({ ...f, clientSecret: e.target.value }))}
+              placeholder="••••••••"
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Merchant ID (loja)</label>
+            <input
+              value={form.merchantId}
+              onChange={(e) => setForm((f) => ({ ...f, merchantId: e.target.value }))}
+              placeholder="ex: d4e5f6a7-..."
+              className="input w-full"
+            />
+            <p className="text-xs text-gray-600 mt-1">
+              Portal iFood → Minha Conta → Dados da loja → UUID da loja
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleSave}
+            disabled={saving || !form.clientId || !form.merchantId}
+            className="btn-green flex-1 min-w-0"
+          >
+            {saving ? 'Salvando...' : connected ? '🔄 Atualizar' : '🔗 Conectar'}
+          </button>
+          {connected && (
+            <>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="btn-blue px-3"
+              >
+                {syncing ? '⏳' : '🔄 Sync agora'}
+              </button>
+              <button onClick={handleDisconnect} className="btn-red px-3">
+                Desconectar
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-sm text-blue-300">
+        <p className="font-semibold mb-1">💡 Como obter as credenciais iFood</p>
+        <ol className="space-y-1 text-blue-300/80 list-decimal list-inside text-xs">
+          <li>Acesse <strong>developer.ifood.com.br</strong> e crie uma aplicação</li>
+          <li>Solicite acesso à Merchant API (pode levar alguns dias)</li>
+          <li>Após aprovação, copie o <strong>Client ID</strong> e <strong>Client Secret</strong></li>
+          <li>No portal do iFood, copie o <strong>ID da sua loja</strong> (UUID)</li>
+          <li>Cole aqui e clique em Conectar</li>
+        </ol>
+      </div>
+
+      <div className="bg-gray-800/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-400">
+        <p className="font-semibold text-gray-300 mb-1">🚧 Em breve</p>
+        <ul className="space-y-1 list-disc list-inside text-xs">
+          <li>Rappi</li>
+          <li>Anotaí</li>
+          <li>99Food</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ── NFC-e Tab ────────────────────────────────────────────────
 
 function NfceTab({ onToast }) {
@@ -2106,6 +2279,9 @@ export default function ConfiguracoesPage() {
             <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
           )}
           {isOwner && (
+            <Tab active={tab === 'integracoes'} onClick={() => setTab('integracoes')}>📱 Integrações</Tab>
+          )}
+          {isOwner && (
             <Tab active={tab === 'nfce'} onClick={() => setTab('nfce')}>🧾 NFC-e</Tab>
           )}
           {isOwner && (
@@ -2137,6 +2313,7 @@ export default function ConfiguracoesPage() {
         {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
         {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
         {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'integracoes' && <IntegracoesTab  onToast={showToast} />}
         {tab === 'nfce'        && <NfceTab        onToast={showToast} />}
         {tab === 'impressoras' && <ImpresorasTab  onToast={showToast} />}
         {tab === 'horarios'    && <HorariosTab    onToast={showToast} />}

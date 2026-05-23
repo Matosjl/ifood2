@@ -590,6 +590,13 @@ ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_key           VARCHAR(100) DEF
 ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_number        VARCHAR(20)  DEFAULT NULL;
 ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_url           TEXT         DEFAULT NULL;
 ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_issued_at     TIMESTAMPTZ  DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS external_id        VARCHAR(100) DEFAULT NULL;
+
+-- ── Integrações externas (iFood, Rappi) ───────────────────────
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ifood_client_id     VARCHAR(200) DEFAULT NULL;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ifood_client_secret VARCHAR(200) DEFAULT NULL;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ifood_merchant_id   VARCHAR(100) DEFAULT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_external_id ON orders(tenant_id, external_id) WHERE external_id IS NOT NULL;
 
 -- ── VARIAÇÕES DE PRODUTO ──────────────────────────────────────
 -- Grupo: ex. "Tamanho", "Sabor", "Borda"
