@@ -55,6 +55,7 @@ export default function DashboardPage() {
     statusError, setStatusError,
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
+    autoPrintKitchen, setAutoPrintKitchen,
     changeStatus, doCancel,
     acknowledgeOrder, getColumnOrders,
     addOrder, markPaid, editItems,
@@ -117,6 +118,8 @@ export default function DashboardPage() {
         setSoundEnabled={setSoundEnabled}
         autoPrint={autoPrint}
         setAutoPrint={setAutoPrint}
+        autoPrintKitchen={autoPrintKitchen}
+        setAutoPrintKitchen={setAutoPrintKitchen}
         onNewOrder={() => setShowModal(true)}
         viewMode={viewMode}
         setViewMode={setViewMode}

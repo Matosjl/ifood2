@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { printOrder } from '../utils/print';
+import { printOrder, printKitchen } from '../utils/print';
 import { PAY_ICONS, PAY_LABELS } from '../constants/orders';
 
 // ── Status config ─────────────────────────────────────────────
@@ -174,15 +174,27 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
             </button>
           )}
 
-          {/* Imprimir */}
+          {/* Imprimir recibo (58mm) */}
           <button
             onClick={() => printOrder(order)}
-            title="Imprimir pedido"
+            title="Imprimir recibo do cliente (58mm)"
             className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/10 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+          </button>
+
+          {/* Imprimir comanda de cozinha (80mm) */}
+          <button
+            onClick={() => printKitchen(order)}
+            title="Imprimir comanda de cozinha (80mm)"
+            className="p-1 rounded text-gray-600 hover:text-orange-400 hover:bg-orange-400/10 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z"/>
+              <line x1="6" y1="17" x2="18" y2="17"/>
             </svg>
           </button>
 

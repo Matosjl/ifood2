@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import useSocket from './useSocket';
 import { playAlert, unlockAudio } from '../utils/sound';
-import { printOrder } from '../utils/print';
+import { printOrder, printKitchen } from '../utils/print';
 import { getOrders, updateOrderStatus, cancelOrder,
          markOrderPaid as markOrderPaidApi,
          editOrderItems as editOrderItemsApi } from '../api/orders';
@@ -89,15 +89,26 @@ export default function useOrders() {
   const [autoPrint,    setAutoPrintState] = useState(
     () => localStorage.getItem('autoPrint') !== 'false'
   );
+  const [autoPrintKitchen, setAutoPrintKitchenState] = useState(
+    () => localStorage.getItem('autoPrintKitchen') === 'true'
+  );
 
   // Refs mantidos sincronizados a cada render para uso em callbacks e intervals
   // (mesmo padrão de soundRef e autoPrintRef — evita recriação de closures)
   const autoPrintRef = useRef(autoPrint);
   autoPrintRef.current = autoPrint;
 
+  const autoPrintKitchenRef = useRef(autoPrintKitchen);
+  autoPrintKitchenRef.current = autoPrintKitchen;
+
   const setAutoPrint = useCallback((val) => {
     setAutoPrintState(val);
     localStorage.setItem('autoPrint', String(val));
+  }, []);
+
+  const setAutoPrintKitchen = useCallback((val) => {
+    setAutoPrintKitchenState(val);
+    localStorage.setItem('autoPrintKitchen', String(val));
   }, []);
 
   const unackRef   = useRef(new Set()); // pedidos aguardando reconhecimento
@@ -147,7 +158,8 @@ export default function useOrders() {
     const o = norm(order);
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
     if (soundRef.current) playAlert();
-    if (autoPrintRef.current) printOrder(o);
+    if (autoPrintRef.current)        printOrder(o);
+    if (autoPrintKitchenRef.current) printKitchen(o);
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(`🍽️ Pedido #${o.orderNumber}`, {
         body: `${o.channel !== 'manual' ? o.channel.toUpperCase() + ' · ' : ''}${o.items?.length ?? 0} item(s) · R$ ${o.total.toFixed(2)}`,
@@ -306,6 +318,7 @@ export default function useOrders() {
     statusError, setStatusError,
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
+    autoPrintKitchen, setAutoPrintKitchen,
     changeStatus, doCancel, addOrder,
     acknowledgeOrder, getColumnOrders,
     markPaid, editItems,

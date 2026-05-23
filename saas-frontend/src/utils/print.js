@@ -1,4 +1,6 @@
-// ── Thermal receipt printer — 58mm ───────────────────────────
+// ── Thermal printer utilities ────────────────────────────────
+// printOrder   → recibo do cliente  (58mm)
+// printKitchen → comanda de cozinha (80mm, texto grande)
 
 const PAYMENT_LABELS = {
   cash:    'Dinheiro',
@@ -260,6 +262,172 @@ export function printOrder(order) {
   w.onload = () => setTimeout(doPrint, 250);
 
   // Fallback para browsers que não disparam onload em document.write
+  setTimeout(() => { if (!w.closed) doPrint(); }, 900);
+
+  return true;
+}
+
+// ── Comanda de cozinha — 80mm ─────────────────────────────────
+export function printKitchen(order) {
+  const now  = new Date();
+  const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const itemRows = (order.items ?? []).map((item) => {
+    const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}×`;
+    const name = item.productName ?? item.product_name ?? '';
+    const note = item.notes
+      ? `<div class="item-obs">↳ ${item.notes}</div>`
+      : '';
+    return `
+      <div class="item">
+        <span class="item-qty">${qty}</span>
+        <span class="item-name">${name}</span>
+        ${note}
+      </div>`;
+  }).join('');
+
+  const delivType  = order.deliveryType ?? order.delivery_type ?? '';
+  const isDelivery = delivType === 'delivery' ||
+                     (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
+  const tipoLabel  = isDelivery ? '🛵 ENTREGA' : '🏪 RETIRADA';
+
+  const html = `<!DOCTYPE html>
+<html><head>
+  <meta charset="UTF-8">
+  <title>Comanda #${order.orderNumber ?? order.order_number}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-weight: bold;
+      width: 80mm;
+      min-width: 80mm;
+      max-width: 80mm;
+      padding: 3mm 3mm 8mm 3mm;
+      color: #000;
+      background: #fff;
+    }
+    .header-label {
+      text-align: center;
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      font-weight: 900;
+      border: 2px solid #000;
+      padding: 2px 0;
+      margin-bottom: 4px;
+    }
+    .num {
+      text-align: center;
+      font-size: 52px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -1px;
+      margin: 2px 0;
+    }
+    .hora {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+    .tipo {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    hr { border: none; border-top: 2px dashed #000; margin: 4px 0; }
+    hr.solid { border-top: 3px solid #000; }
+    .item {
+      padding: 5px 0;
+      border-bottom: 1px dashed #ccc;
+      line-height: 1.3;
+    }
+    .item:last-child { border-bottom: none; }
+    .item-qty {
+      display: inline-block;
+      font-size: 22px;
+      font-weight: 900;
+      min-width: 36px;
+      vertical-align: top;
+    }
+    .item-name {
+      display: inline-block;
+      font-size: 18px;
+      font-weight: 900;
+      vertical-align: top;
+      line-height: 1.3;
+      max-width: 62mm;
+    }
+    .item-obs {
+      font-size: 13px;
+      font-weight: 900;
+      padding-left: 36px;
+      margin-top: 2px;
+      text-decoration: underline;
+    }
+    .obs-pedido {
+      font-size: 13px;
+      font-weight: 900;
+      border: 2px solid #000;
+      padding: 3px 5px;
+      margin-top: 4px;
+    }
+    @media print {
+      @page { size: 80mm auto; margin: 0mm; }
+      html, body {
+        width: 80mm;
+        min-width: 80mm;
+        max-width: 80mm;
+        padding: 2mm 3mm 6mm 3mm;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-label">⭐ COZINHA ⭐</div>
+  <p class="num">#${order.orderNumber ?? order.order_number}</p>
+  <p class="hora">${time}</p>
+  <p class="tipo">${tipoLabel}</p>
+  <hr class="solid">
+
+  <div class="itens">${itemRows}</div>
+
+  ${order.notes ? `<div class="obs-pedido">⚠️ OBS: ${order.notes}</div>` : ''}
+
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=380,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
+
+  if (!w) {
+    // Popup bloqueado — fallback arquivo HTML
+    const blob = new Blob([html], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `comanda-${order.orderNumber ?? order.order_number}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return false;
+  }
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
+  let printed = false;
+  const doPrint = () => {
+    if (printed) return;
+    printed = true;
+    w.addEventListener('afterprint', () => { try { w.close(); } catch (e) { /* já fechada */ } });
+    w.focus();
+    w.print();
+  };
+
+  w.onload = () => setTimeout(doPrint, 250);
   setTimeout(() => { if (!w.closed) doPrint(); }, 900);
 
   return true;
