@@ -28,4 +28,7 @@ router.post('/financial/transactions', ctrl.createTransaction);
 router.post('/whatsapp/send',      ctrl.sendWhatsApp);
 router.post('/whatsapp/send-media', ctrl.sendWhatsAppMedia);
 
+// Leads CRM — chamado pelo chatbot VPS2 quando nova conversa inicia
+router.post('/leads', ctrl.upsertLead);
+
 module.exports = router;

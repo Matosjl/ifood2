@@ -7,6 +7,7 @@ const NAV_GROUPS = [
     label: 'Operação',
     items: [
       { key: 'orders',   emoji: '🍽️', label: 'Pedidos' },
+      { key: 'kds',      emoji: '👨‍🍳', label: 'KDS Cozinha' },
       { key: 'entregas', emoji: '🛵', label: 'Entregas' },
     ],
   },
@@ -15,6 +16,7 @@ const NAV_GROUPS = [
     items: [
       { key: 'products', emoji: '📦', label: 'Produtos' },
       { key: 'stock',    emoji: '📊', label: 'Estoque' },
+      { key: 'addons',   emoji: '🍟', label: 'Complementos' },
     ],
   },
   {
@@ -22,6 +24,7 @@ const NAV_GROUPS = [
     items: [
       { key: 'financial',  emoji: '💰', label: 'Financeiro' },
       { key: 'clientes',   emoji: '👥', label: 'Clientes' },
+      { key: 'fidelidade', emoji: '⭐', label: 'Fidelidade' },
       { key: 'fiado',      emoji: '🤝', label: 'Fiado' },
       { key: 'relatorios', emoji: '📈', label: 'Relatórios' },
     ],

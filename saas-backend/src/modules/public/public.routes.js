@@ -4,15 +4,27 @@ const ctrl         = require('./public.controller');
 
 const router = Router();
 
-// Rate limit apertado para rotas públicas
 const orderLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
   message: { success: false, message: 'Muitas requisições. Aguarde 1 minuto.' },
 });
 
-router.get('/order/:id',         ctrl.trackOrder);   // rastrear pedido (static antes de :slug)
-router.get('/:slug',             ctrl.getMenu);
-router.post('/:slug/orders',     orderLimit, ctrl.createOrder);
+const ratingLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Muitas requisições. Aguarde 1 minuto.' },
+});
+
+// Rotas estáticas devem vir ANTES de :slug para não serem capturadas
+router.get('/order/:id',                ctrl.trackOrder);
+
+// Rotas por slug
+router.get('/:slug',                    ctrl.getMenu);
+router.post('/:slug/orders',            orderLimit, ctrl.createOrder);
+router.get('/:slug/customer/:phone',    ctrl.getCustomer);
+router.get('/:slug/history/:phone',     ctrl.getOrderHistory);
+router.post('/:slug/ratings',           ratingLimit, ctrl.submitRating);
+router.get('/:slug/loyalty-config',     ctrl.getLoyaltyConfig);
 
 module.exports = router;

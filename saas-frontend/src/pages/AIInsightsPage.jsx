@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { managerAnalyze, generateMarketing } from '../api/ai';
+import { useState, useEffect, useCallback } from 'react';
+import { managerAnalyze, generateMarketing, getWhatsAppMenu, clearWhatsAppMenu } from '../api/ai';
 import OcrInvoiceModal from '../components/OcrInvoiceModal';
 import api from '../api/axios';
 
@@ -33,6 +33,95 @@ function Card({ children, className = '' }) {
     <div className={`bg-gray-900 rounded-2xl border border-white/[0.07] p-5 ${className}`}>
       {children}
     </div>
+  );
+}
+
+// ── Cardápio do Dia ────────────────────────────────────────────────
+function DayMenuSection() {
+  const [menu,     setMenu]     = useState(undefined); // undefined = loading, null = none
+  const [loading,  setLoading]  = useState(true);
+  const [clearing, setClearing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await getWhatsAppMenu();
+      setMenu(data.data ?? null);
+    } catch {
+      setMenu(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleClear = async () => {
+    if (!window.confirm('Remover o cardápio ativo do WhatsApp?')) return;
+    setClearing(true);
+    try {
+      await clearWhatsAppMenu();
+      setMenu(null);
+    } catch { /* ignore */ }
+    finally { setClearing(false); }
+  };
+
+  return (
+    <Card>
+      <SectionHeader emoji="📋" title="Cardápio do Dia (WhatsApp)" subtitle="Imagem enviada pelo dono via WhatsApp para os clientes" />
+
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : !menu ? (
+        <div className="text-center py-10 text-gray-600">
+          <p className="text-3xl mb-2">📭</p>
+          <p className="text-sm">Nenhum cardápio ativo no momento.</p>
+          <p className="text-xs mt-1 text-gray-700">Envie uma foto via WhatsApp para ativá-lo.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Imagem */}
+          {menu.image && (
+            <div className="rounded-xl overflow-hidden border border-white/[0.07] bg-gray-800">
+              <img
+                src={`data:image/jpeg;base64,${menu.image}`}
+                alt="Cardápio do dia"
+                className="w-full object-contain max-h-[480px]"
+              />
+            </div>
+          )}
+
+          {/* Legenda */}
+          {menu.caption && (
+            <div className="bg-gray-800/60 rounded-xl px-4 py-3">
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wide mb-1">Legenda</p>
+              <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{menu.caption}</p>
+            </div>
+          )}
+
+          {/* Meta */}
+          <div className="flex items-center justify-between">
+            {menu.savedAt && (
+              <p className="text-xs text-gray-600">
+                Atualizado em {new Date(menu.savedAt).toLocaleString('pt-BR')}
+              </p>
+            )}
+            <button
+              onClick={handleClear}
+              disabled={clearing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 border border-red-500/20 transition-colors disabled:opacity-40 ml-auto"
+            >
+              {clearing
+                ? <><div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> Removendo...</>
+                : <><span>🗑️</span> Limpar cardápio</>
+              }
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -318,6 +407,7 @@ export default function AIInsightsPage() {
       </div>
 
       {/* Sections */}
+      <DayMenuSection />
       <ManagerSection />
       <MarketingSection />
 

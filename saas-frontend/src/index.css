@@ -186,3 +186,42 @@
            transition-colors;
   }
 }
+
+/* ── Landing Page — Design System Classes ──────────────────────── */
+.cz-card {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 28px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+.cz-card-lg { border-radius: 36px; }
+.dot-bg {
+  background-image: radial-gradient(rgba(0,0,0,0.06) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+@keyframes barRise { 0% { transform: scaleY(0.05); } 100% { transform: scaleY(1); } }
+.bar-rise { transform-origin: bottom; animation: barRise 0.7s cubic-bezier(0.16,1,0.3,1) both; }
+
+@keyframes pulseGlowG {
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.45); }
+  50%      { box-shadow: 0 0 0 10px rgba(34,197,94,0); }
+}
+.pulse-glow-g { animation: pulseGlowG 2.4s ease-in-out infinite; }
+
+@keyframes blobFloat {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  33%     { transform: translate(4px,-6px) rotate(2deg); }
+  66%     { transform: translate(-3px,4px) rotate(-1deg); }
+}
+.blob-float { animation: blobFloat 7s ease-in-out infinite; }
+
+@keyframes tickerSlide { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+.ticker-track { animation: tickerSlide 50s linear infinite; }
+
+@keyframes lpFloatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+.lp-float-y { animation: lpFloatY 3.5s ease-in-out infinite; }
+
+@keyframes fadeSlideIn { 0% { opacity:0; transform:translateX(8px); } 100% { opacity:1; transform:translateX(0); } }
+.fade-slide-in { animation: fadeSlideIn 0.3s ease-out; }

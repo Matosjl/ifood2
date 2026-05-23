@@ -110,6 +110,21 @@ const applyOcrResult = asyncHandler(async (req, res) => {
   }
 });
 
+// ── Cardápio do Dia (WhatsApp) ────────────────────────────────────
+
+/** GET /api/ai/menu — retorna o cardápio do dia ativo no WhatsApp */
+const getWhatsAppMenu = asyncHandler(async (req, res) => {
+  const result = await aiService.getWhatsAppMenu(req.user.tenantId);
+  if (!result) return res.status(404).json({ success: false, message: 'Nenhum cardápio ativo no momento.' });
+  res.json({ success: true, data: result });
+});
+
+/** DELETE /api/ai/menu — remove o cardápio do dia */
+const clearWhatsAppMenu = asyncHandler(async (req, res) => {
+  await aiService.clearWhatsAppMenu(req.user.tenantId);
+  res.json({ success: true, message: 'Cardápio removido com sucesso.' });
+});
+
 // ── Uso de IA ──────────────────────────────────────────────────────
 
 /** GET /api/ai/usage */
@@ -128,5 +143,7 @@ module.exports = {
   submitOcrInvoice,
   getOcrJob,
   applyOcrResult,
+  getWhatsAppMenu,
+  clearWhatsAppMenu,
   getUsage,
 };

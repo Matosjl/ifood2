@@ -32,6 +32,11 @@ const billingRoutes  = require('./modules/billing/billing.routes');
 const driverRoutes   = require('./modules/driver/driver.routes');
 const internalRoutes = require('./modules/internal/internal.routes');
 const aiRoutes       = require('./modules/ai/ai.routes');
+const addonsRoutes   = require('./modules/addons/addons.routes');
+const insumosRoutes  = require('./modules/insumos/insumos.routes');
+const couponsRoutes    = require('./modules/coupons/coupons.routes');
+const tablesRoutes     = require('./modules/tables/tables.routes');
+const campaignsRoutes  = require('./modules/campaigns/campaigns.routes');
 const productCtrl    = require('./modules/products/products.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { PLANS }      = require('./config/plans');
@@ -118,6 +123,11 @@ app.use('/api/billing',    billingRoutes);
 app.use('/api/driver',     driverRoutes);
 app.use('/api/internal',   internalRoutes); // Chamado pelo AI Engine (VPS2) — auth via X-Internal-Key
 app.use('/api/ai',         aiRoutes);       // Agentes IA (VPS2) — auth via JWT
+app.use('/api/addons',     addonsRoutes);   // Complementos / Adicionais
+app.use('/api/insumos',    insumosRoutes);  // Controle de insumos / ingredientes
+app.use('/api/coupons',    couponsRoutes);
+app.use('/api/tables',     tablesRoutes);
+app.use('/api/campaigns',  campaignsRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

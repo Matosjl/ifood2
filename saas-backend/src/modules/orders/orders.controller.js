@@ -174,25 +174,28 @@ const searchCustomers = asyncHandler(async (req, res) => {
   const sql = `
     WITH ranked_orders AS (
       SELECT customer_name, customer_phone, customer_address, total, created_at,
+             -- normaliza telefone: remove não-dígitos para agrupar variações de formato
+             regexp_replace(COALESCE(customer_phone,''), '[^0-9]', '', 'g') AS phone_norm,
              ROW_NUMBER() OVER (
-               PARTITION BY lower(customer_name), customer_phone
+               PARTITION BY lower(customer_name), regexp_replace(COALESCE(customer_phone,''), '[^0-9]', '', 'g')
                ORDER BY created_at DESC
              ) AS rn
       FROM   orders
       WHERE  tenant_id = $1
         AND  customer_name IS NOT NULL
+        AND  customer_name <> ''
         ${orderFilter}
     ),
     order_agg AS (
-      SELECT customer_name        AS name,
-             customer_phone       AS phone,
+      SELECT MIN(customer_name)   AS name,
+             NULLIF(phone_norm,'')AS phone,
              MAX(CASE WHEN rn = 1 THEN customer_address END) AS address,
              COUNT(*)::int        AS order_count,
              MAX(created_at)      AS last_order_date,
              SUM(total)::numeric  AS total_spent,
              NULL::uuid           AS client_id
       FROM   ranked_orders
-      GROUP  BY customer_name, customer_phone
+      GROUP  BY lower(customer_name), phone_norm
     ),
     manual_only AS (
       SELECT tc.name, tc.phone, tc.address,
@@ -206,15 +209,22 @@ const searchCustomers = asyncHandler(async (req, res) => {
         AND NOT EXISTS (
           SELECT 1 FROM order_agg oa
           WHERE (tc.phone IS NOT NULL AND tc.phone <> ''
-                 AND lower(oa.phone) = lower(tc.phone))
-             OR (tc.phone IS NULL OR tc.phone = '')
-                 AND lower(oa.name) = lower(tc.name)
+                 AND oa.phone = regexp_replace(tc.phone, '[^0-9]', '', 'g'))
+             OR ((tc.phone IS NULL OR tc.phone = '')
+                 AND lower(oa.name) = lower(tc.name))
         )
     )
-    SELECT * FROM order_agg
-    UNION ALL
-    SELECT * FROM manual_only
-    ORDER BY last_order_date DESC NULLS LAST, name ASC
+    SELECT ua.*, COALESCE(lc.cashback_balance, 0)::numeric AS cashback_balance
+    FROM (
+      SELECT * FROM order_agg
+      UNION ALL
+      SELECT * FROM manual_only
+    ) ua
+    LEFT JOIN loyalty_customers lc
+      ON lc.tenant_id = $1
+     AND ua.phone IS NOT NULL AND ua.phone <> ''
+     AND lc.phone = ua.phone
+    ORDER BY last_order_date DESC NULLS LAST, ua.name ASC
     LIMIT ${limitParam}
   `;
 
@@ -276,4 +286,52 @@ const updateInfo = asyncHandler(async (req, res) => {
   res.json({ success: true, data: order });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, createCustomer, setPaid, updateItems, updateInfo };
+/** GET /api/orders/customers/funnel — segmentação CRM de todos os clientes */
+const getCustomerFunnel = asyncHandler(async (req, res) => {
+  const db = require('../../config/database');
+
+  const sql = `
+    WITH base AS (
+      SELECT
+        COALESCE(lc.name, oa.name)              AS name,
+        COALESCE(lc.phone, oa.phone)            AS phone,
+        COALESCE(lc.address, oa.address)        AS address,
+        COALESCE(lc.cashback_balance, 0)        AS cashback_balance,
+        COALESCE(oa.order_count, 0)::int        AS order_count,
+        COALESCE(oa.total_spent, 0)::numeric    AS total_spent,
+        oa.last_order_date
+      FROM loyalty_customers lc
+      FULL OUTER JOIN (
+        SELECT
+          customer_name  AS name,
+          customer_phone AS phone,
+          MAX(customer_address) AS address,
+          COUNT(*)::int         AS order_count,
+          SUM(total)::numeric   AS total_spent,
+          MAX(created_at)       AS last_order_date
+        FROM orders
+        WHERE tenant_id = $1 AND status NOT IN ('cancelled','pending') AND customer_name IS NOT NULL
+        GROUP BY customer_name, customer_phone
+      ) oa ON lower(lc.phone) = lower(oa.phone)
+      WHERE lc.tenant_id = $1 OR oa.name IS NOT NULL
+    ),
+    segmented AS (
+      SELECT *,
+        CASE
+          WHEN order_count = 0 OR last_order_date IS NULL                                          THEN 'lead'
+          WHEN order_count >= 6 AND last_order_date > NOW() - INTERVAL '30 days'                   THEN 'vip'
+          WHEN order_count >= 2 AND last_order_date > NOW() - INTERVAL '30 days'                   THEN 'recorrente'
+          WHEN order_count = 1  AND last_order_date > NOW() - INTERVAL '30 days'                   THEN 'novo'
+          WHEN last_order_date  > NOW() - INTERVAL '60 days'                                       THEN 'em_risco'
+          ELSE 'perdido'
+        END AS segment
+      FROM base
+    )
+    SELECT * FROM segmented ORDER BY last_order_date DESC NULLS LAST, name ASC
+  `;
+
+  const { rows } = await db.query(sql, [req.user.tenantId]);
+  res.json({ success: true, data: rows });
+});
+
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, createCustomer, setPaid, updateItems, updateInfo, getCustomerFunnel };

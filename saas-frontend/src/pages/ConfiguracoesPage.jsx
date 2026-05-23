@@ -1,10 +1,16 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Toast from '../components/Toast';
 import api from '../api/axios';
+import { Map, MapMarker, MarkerContent, MapControls, useMap } from '../components/ui/map';
 import {
   updateProfile, updateTenantProfile, getTenantInfo,
   listUsers, createUser, updateUser, deactivateUser,
+  getWhatsappStatus, connectWhatsapp, disconnectWhatsapp,
+  updateSettings, getFullSettings,
+  listCoupons, createCoupon, updateCoupon,
+  listTables, createTable, deleteTable,
 } from '../api/users';
+import { PAY_OPTIONS } from '../constants/orders';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -143,16 +149,35 @@ function QrCodeTab({ currentUser }) {
 // ─────────────────────────────────────────────────────────────
 
 function RestauranteTab({ currentUser, onToast }) {
-  const [name,         setName]         = useState('');
-  const [whatsapp,     setWhatsapp]     = useState('');
-  const [address,      setAddress]      = useState('');
-  const [defaultFee,   setDefaultFee]   = useState(
+  const [name,           setName]           = useState('');
+  const [whatsapp,       setWhatsapp]       = useState('');
+  const [address,        setAddress]        = useState('');
+  const [defaultFee,     setDefaultFee]     = useState(
     () => localStorage.getItem('defaultDeliveryFee') ?? ''
   );
-  const [saving,        setSaving]        = useState(false);
-  const [tenant,        setTenant]        = useState(null);
+  const [markerPos,      setMarkerPos]      = useState(null);  // [lng, lat]
+  const [showMap,        setShowMap]        = useState(false);
+  const [geocoding,      setGeocoding]      = useState(false);
+  const [saving,         setSaving]         = useState(false);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [tenant,         setTenant]         = useState(null);
   const [chatbotEnabled, setChatbotEnabled] = useState(true);
   const [savingChatbot,  setSavingChatbot]  = useState(false);
+  const mapRef = useRef(null);
+
+  // Reverse-geocode helper
+  const reverseGeocode = useCallback(async (lng, lat) => {
+    try {
+      const res  = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { 'Accept-Language': 'pt-BR' } });
+      const data = await res.json();
+      const addr = data.address ?? {};
+      const road = addr.road ?? addr.pedestrian ?? '';
+      const num  = addr.house_number ?? '';
+      const city = addr.city ?? addr.town ?? addr.village ?? '';
+      const sub  = addr.suburb ?? addr.neighbourhood ?? '';
+      return [road, num].filter(Boolean).join(', ') + (sub ? ` — ${sub}` : '') + (city ? `, ${city}` : '');
+    } catch { return ''; }
+  }, []);
 
   useEffect(() => {
     getTenantInfo()
@@ -163,6 +188,15 @@ function RestauranteTab({ currentUser, onToast }) {
         setWhatsapp(t.whatsapp_number ?? '');
         setAddress(t.address ?? '');
         setChatbotEnabled(t.chatbot_enabled ?? true);
+      })
+      .catch(() => {});
+    // Load saved coordinates
+    getFullSettings()
+      .then(({ data }) => {
+        const s = data.data;
+        if (s.restaurant_lat && s.restaurant_lng) {
+          setMarkerPos([parseFloat(s.restaurant_lng), parseFloat(s.restaurant_lat)]);
+        }
       })
       .catch(() => {});
   }, []);
@@ -195,11 +229,7 @@ function RestauranteTab({ currentUser, onToast }) {
     try {
       await updateTenantProfile({ name, whatsappNumber: whatsapp.trim(), address: address.trim() });
       const u = getUser();
-      if (u.tenant) {
-        u.tenant.name = name.trim();
-        localStorage.setItem('user', JSON.stringify(u));
-      }
-      // Persiste taxa padrão de entrega localmente
+      if (u.tenant) { u.tenant.name = name.trim(); localStorage.setItem('user', JSON.stringify(u)); }
       const feeVal = parseFloat(defaultFee);
       if (feeVal > 0) localStorage.setItem('defaultDeliveryFee', String(feeVal));
       else localStorage.removeItem('defaultDeliveryFee');
@@ -211,8 +241,25 @@ function RestauranteTab({ currentUser, onToast }) {
     }
   };
 
+  const handleSaveLocation = async () => {
+    if (!markerPos) return;
+    setSavingLocation(true);
+    try {
+      await updateSettings({ restaurantLat: markerPos[1], restaurantLng: markerPos[0] });
+      onToast('Localização do restaurante salva!');
+      setShowMap(false);
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao salvar localização.', 'error');
+    } finally {
+      setSavingLocation(false);
+    }
+  };
+
+  const DEFAULT_CENTER = markerPos ?? [-49.7802, -29.3965];
+
   return (
-    <div className="max-w-md space-y-5">
+    <div className="max-w-xl space-y-5">
+      {/* Plan card */}
       <div className="bg-gray-800/60 rounded-2xl p-4 border border-white/[0.06] space-y-1">
         <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Plano atual</p>
         <p className="text-white font-semibold capitalize">{getUser().tenant?.plan ?? '—'}</p>
@@ -223,6 +270,7 @@ function RestauranteTab({ currentUser, onToast }) {
         )}
       </div>
 
+      {/* Basic info form */}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome do Restaurante *</label>
@@ -234,49 +282,113 @@ function RestauranteTab({ currentUser, onToast }) {
             WhatsApp <span className="text-gray-600 font-normal">(aparece no cardápio do cliente)</span>
           </label>
           <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
-            className="input w-full" placeholder="5511999999999 (com código do país)" type="tel" />
+            className="input w-full" placeholder="5511999999999" type="tel" />
           <p className="text-[11px] text-gray-600 mt-1">Formato: 55 + DDD + número. Ex: 5511999887766</p>
         </div>
         <div>
-          <label className="text-xs text-gray-400 font-semibold mb-1 block">
-            Endereço <span className="text-gray-600 font-normal">(opcional)</span>
-          </label>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">Endereço <span className="text-gray-600 font-normal">(texto livre)</span></label>
           <input value={address} onChange={(e) => setAddress(e.target.value)}
             className="input w-full" placeholder="Rua, número — Bairro, Cidade" />
         </div>
         <div>
           <label className="text-xs text-gray-400 font-semibold mb-1 block">
-            Taxa de entrega padrão <span className="text-gray-600 font-normal">(R$ — pré-preenche novos pedidos delivery)</span>
+            Taxa de entrega padrão <span className="text-gray-600 font-normal">(R$)</span>
           </label>
-          <input
-            type="number" min="0" step="0.50" placeholder="0,00"
-            value={defaultFee}
-            onChange={(e) => setDefaultFee(e.target.value)}
-            className="input w-40"
-          />
+          <input type="number" min="0" step="0.50" placeholder="0,00"
+            value={defaultFee} onChange={(e) => setDefaultFee(e.target.value)}
+            className="input w-40" />
         </div>
         <button type="submit" disabled={saving || !name.trim()}
           className="btn-green px-6 disabled:opacity-50">
-          {saving ? 'Salvando...' : 'Salvar'}
+          {saving ? 'Salvando...' : 'Salvar dados'}
         </button>
       </form>
 
+      {/* Location on map */}
+      <div className="pt-5 border-t border-white/[0.06]">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">📍 Localização no mapa</p>
+            <p className="text-[11px] text-gray-600 mt-0.5">
+              {markerPos
+                ? `Salvo: ${markerPos[1].toFixed(5)}, ${markerPos[0].toFixed(5)}`
+                : 'Não definida — o mapa de entregas abrirá no centro padrão'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              // Ao abrir o mapa sem posição salva, inicializa no centro padrão
+              // para que o botão "Confirmar" fique ativo imediatamente
+              if (!showMap && !markerPos) {
+                setMarkerPos([-49.7802, -29.3965]);
+              }
+              setShowMap((v) => !v);
+            }}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 transition-colors"
+          >
+            {showMap ? 'Fechar mapa' : markerPos ? '✏️ Alterar' : '📍 Definir no mapa'}
+          </button>
+        </div>
+
+        {showMap && (
+          <div className="space-y-2">
+            <div className="h-64 rounded-2xl overflow-hidden border border-white/10">
+              <Map
+                ref={mapRef}
+                defaultCenter={{ lng: DEFAULT_CENTER[0], lat: DEFAULT_CENTER[1] }}
+                defaultZoom={15}
+                theme="light"
+                className="w-full h-full"
+              >
+                <MapControls position="top-right" showZoom showCompass={false} />
+                <MapMarker
+                  longitude={markerPos ? markerPos[0] : DEFAULT_CENTER[0]}
+                  latitude={markerPos ? markerPos[1] : DEFAULT_CENTER[1]}
+                  draggable
+                  onDragEnd={async ({ lngLat }) => {
+                    setMarkerPos([lngLat.lng, lngLat.lat]);
+                    setGeocoding(true);
+                    const addr = await reverseGeocode(lngLat.lng, lngLat.lat);
+                    if (addr && !address.trim()) setAddress(addr);
+                    setGeocoding(false);
+                  }}
+                >
+                  <MarkerContent>
+                    <div className="w-10 h-10 rounded-full bg-orange-500 border-2 border-white shadow-xl flex items-center justify-center text-lg select-none">
+                      🍽️
+                    </div>
+                  </MarkerContent>
+                </MapMarker>
+              </Map>
+            </div>
+            <p className="text-[11px] text-gray-500">
+              {geocoding ? '🔍 Buscando endereço...' : 'Arraste o marcador até a entrada do seu restaurante.'}
+            </p>
+            <button
+              type="button"
+              onClick={handleSaveLocation}
+              disabled={savingLocation || !markerPos}
+              className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-sm font-bold transition-all disabled:opacity-40"
+            >
+              {savingLocation ? 'Salvando...' : '✅ Confirmar localização'}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Chatbot toggle */}
-      <div className="mt-6 pt-5 border-t border-white/[0.06]">
+      <div className="pt-5 border-t border-white/[0.06]">
         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🤖 Chatbot WhatsApp</p>
         <div className={`flex items-center justify-between gap-4 px-4 py-4 rounded-2xl border transition-colors ${
-          chatbotEnabled
-            ? 'bg-green-500/10 border-green-500/25'
-            : 'bg-gray-800/60 border-white/[0.06]'
+          chatbotEnabled ? 'bg-green-500/10 border-green-500/25' : 'bg-gray-800/60 border-white/[0.06]'
         }`}>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white">
               {chatbotEnabled ? '✅ Chatbot ativo' : '⏸ Chatbot pausado'}
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {chatbotEnabled
-                ? 'Respondendo automaticamente no WhatsApp'
-                : 'Não está respondendo mensagens automáticas'}
+              {chatbotEnabled ? 'Respondendo automaticamente no WhatsApp' : 'Não está respondendo mensagens automáticas'}
             </p>
           </div>
           <button
@@ -736,6 +848,889 @@ function MotoboyTab({ currentUser, onToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Tab: WhatsApp Connection
+// ─────────────────────────────────────────────────────────────
+
+function WhatsappTab({ onToast }) {
+  const [status,      setStatus]      = useState(null); // { connected, instance, qrcode, status }
+  const [loading,     setLoading]     = useState(true);
+  const [connecting,  setConnecting]  = useState(false);
+  const pollRef = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await getWhatsappStatus();
+      setStatus(data.data);
+      // Para polling se conectou
+      if (data.data?.connected && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    load();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [load]);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const { data } = await connectWhatsapp();
+      setStatus(data.data);
+      onToast('Escaneie o QR Code no WhatsApp para conectar!');
+      // Começa polling a cada 5s para detectar quando conectar
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await getWhatsappStatus();
+          setStatus(res.data.data);
+          if (res.data.data?.connected) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            onToast('WhatsApp conectado com sucesso! ✅');
+          }
+        } catch { /* ignore */ }
+      }, 5000);
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao conectar WhatsApp.', 'error');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Desconectar o WhatsApp? As notificações automáticas serão pausadas.')) return;
+    try {
+      await disconnectWhatsapp();
+      setStatus({ connected: false, instance: null, qrcode: null, status: 'not_configured' });
+      onToast('WhatsApp desconectado.');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao desconectar.', 'error');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-sm space-y-5">
+      {/* Status card */}
+      <div className={`rounded-2xl border p-5 space-y-4 ${
+        status?.connected
+          ? 'bg-green-500/10 border-green-500/25'
+          : 'bg-gray-800/60 border-white/[0.06]'
+      }`}>
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">{status?.connected ? '✅' : '📱'}</span>
+          <div>
+            <p className="text-base font-black text-white">
+              {status?.connected ? 'WhatsApp conectado' : 'WhatsApp desconectado'}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {status?.connected
+                ? 'Notificações automáticas ativas para clientes'
+                : 'Conecte para enviar atualizações de pedido via WhatsApp'}
+            </p>
+            {status?.instance && (
+              <p className="text-[11px] text-gray-600 mt-0.5">Instância: {status.instance}</p>
+            )}
+          </div>
+        </div>
+
+        {/* QR Code */}
+        {!status?.connected && status?.qrcode && (
+          <div className="flex flex-col items-center gap-3 pt-2">
+            <p className="text-xs text-amber-400 font-semibold text-center">
+              📲 Abra o WhatsApp → Aparelhos Conectados → Conectar aparelho → Escaneie
+            </p>
+            <div className="bg-white p-3 rounded-2xl shadow-xl">
+              <img
+                src={status.qrcode.startsWith('data:') ? status.qrcode : `data:image/png;base64,${status.qrcode}`}
+                alt="QR Code WhatsApp"
+                className="w-52 h-52"
+              />
+            </div>
+            <p className="text-[11px] text-gray-500 text-center animate-pulse">
+              Aguardando conexão... (verificando a cada 5s)
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          {!status?.connected ? (
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {connecting ? (
+                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Conectando...</>
+              ) : (
+                <>{status?.qrcode ? '🔄 Atualizar QR Code' : '🔗 Conectar WhatsApp'}</>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleDisconnect}
+              className="flex-1 py-2.5 rounded-xl bg-red-600/20 hover:bg-red-600/40 text-red-400 font-bold text-sm transition-colors border border-red-500/20"
+            >
+              Desconectar
+            </button>
+          )}
+          <button onClick={load} className="p-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors" title="Atualizar">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-gray-800/40 rounded-xl p-4 space-y-1.5 border border-white/[0.05]">
+        <p className="text-xs font-bold text-gray-400">ℹ️ Como funciona</p>
+        <p className="text-xs text-gray-500">Ao conectar, cada mudança de status do pedido (confirmado, em preparo, pronto, saiu para entrega) dispara uma mensagem automática para o número do cliente.</p>
+        <p className="text-xs text-gray-500">Usa Evolution API local — sem custos extras por mensagem.</p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab: Formas de Pagamento
+// ─────────────────────────────────────────────────────────────
+
+function PagamentosTab({ onToast }) {
+  const [accepted, setAccepted] = useState(null); // string[] | null
+  const [saving,   setSaving]   = useState(false);
+
+  useEffect(() => {
+    getFullSettings()
+      .then(({ data }) => {
+        const methods = data.data?.accepted_payment_methods;
+        setAccepted(Array.isArray(methods) ? methods : PAY_OPTIONS.map((p) => p.value));
+      })
+      .catch(() => setAccepted(PAY_OPTIONS.map((p) => p.value)));
+  }, []);
+
+  const toggle = (value) => {
+    setAccepted((prev) => {
+      if (!prev) return [value];
+      return prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value];
+    });
+  };
+
+  const handleSave = async () => {
+    if (!accepted || accepted.length === 0) {
+      onToast('Selecione pelo menos uma forma de pagamento.', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateSettings({ acceptedPaymentMethods: accepted });
+      onToast('Formas de pagamento salvas!');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!accepted) {
+    return <div className="flex items-center justify-center h-40"><div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;
+  }
+
+  return (
+    <div className="max-w-md space-y-5">
+      <p className="text-sm text-gray-400">Selecione quais formas de pagamento o restaurante aceita. Apenas as ativas aparecerão na criação de pedidos.</p>
+      <div className="space-y-2">
+        {PAY_OPTIONS.map(({ value, label }) => {
+          const on = accepted.includes(value);
+          const [emoji, ...rest] = label.split(' ');
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => toggle(value)}
+              className={[
+                'w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all',
+                on ? 'border-green-500/40 bg-green-500/10 text-white' : 'border-white/10 bg-gray-800/40 text-gray-500 hover:border-white/20 hover:text-gray-300',
+              ].join(' ')}
+            >
+              <span className="flex items-center gap-2.5 text-sm font-semibold">
+                <span className="text-lg">{emoji}</span>
+                {rest.join(' ')}
+              </span>
+              <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-black transition-colors ${on ? 'bg-green-500 border-green-500 text-white' : 'border-gray-600'}`}>
+                {on ? '✓' : ''}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <button onClick={handleSave} disabled={saving} className="btn-green px-6 disabled:opacity-50">
+        {saving ? 'Salvando...' : 'Salvar'}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab: Zonas de Entrega (com desenho de polígonos no mapa)
+// ─────────────────────────────────────────────────────────────
+
+const ZONE_COLORS = ['#f97316','#3b82f6','#22c55e','#a855f7','#ec4899','#14b8a6','#f59e0b','#ef4444'];
+
+/** Componente interno — usa useMap() para desenhar polígonos no mapa */
+function PolygonLayer({ zones, drawPoints, isDrawing, onMapClick, onMapDblClick }) {
+  const { map, isLoaded } = useMap();
+
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+
+    // ── GeoJSON dos polígonos já salvos ───────────────────────
+    const zonesGeo = {
+      type: 'FeatureCollection',
+      features: zones
+        .filter((z) => z.polygon?.length >= 3)
+        .map((z, i) => ({
+          type: 'Feature',
+          properties: { name: z.name, fee: z.fee, color: z.color || ZONE_COLORS[i % ZONE_COLORS.length] },
+          geometry: { type: 'Polygon', coordinates: [[...z.polygon, z.polygon[0]]] },
+        })),
+    };
+
+    // ── GeoJSON do polígono em desenho ────────────────────────
+    const pts = drawPoints;
+    const drawGeo = {
+      type: 'FeatureCollection',
+      features: [
+        ...(pts.length >= 2 ? [{
+          type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: pts },
+        }] : []),
+        ...pts.map((pt) => ({
+          type: 'Feature', properties: {},
+          geometry: { type: 'Point', coordinates: pt },
+        })),
+      ],
+    };
+
+    // Atualiza ou cria fontes
+    if (map.getSource('zones-src')) {
+      map.getSource('zones-src').setData(zonesGeo);
+    } else {
+      map.addSource('zones-src', { type: 'geojson', data: zonesGeo });
+      map.addLayer({ id: 'zones-fill',    type: 'fill',   source: 'zones-src', paint: { 'fill-color': ['get','color'], 'fill-opacity': 0.18 } });
+      map.addLayer({ id: 'zones-outline', type: 'line',   source: 'zones-src', paint: { 'line-color': ['get','color'], 'line-width': 2 } });
+      map.addLayer({ id: 'zones-labels',  type: 'symbol', source: 'zones-src',
+        layout: { 'text-field': '{name}', 'text-size': 12, 'text-anchor': 'center' },
+        paint:  { 'text-color': '#fff', 'text-halo-color': '#000', 'text-halo-width': 1 },
+      });
+    }
+
+    if (map.getSource('draw-src')) {
+      map.getSource('draw-src').setData(drawGeo);
+    } else {
+      map.addSource('draw-src', { type: 'geojson', data: drawGeo });
+      map.addLayer({ id: 'draw-line', type: 'line',   source: 'draw-src', filter: ['==','$type','LineString'],
+        paint: { 'line-color': '#f97316', 'line-width': 2, 'line-dasharray': [3,2] },
+      });
+      map.addLayer({ id: 'draw-pts', type: 'circle', source: 'draw-src', filter: ['==','$type','Point'],
+        paint: { 'circle-radius': 5, 'circle-color': '#f97316', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+      });
+    }
+
+    // Cursor
+    map.getCanvas().style.cursor = isDrawing ? 'crosshair' : '';
+
+    // Handlers de clique
+    const handleClick = (e) => {
+      if (!isDrawing) return;
+      e.preventDefault();
+      onMapClick([e.lngLat.lng, e.lngLat.lat]);
+    };
+    const handleDblClick = (e) => {
+      if (!isDrawing) return;
+      e.preventDefault();
+      onMapDblClick();
+    };
+    map.on('click', handleClick);
+    map.on('dblclick', handleDblClick);
+    return () => {
+      map.off('click', handleClick);
+      map.off('dblclick', handleDblClick);
+      map.getCanvas().style.cursor = '';
+    };
+  }, [map, isLoaded, zones, drawPoints, isDrawing, onMapClick, onMapDblClick]);
+
+  return null;
+}
+
+function ZonasTab({ onToast }) {
+  const [zoneType,    setZoneType]    = useState('polygon'); // 'polygon' | 'radius'
+  const [zones,       setZones]       = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [isDrawing,   setIsDrawing]   = useState(false);
+  const [drawPoints,  setDrawPoints]  = useState([]);
+  const [pendingPoly, setPendingPoly] = useState(null); // polygon awaiting name+fee
+  const [editName,    setEditName]    = useState('');
+  const [editFee,     setEditFee]     = useState('');
+  const [restCenter,  setRestCenter]  = useState(null);
+  // radius mode
+  const [newRadius,   setNewRadius]   = useState('');
+  const [newRadFee,   setNewRadFee]   = useState('');
+
+  useEffect(() => {
+    getFullSettings().then(({ data }) => {
+      const d = data.data;
+      setZoneType(d?.delivery_zone_type || 'polygon');
+      setZones(Array.isArray(d?.delivery_zones) ? d.delivery_zones : []);
+      if (d?.restaurant_lat && d?.restaurant_lng)
+        setRestCenter([parseFloat(d.restaurant_lng), parseFloat(d.restaurant_lat)]);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const mapCenter = restCenter ?? [-49.7802, -29.3965];
+
+  const handleMapClick = useCallback(([lng, lat]) => {
+    setDrawPoints((p) => [...p, [lng, lat]]);
+  }, []);
+
+  const handleMapDblClick = useCallback(() => {
+    setDrawPoints((pts) => {
+      if (pts.length < 3) return pts;
+      setPendingPoly(pts);
+      setIsDrawing(false);
+      return [];
+    });
+  }, []);
+
+  const closePoly = () => {
+    if (drawPoints.length < 3) return;
+    setPendingPoly(drawPoints);
+    setIsDrawing(false);
+    setDrawPoints([]);
+  };
+
+  const cancelDraw = () => {
+    setIsDrawing(false);
+    setDrawPoints([]);
+    setPendingPoly(null);
+    setEditName('');
+    setEditFee('');
+  };
+
+  const confirmZone = () => {
+    if (!editName.trim() || !editFee || !pendingPoly) return;
+    const color = ZONE_COLORS[zones.length % ZONE_COLORS.length];
+    setZones((z) => [...z, { name: editName.trim(), fee: parseFloat(editFee), polygon: pendingPoly, color }]);
+    setPendingPoly(null); setEditName(''); setEditFee('');
+  };
+
+  const removeZone = (i) => setZones((z) => z.filter((_, idx) => idx !== i));
+
+  const addRadius = () => {
+    if (!newRadius || !newRadFee) return;
+    const sorted = [...zones, { radiusKm: parseFloat(newRadius), fee: parseFloat(newRadFee) }]
+      .sort((a, b) => a.radiusKm - b.radiusKm);
+    setZones(sorted);
+    setNewRadius(''); setNewRadFee('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateSettings({ deliveryZones: zones, deliveryZoneType: zoneType });
+      onToast('Zonas de entrega salvas!');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-40">
+      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-5 max-w-4xl">
+      {/* Tipo */}
+      <div>
+        <label className="text-xs text-gray-400 font-semibold mb-2 block">Modelo de cobrança</label>
+        <div className="grid grid-cols-2 gap-3 max-w-md">
+          {[
+            { v: 'polygon', emoji: '🗺️', title: 'Por área no mapa',    desc: 'Desenhe polígonos no mapa real' },
+            { v: 'radius',  emoji: '📍', title: 'Por raio da loja',    desc: 'Raios concêntricos com taxas diferentes' },
+          ].map(({ v, emoji, title, desc }) => (
+            <button key={v} type="button" onClick={() => { setZoneType(v); cancelDraw(); }}
+              className={['flex flex-col gap-1 p-4 rounded-xl border-2 text-left transition-all',
+                zoneType === v ? 'border-orange-400 bg-orange-500/10' : 'border-white/10 hover:border-white/20 bg-gray-800/40',
+              ].join(' ')}
+            >
+              <span className="text-2xl">{emoji}</span>
+              <p className="text-sm font-bold text-white">{title}</p>
+              <p className="text-xs text-gray-400">{desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Modo Polígono ────────────────────────────────────── */}
+      {zoneType === 'polygon' && (
+        <div className="flex gap-4 flex-col lg:flex-row">
+
+          {/* Painel esquerdo — lista + confirmação */}
+          <div className="w-full lg:w-64 shrink-0 space-y-3">
+
+            {/* Confirmar zona desenhada */}
+            {pendingPoly && (
+              <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 space-y-3">
+                <p className="text-xs font-bold text-orange-300">✏️ Nomear zona desenhada</p>
+                <input value={editName} onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Nome (ex: Centro, Zona Norte)" className="input w-full text-sm" autoFocus />
+                <div className="flex items-center gap-2">
+                  <input type="number" min="0" step="0.5" value={editFee}
+                    onChange={(e) => setEditFee(e.target.value)}
+                    placeholder="Taxa R$" className="input flex-1 text-sm" />
+                  <button onClick={confirmZone} disabled={!editName.trim() || !editFee}
+                    className="px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm disabled:opacity-40 shrink-0">
+                    ✓
+                  </button>
+                </div>
+                <button onClick={cancelDraw} className="w-full text-xs text-gray-500 hover:text-red-400 transition-colors">
+                  Descartar polígono
+                </button>
+              </div>
+            )}
+
+            {/* Botão desenhar */}
+            {!pendingPoly && (
+              <button
+                onClick={() => { setIsDrawing(true); setDrawPoints([]); }}
+                disabled={isDrawing}
+                className="w-full py-2.5 rounded-xl border-2 border-dashed border-orange-500/40 text-orange-400 hover:bg-orange-500/10 text-sm font-bold transition-all disabled:opacity-50"
+              >
+                {isDrawing ? '🖊️ Clicando no mapa...' : '+ Desenhar nova zona'}
+              </button>
+            )}
+
+            {/* Instrução de desenho */}
+            {isDrawing && (
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 space-y-2">
+                <p className="text-xs text-blue-300 font-semibold">🖊️ Modo desenho ativo</p>
+                <p className="text-xs text-gray-400">• Clique no mapa para adicionar pontos</p>
+                <p className="text-xs text-gray-400">• Duplo-clique para fechar</p>
+                <p className="text-xs text-gray-400 tabular-nums">{drawPoints.length} pontos</p>
+                <div className="flex gap-2">
+                  <button onClick={closePoly} disabled={drawPoints.length < 3}
+                    className="flex-1 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold disabled:opacity-40 transition-all">
+                    Fechar polígono
+                  </button>
+                  <button onClick={cancelDraw}
+                    className="flex-1 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-semibold transition-all">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista de zonas */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                {zones.length} zona{zones.length !== 1 ? 's' : ''} configurada{zones.length !== 1 ? 's' : ''}
+              </p>
+              {zones.length === 0 && !isDrawing && !pendingPoly && (
+                <p className="text-xs text-gray-600 italic">Nenhuma zona ainda. Clique em "Desenhar nova zona".</p>
+              )}
+              {zones.map((z, i) => (
+                <div key={i} className="flex items-center gap-2 bg-gray-800/60 rounded-xl px-3 py-2.5 border border-white/[0.06]">
+                  <div className="w-3 h-3 rounded-full shrink-0" style={{ background: z.color || ZONE_COLORS[i % ZONE_COLORS.length] }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-200 truncate">{z.name}</p>
+                    <p className="text-[10px] text-green-400 font-bold">R$ {parseFloat(z.fee).toFixed(2)}</p>
+                  </div>
+                  <button onClick={() => removeZone(i)} className="text-gray-600 hover:text-red-400 transition-colors text-sm shrink-0">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Mapa */}
+          <div className="flex-1 min-h-[420px] rounded-2xl overflow-hidden border border-white/10">
+            <Map defaultCenter={{ lng: mapCenter[0], lat: mapCenter[1] }} defaultZoom={13} theme="dark" className="w-full h-full">
+              <MapControls position="top-right" showZoom showCompass={false} />
+              {/* Marca o restaurante */}
+              {restCenter && (
+                <MapMarker longitude={restCenter[0]} latitude={restCenter[1]}>
+                  <MarkerContent>
+                    <div className="w-8 h-8 rounded-full bg-orange-500 border-2 border-white shadow-lg flex items-center justify-center text-sm select-none">🍽️</div>
+                  </MarkerContent>
+                </MapMarker>
+              )}
+              <PolygonLayer
+                zones={zones}
+                drawPoints={drawPoints}
+                isDrawing={isDrawing}
+                onMapClick={handleMapClick}
+                onMapDblClick={handleMapDblClick}
+              />
+            </Map>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modo Raio ────────────────────────────────────────── */}
+      {zoneType === 'radius' && (
+        <div className="max-w-sm space-y-3">
+          <p className="text-xs text-gray-500">
+            💡 Para o raio funcionar, defina a localização do restaurante na aba <strong className="text-gray-300">Restaurante</strong>.
+          </p>
+          <div className="bg-gray-800/40 rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-white/[0.06]">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Raios — {zones.length} zona{zones.length !== 1 ? 's' : ''}</p>
+            </div>
+            {zones.length === 0 ? (
+              <p className="text-xs text-gray-600 italic text-center py-5">Nenhum raio configurado</p>
+            ) : (
+              <div className="divide-y divide-white/[0.04]">
+                {zones.map((z, i) => (
+                  <div key={i} className="flex items-center justify-between px-4 py-2.5">
+                    <p className="text-sm font-semibold text-gray-200">Até {z.radiusKm} km</p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold text-green-400">R$ {parseFloat(z.fee).toFixed(2)}</span>
+                      <button onClick={() => removeZone(i)} className="text-gray-600 hover:text-red-400 transition-colors">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="px-4 py-3 bg-gray-800/60 border-t border-white/[0.06] flex gap-2">
+              <input type="number" min="0.1" step="0.5" placeholder="km"
+                value={newRadius} onChange={(e) => setNewRadius(e.target.value)}
+                className="input w-20 text-sm" />
+              <input type="number" min="0" step="0.5" placeholder="Taxa R$"
+                value={newRadFee} onChange={(e) => setNewRadFee(e.target.value)}
+                className="input flex-1 text-sm" />
+              <button onClick={addRadius} disabled={!newRadius || !newRadFee}
+                className="px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm disabled:opacity-40">
+                + Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button onClick={handleSave} disabled={saving} className="btn-green px-6 disabled:opacity-50 w-fit">
+        {saving ? 'Salvando...' : 'Salvar zonas'}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab: Mesas (QR Code por mesa)
+// ─────────────────────────────────────────────────────────────
+
+function MesasTab({ currentUser, onToast }) {
+  const [tables,  setTables]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newNum,  setNewNum]  = useState('');
+  const [newName, setNewName] = useState('');
+  const [adding,  setAdding]  = useState(false);
+
+  const slug    = currentUser?.tenant?.slug ?? '';
+  const menuUrl = (tableNum) =>
+    slug ? `${window.location.origin}/menu/${slug}?table=${encodeURIComponent(tableNum)}` : '';
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await listTables();
+      setTables(data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!newNum.trim()) return;
+    setAdding(true);
+    try {
+      const { data } = await createTable({ number: newNum.trim(), name: newName.trim() || undefined });
+      setTables((prev) => [...prev, data.data]);
+      setNewNum(''); setNewName('');
+      onToast('Mesa adicionada!');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao adicionar mesa.', 'error');
+    } finally { setAdding(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remover esta mesa?')) return;
+    try {
+      await deleteTable(id);
+      setTables((prev) => prev.filter((t) => t.id !== id));
+      onToast('Mesa removida.');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro.', 'error');
+    }
+  };
+
+  const downloadQr = (tableNum) => {
+    const url = menuUrl(tableNum);
+    const link = document.createElement('a');
+    link.href  = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}&format=png`;
+    link.download = `mesa-${tableNum}.png`;
+    link.target = '_blank';
+    link.click();
+  };
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <p className="text-sm text-gray-400">
+        Cada mesa gera um QR Code exclusivo. O cliente escaneia e faz o pedido direto pelo cardápio digital, sem precisar chamar o garçom.
+      </p>
+
+      {/* Add mesa */}
+      <div className="flex gap-2 items-end">
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Número / ID *</label>
+          <input
+            type="text"
+            placeholder="1, 2, A1..."
+            value={newNum}
+            onChange={(e) => setNewNum(e.target.value)}
+            className="input w-28 text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs text-gray-400 mb-1 block">Nome <span className="text-gray-600 font-normal">(opcional)</span></label>
+          <input
+            type="text"
+            placeholder="Ex: Varanda, VIP..."
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className="input w-full text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          />
+        </div>
+        <button
+          onClick={handleAdd}
+          disabled={adding || !newNum.trim()}
+          className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-50 shrink-0 self-end"
+        >
+          {adding ? '...' : '+ Adicionar'}
+        </button>
+      </div>
+
+      {/* Table list */}
+      {loading ? (
+        <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>
+      ) : tables.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-32 gap-2 text-gray-600 bg-gray-800/40 rounded-xl border border-white/[0.04]">
+          <span className="text-3xl">🍽️</span>
+          <p className="text-xs italic">Nenhuma mesa cadastrada</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {tables.map((t) => {
+            const url = menuUrl(t.number);
+            const qrSrc = url
+              ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`
+              : null;
+            return (
+              <div key={t.id} className="bg-gray-800/60 rounded-2xl border border-white/[0.06] overflow-hidden">
+                <div className="px-3 py-2.5 flex items-center justify-between border-b border-white/[0.06]">
+                  <div>
+                    <p className="text-sm font-black text-white">Mesa {t.number}</p>
+                    {t.name && <p className="text-xs text-gray-500">{t.name}</p>}
+                  </div>
+                  <button
+                    onClick={() => handleDelete(t.id)}
+                    className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {qrSrc && (
+                  <div className="flex flex-col items-center gap-2 p-3">
+                    <img src={qrSrc} alt={`QR Mesa ${t.number}`} className="w-24 h-24 rounded-xl bg-white p-1.5" />
+                    <button
+                      onClick={() => downloadQr(t.number)}
+                      className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1"
+                    >
+                      ⬇ Baixar QR
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab: Cupons de Desconto
+// ─────────────────────────────────────────────────────────────
+
+function CuponsTab({ onToast }) {
+  const [coupons, setCoupons] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ code: '', description: '', discountType: 'percent', discountValue: '', minOrder: '', maxUses: '', expiresAt: '' });
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await listCoupons();
+      setCoupons(data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    setAdding(true);
+    try {
+      const { data } = await createCoupon({
+        code:          form.code,
+        description:   form.description,
+        discountType:  form.discountType,
+        discountValue: parseFloat(form.discountValue),
+        minOrder:      parseFloat(form.minOrder) || 0,
+        maxUses:       form.maxUses ? parseInt(form.maxUses) : undefined,
+        expiresAt:     form.expiresAt || undefined,
+      });
+      setCoupons((prev) => [data.data, ...prev]);
+      setForm({ code: '', description: '', discountType: 'percent', discountValue: '', minOrder: '', maxUses: '', expiresAt: '' });
+      onToast('Cupom criado!');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao criar cupom.', 'error');
+    } finally { setAdding(false); }
+  };
+
+  const toggleActive = async (coupon) => {
+    try {
+      const { data } = await updateCoupon(coupon.id, { active: !coupon.active });
+      setCoupons((prev) => prev.map((c) => c.id === coupon.id ? data.data : c));
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro.', 'error');
+    }
+  };
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Criar cupom */}
+      <form onSubmit={handleAdd} className="bg-gray-800/60 rounded-2xl p-4 border border-white/[0.06] space-y-3">
+        <p className="text-sm font-bold text-white mb-2">✨ Criar novo cupom</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Código *</label>
+            <input value={form.code} onChange={(e) => setF('code', e.target.value.toUpperCase())}
+              className="input w-full text-sm uppercase" placeholder="PROMO10" required />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Tipo de desconto</label>
+            <select value={form.discountType} onChange={(e) => setF('discountType', e.target.value)} className="input w-full text-sm">
+              <option value="percent">Percentual (%)</option>
+              <option value="fixed">Valor fixo (R$)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Valor *</label>
+            <input type="number" min="0.01" step="0.01" value={form.discountValue}
+              onChange={(e) => setF('discountValue', e.target.value)}
+              className="input w-full text-sm" placeholder={form.discountType === 'percent' ? '10' : '5.00'} required />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Pedido mínimo R$</label>
+            <input type="number" min="0" step="1" value={form.minOrder}
+              onChange={(e) => setF('minOrder', e.target.value)}
+              className="input w-full text-sm" placeholder="0 = sem mínimo" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Máx. de usos</label>
+            <input type="number" min="1" step="1" value={form.maxUses}
+              onChange={(e) => setF('maxUses', e.target.value)}
+              className="input w-full text-sm" placeholder="Ilimitado" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Expira em</label>
+            <input type="date" value={form.expiresAt}
+              onChange={(e) => setF('expiresAt', e.target.value)}
+              className="input w-full text-sm" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Descrição</label>
+          <input value={form.description} onChange={(e) => setF('description', e.target.value)}
+            className="input w-full text-sm" placeholder="Ex: 10% off no primeiro pedido" />
+        </div>
+        <button type="submit" disabled={adding || !form.code || !form.discountValue}
+          className="btn-green px-5 disabled:opacity-50">
+          {adding ? 'Criando...' : '+ Criar Cupom'}
+        </button>
+      </form>
+
+      {/* List */}
+      {loading ? (
+        <div className="flex items-center justify-center h-24"><div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>
+      ) : coupons.length === 0 ? (
+        <p className="text-xs text-gray-600 italic text-center py-6">Nenhum cupom criado ainda</p>
+      ) : (
+        <div className="space-y-2">
+          {coupons.map((c) => (
+            <div key={c.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+              c.active ? 'bg-gray-800/60 border-white/[0.06]' : 'bg-gray-900/40 border-white/[0.03] opacity-60'
+            }`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-white tracking-wider">{c.code}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                    c.active ? 'bg-green-500/20 text-green-300' : 'bg-gray-700 text-gray-500'
+                  }`}>{c.active ? 'Ativo' : 'Inativo'}</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {c.discount_type === 'percent' ? `${c.discount_value}% off` : `R$ ${parseFloat(c.discount_value).toFixed(2)} off`}
+                  {parseFloat(c.min_order) > 0 && ` · mín R$ ${parseFloat(c.min_order).toFixed(2)}`}
+                  {c.max_uses && ` · ${c.uses_count}/${c.max_uses} usos`}
+                  {c.expires_at && ` · até ${new Date(c.expires_at).toLocaleDateString('pt-BR')}`}
+                </p>
+                {c.description && <p className="text-xs text-gray-500">{c.description}</p>}
+              </div>
+              <button
+                onClick={() => toggleActive(c)}
+                className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors ${c.active ? 'bg-green-500' : 'bg-gray-600'}`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${c.active ? 'translate-x-5' : 'translate-x-1'}`} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────
 
@@ -761,7 +1756,22 @@ export default function ConfiguracoesPage() {
           )}
           <Tab active={tab === 'equipe'}      onClick={() => setTab('equipe')}>Equipe</Tab>
           {isOwner && (
-            <Tab active={tab === 'qrcode'} onClick={() => setTab('qrcode')}>📱 QR Code</Tab>
+            <Tab active={tab === 'whatsapp'} onClick={() => setTab('whatsapp')}>📱 WhatsApp</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'pagamentos'} onClick={() => setTab('pagamentos')}>💳 Pagamentos</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'mesas'} onClick={() => setTab('mesas')}>🍽️ Mesas</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'cupons'} onClick={() => setTab('cupons')}>🎫 Cupons</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'qrcode'} onClick={() => setTab('qrcode')}>🔲 QR Cardápio</Tab>
           )}
           {isOwner && (
             <Tab active={tab === 'motoboys'} onClick={() => setTab('motoboys')}>🛵 Motoboys</Tab>
@@ -774,6 +1784,11 @@ export default function ConfiguracoesPage() {
         {tab === 'conta'       && <ContaTab       currentUser={currentUser} onToast={showToast} />}
         {tab === 'restaurante' && <RestauranteTab currentUser={currentUser} onToast={showToast} />}
         {tab === 'equipe'      && <EquipeTab      currentUser={currentUser} onToast={showToast} />}
+        {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
+        {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
+        {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'mesas'       && <MesasTab       currentUser={currentUser} onToast={showToast} />}
+        {tab === 'cupons'      && <CuponsTab      onToast={showToast} />}
         {tab === 'qrcode'      && <QrCodeTab      currentUser={currentUser} />}
         {tab === 'motoboys'   && <MotoboyTab     currentUser={currentUser} onToast={showToast} />}
       </div>

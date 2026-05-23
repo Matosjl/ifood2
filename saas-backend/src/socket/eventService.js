@@ -109,4 +109,4 @@ const newDeliveryAvailable = async (tenantId, order) => {
 const driverLocationUpdated = (tenantId, driverData) =>
   emit(tenantId, 'driver:location', { ...driverData, timestamp: new Date().toISOString() });
 
-module.exports = { orderCreated, orderUpdated, orderDeleted, newDeliveryAvailable, driverLocationUpdated };
+module.exports = { orderCreated, orderUpdated, orderDeleted, newDeliveryAvailable, driverLocationUpdated, emit };

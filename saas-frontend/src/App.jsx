@@ -13,6 +13,9 @@ import EntregasPage      from './pages/EntregasPage';
 import PlansPage         from './pages/PlansPage';
 import AIInsightsPage    from './pages/AIInsightsPage';
 import ClientesPage      from './pages/ClientesPage';
+import AddonsPage        from './pages/AddonsPage';
+import FidelidadePage    from './pages/FidelidadePage';
+import KdsPage           from './pages/KdsPage';
 import Sidebar           from './components/Sidebar';
 import TrialBanner       from './components/TrialBanner';
 import PlanWall          from './components/PlanWall';
@@ -91,8 +94,8 @@ export default function App() {
   if (route.startsWith('/admin')) return <AdminApp />;
 
   // ── Customer menu (public) ────────────────────────────────
-  const menuMatch = route.match(/^\/menu\/([^/]+)/);
-  if (menuMatch) return <CustomerApp slug={menuMatch[1]} />;
+  const menuMatch = route.match(/^\/(menu|cardapio)\/([^/]+)/);
+  if (menuMatch) return <CustomerApp slug={menuMatch[2]} />;
 
   // ── Register page ─────────────────────────────────────────
   if (route === '/cadastro') {
@@ -148,6 +151,7 @@ export default function App() {
           ) : (
             <>
               {page === 'orders'     && <DashboardPage />}
+              {page === 'kds'        && <KdsPage />}
               {page === 'products'   && <ProductsPage />}
               {page === 'stock'      && <StockPage />}
               {page === 'financial'  && <FinanceiroPage />}
@@ -156,6 +160,8 @@ export default function App() {
               {page === 'entregas'   && <EntregasPage />}
               {page === 'ai'         && <AIInsightsPage />}
               {page === 'clientes'   && <ClientesPage />}
+              {page === 'fidelidade' && <FidelidadePage />}
+              {page === 'addons'     && <AddonsPage />}
               {page === 'settings'   && <ConfiguracoesPage />}
             </>
           )}

@@ -333,10 +333,40 @@ const createOrderFromWhatsApp = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: order });
 });
 
+/**
+ * POST /api/internal/leads
+ * Chamado pelo VPS2 (chatbot) quando uma nova conversa WhatsApp é iniciada.
+ * Cria o contato como lead no funil CRM se ainda não existir.
+ * Body: { tenantId, phone, name? }
+ */
+const upsertLead = asyncHandler(async (req, res) => {
+  const tenantId = req.tenantId || req.body.tenantId;
+  if (!tenantId) throw new AppError('tenantId obrigatório', 400);
+
+  const { phone, name } = req.body;
+  if (!phone) throw new AppError('phone obrigatório', 400);
+
+  const normPhone = phone.replace(/\D/g, '').trim();
+  if (!normPhone) throw new AppError('phone inválido', 400);
+
+  const { rows } = await db.query(
+    `INSERT INTO loyalty_customers (tenant_id, phone, name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (tenant_id, phone) DO UPDATE
+       SET name       = COALESCE(EXCLUDED.name, loyalty_customers.name),
+           updated_at = NOW()
+     RETURNING id, name, phone, total_orders`,
+    [tenantId, normPhone, name?.trim() || null]
+  );
+
+  res.json({ success: true, data: rows[0] });
+});
+
 module.exports = {
   getTenant, getAllTenants, getSuperStats,
   getProducts, getOrdersSummary,
   getFinancialSummary, createTransaction,
   bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
   getOrdersByPhone, createOrderFromWhatsApp,
+  upsertLead,
 };

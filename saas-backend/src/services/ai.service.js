@@ -124,6 +124,29 @@ async function getOcrJob(tenantId, jobId) {
   return data.data;
 }
 
+// ── Cardápio do Dia (WhatsApp) ────────────────────────────────────
+
+/** Retorna o cardápio do dia ativo no WhatsApp (imagem base64 + legenda) */
+async function getWhatsAppMenu(tenantId) {
+  try {
+    const { data } = await aiEngine.get('/api/v1/menu/image',
+      { headers: headers(tenantId) }
+    );
+    return data.data ?? null;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Remove o cardápio do dia ativo */
+async function clearWhatsAppMenu(tenantId) {
+  const { data } = await aiEngine.delete('/api/v1/menu',
+    { headers: headers(tenantId) }
+  );
+  return data;
+}
+
 // ── Super Admin ────────────────────────────────────────────────────
 
 /** Resumo de uso de IA para o Super Admin Panel */
@@ -151,6 +174,8 @@ module.exports = {
   generateMarketing,
   submitOcrInvoice,
   getOcrJob,
+  getWhatsAppMenu,
+  clearWhatsAppMenu,
   getAiUsageSummary,
   isHealthy,
 };
