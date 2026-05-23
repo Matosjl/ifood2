@@ -111,6 +111,32 @@ export default function useOrders() {
     localStorage.setItem('autoPrintKitchen', String(val));
   }, []);
 
+  // ── Auto-confirmação ─────────────────────────────────────────
+  // Delay em segundos: 0 = desligado. Opções: 0 | 30 | 60 | 120 | 300
+  const AUTO_CONFIRM_OPTIONS = [0, 30, 60, 120, 300];
+  const [autoConfirmDelay, setAutoConfirmDelayState] = useState(
+    () => parseInt(localStorage.getItem('autoConfirmDelay') ?? '0', 10) || 0
+  );
+  const autoConfirmDelayRef = useRef(autoConfirmDelay);
+  autoConfirmDelayRef.current = autoConfirmDelay;
+
+  // Mapa de pedidos aguardando auto-confirmação: orderId → timeoutId
+  const autoConfirmTimersRef = useRef(new Map());
+
+  const setAutoConfirmDelay = useCallback((val) => {
+    setAutoConfirmDelayState(val);
+    localStorage.setItem('autoConfirmDelay', String(val));
+  }, []);
+
+  // Cancela timer de auto-confirmação de um pedido (se existir)
+  const clearAutoConfirmTimer = useCallback((id) => {
+    const tid = autoConfirmTimersRef.current.get(id);
+    if (tid != null) {
+      clearTimeout(tid);
+      autoConfirmTimersRef.current.delete(id);
+    }
+  }, []);
+
   const unackRef   = useRef(new Set()); // pedidos aguardando reconhecimento
   const alertRef   = useRef(null);      // intervalo do alerta contínuo
   const soundRef   = useRef(soundEnabled);
@@ -160,6 +186,22 @@ export default function useOrders() {
     if (soundRef.current) playAlert();
     if (autoPrintRef.current)        printOrder(o);
     if (autoPrintKitchenRef.current) printKitchen(o);
+    // Agenda auto-confirmação se configurado e pedido em pending
+    if (autoConfirmDelayRef.current > 0 && o.status === 'pending') {
+      const tid = setTimeout(() => {
+        autoConfirmTimersRef.current.delete(o.id);
+        // Só confirma se ainda estiver pending (não foi cancelado/confirmado manualmente)
+        setOrders((prev) => {
+          const cur = prev.find((p) => p.id === o.id);
+          if (cur?.status === 'pending') {
+            updateOrderStatus(o.id, 'confirmed').catch(() => {});
+            return prev.map((p) => p.id === o.id ? { ...p, status: 'confirmed' } : p);
+          }
+          return prev;
+        });
+      }, autoConfirmDelayRef.current * 1_000);
+      autoConfirmTimersRef.current.set(o.id, tid);
+    }
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(`🍽️ Pedido #${o.orderNumber}`, {
         body: `${o.channel !== 'manual' ? o.channel.toUpperCase() + ' · ' : ''}${o.items?.length ?? 0} item(s) · R$ ${o.total.toFixed(2)}`,
@@ -244,6 +286,7 @@ export default function useOrders() {
     // Guarda 2: request já em voo para este pedido (double-click antes do otimistic commit)
     if (pendingStatusRef.current.has(id)) return;
 
+    clearAutoConfirmTimer(id); // cancela auto-confirmação pendente
     pendingStatusRef.current.add(id);
     setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status } : o));
     acknowledgeOrder(id);
@@ -258,6 +301,7 @@ export default function useOrders() {
   }, [orders, acknowledgeOrder]);
 
   const doCancel = useCallback(async (id) => {
+    clearAutoConfirmTimer(id); // cancela auto-confirmação pendente
     const snapshot = orders.find((o) => o.id === id);
     setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status: 'cancelled' } : o));
     acknowledgeOrder(id);
@@ -319,6 +363,7 @@ export default function useOrders() {
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
     autoPrintKitchen, setAutoPrintKitchen,
+    autoConfirmDelay, setAutoConfirmDelay, AUTO_CONFIRM_OPTIONS,
     changeStatus, doCancel, addOrder,
     acknowledgeOrder, getColumnOrders,
     markPaid, editItems,

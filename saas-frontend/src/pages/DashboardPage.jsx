@@ -56,6 +56,7 @@ export default function DashboardPage() {
     soundEnabled, setSoundEnabled,
     autoPrint, setAutoPrint,
     autoPrintKitchen, setAutoPrintKitchen,
+    autoConfirmDelay, setAutoConfirmDelay, AUTO_CONFIRM_OPTIONS,
     changeStatus, doCancel,
     acknowledgeOrder, getColumnOrders,
     addOrder, markPaid, editItems,
@@ -120,6 +121,9 @@ export default function DashboardPage() {
         setAutoPrint={setAutoPrint}
         autoPrintKitchen={autoPrintKitchen}
         setAutoPrintKitchen={setAutoPrintKitchen}
+        autoConfirmDelay={autoConfirmDelay}
+        setAutoConfirmDelay={setAutoConfirmDelay}
+        autoConfirmOptions={AUTO_CONFIRM_OPTIONS}
         onNewOrder={() => setShowModal(true)}
         viewMode={viewMode}
         setViewMode={setViewMode}

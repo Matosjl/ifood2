@@ -29,10 +29,13 @@ function FullscreenBtn() {
   );
 }
 
+const AUTO_CONFIRM_LABELS = { 0: 'OFF', 30: '30s', 60: '1min', 120: '2min', 300: '5min' };
+
 export default function Header({
   connected, soundEnabled, setSoundEnabled,
   autoPrint, setAutoPrint,
   autoPrintKitchen, setAutoPrintKitchen,
+  autoConfirmDelay, setAutoConfirmDelay, autoConfirmOptions,
   onNewOrder, viewMode, setViewMode, viewModes,
   pendingCount = 0,
 }) {
@@ -144,6 +147,30 @@ export default function Header({
               <path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z"/>
               <line x1="6" y1="17" x2="18" y2="17"/>
             </svg>
+          </button>
+        )}
+
+        {/* Auto-confirmação toggle */}
+        {setAutoConfirmDelay && autoConfirmOptions && (
+          <button
+            onClick={() => {
+              const idx = autoConfirmOptions.indexOf(autoConfirmDelay);
+              const next = autoConfirmOptions[(idx + 1) % autoConfirmOptions.length];
+              setAutoConfirmDelay(next);
+            }}
+            title={autoConfirmDelay > 0
+              ? `Auto-confirmação: ${AUTO_CONFIRM_LABELS[autoConfirmDelay]} (clique para mudar)`
+              : 'Auto-confirmação: OFF (clique para ligar)'}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              autoConfirmDelay > 0
+                ? 'text-emerald-400 bg-emerald-400/10 hover:bg-emerald-400/20'
+                : 'text-gray-600 hover:bg-white/10'
+            }`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            {autoConfirmDelay > 0 ? AUTO_CONFIRM_LABELS[autoConfirmDelay] : 'AC'}
           </button>
         )}
 
