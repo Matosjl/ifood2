@@ -175,6 +175,7 @@ export default function useOrders() {
     onOrderCreated: handleOrderCreated,
     onOrderUpdated: handleOrderUpdated,
     onOrderDeleted: handleOrderDeleted,
+    onReconnect:    fetchToday,   // re-fetch ao reconectar para não perder pedidos
   });
 
   // Ref para usar socketConnected dentro do interval sem recriar o effect
