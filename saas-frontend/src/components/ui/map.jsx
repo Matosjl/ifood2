@@ -506,9 +506,9 @@ export function MapControls({
         setWaiting(false);
       },
       () => {
-        // GPS bloqueado (HTTP) — centraliza na cidade
+        // GPS bloqueado (HTTP) — apenas centraliza o mapa, NÃO move o alfinete
         map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 13, duration: 1500 });
-        onLocate?.(CITY_FALLBACK);
+        // onLocate NÃO é chamado: fallback de cidade não é localização real do usuário
         setWaiting(false);
       },
     );

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listProducts, replenishStock, listAllMovements } from '../api/products';
+import { listInsumos, createInsumo, updateInsumo, deleteInsumo, adjustInsumoStock } from '../api/insumos';
 
 const fmt = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtQty = (qty, type) =>
@@ -152,6 +153,266 @@ const VARIANT_STYLES = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Insumos Tab — ingredient stock management
+// ─────────────────────────────────────────────────────────────
+
+const UNITS = ['un', 'g', 'kg', 'ml', 'l', 'cx', 'pct'];
+
+function InsumoFormModal({ insumo, onClose, onSave }) {
+  const isEdit = !!insumo;
+  const [name,  setName]  = useState(insumo?.name  ?? '');
+  const [unit,  setUnit]  = useState(insumo?.unit  ?? 'un');
+  const [stock, setStock] = useState(insumo?.qty_in_stock  ?? '0');
+  const [minQty,setMinQty]= useState(insumo?.min_qty       ?? '0');
+  const [cost,  setCost]  = useState(insumo?.cost_per_unit ?? '0');
+  const [saving,setSaving]= useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return setError('Nome é obrigatório.');
+    setSaving(true); setError(null);
+    try {
+      const payload = { name: name.trim(), unit, qty_in_stock: parseFloat(stock) || 0, min_qty: parseFloat(minQty) || 0, cost_per_unit: parseFloat(cost) || 0 };
+      const { data } = isEdit ? await updateInsumo(insumo.id, payload) : await createInsumo(payload);
+      onSave(data.data);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Erro ao salvar.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-gray-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <h3 className="text-base font-bold text-white mb-4">{isEdit ? 'Editar Insumo' : 'Novo Insumo'}</h3>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-400 font-semibold block mb-1">Nome *</label>
+            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Ex: Farinha de trigo" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-400 font-semibold block mb-1">Unidade</label>
+              <select className="input w-full" value={unit} onChange={(e) => setUnit(e.target.value)}>
+                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-semibold block mb-1">Estoque atual</label>
+              <input className="input w-full" type="number" min="0" step="0.001" value={stock} onChange={(e) => setStock(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-400 font-semibold block mb-1">Alerta (mín.)</label>
+              <input className="input w-full" type="number" min="0" step="0.001" value={minQty} onChange={(e) => setMinQty(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-semibold block mb-1">Custo/{unit}</label>
+              <input className="input w-full" type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm font-semibold hover:bg-gray-700">Cancelar</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-500 disabled:opacity-50">
+              {saving ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AdjustModal({ insumo, onClose, onDone }) {
+  const [qty,    setQty]    = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState(null);
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const q = parseFloat(qty);
+    if (isNaN(q) || q === 0) return setError('Informe uma quantidade (positiva = entrada, negativa = saída).');
+    setSaving(true); setError(null);
+    try {
+      const { data } = await adjustInsumoStock(insumo.id, q, reason.trim() || undefined);
+      onDone(data.data); onClose();
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Erro ao ajustar.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-gray-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <h3 className="text-base font-bold text-white mb-1">Ajustar Estoque</h3>
+        <p className="text-sm text-gray-400 mb-4">{insumo.name} · atual: <span className="text-white font-semibold">{parseFloat(insumo.qty_in_stock).toFixed(3)} {insumo.unit}</span></p>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-400 font-semibold block mb-1">Quantidade (+ entrada / − saída)</label>
+            <input className="input w-full" type="number" step="0.001" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus placeholder="Ex: 500 ou -100" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 font-semibold block mb-1">Motivo</label>
+            <input className="input w-full" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Opcional" />
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm font-semibold hover:bg-gray-700">Cancelar</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold hover:bg-orange-500 disabled:opacity-50">
+              {saving ? 'Salvando...' : 'Ajustar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function InsumosTab() {
+  const [insumos,  setInsumos]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [search,   setSearch]   = useState('');
+  const [formItem, setFormItem] = useState(null);   // null = hidden, {} = new, obj = edit
+  const [adjItem,  setAdjItem]  = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const { data } = await listInsumos(); setInsumos(data.data ?? []); }
+    catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = (saved) => {
+    setInsumos((prev) => {
+      const idx = prev.findIndex((i) => i.id === saved.id);
+      return idx >= 0 ? prev.map((i) => i.id === saved.id ? saved : i) : [saved, ...prev];
+    });
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Excluir este insumo?')) return;
+    try {
+      await deleteInsumo(id);
+      setInsumos((prev) => prev.filter((i) => i.id !== id));
+    } catch { alert('Erro ao excluir.'); }
+  };
+
+  const filtered = insumos.filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()));
+  const lowStock = insumos.filter((i) => i.low_stock);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-1 py-3 shrink-0">
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar insumo..." className="input flex-1 max-w-xs text-sm" />
+        {lowStock.length > 0 && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-500/15 border border-red-500/20 text-red-400 text-xs font-semibold">
+            ⚠️ {lowStock.length} com estoque baixo
+          </span>
+        )}
+        <button onClick={() => setFormItem({})}
+          className="ml-auto px-3 py-1.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-500 transition-colors">
+          + Novo Insumo
+        </button>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-600">
+          <span className="text-5xl">🧂</span>
+          <p className="text-sm italic">{search ? 'Nenhum resultado' : 'Nenhum insumo cadastrado'}</p>
+          {!search && <button onClick={() => setFormItem({})} className="text-sm text-blue-400 hover:text-blue-300">+ Cadastrar primeiro insumo</button>}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-gray-950">
+              <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
+                <th className="pb-2.5 pr-3 font-semibold">Insumo</th>
+                <th className="pb-2.5 pr-3 font-semibold text-center">Un.</th>
+                <th className="pb-2.5 pr-3 font-semibold text-right">Estoque</th>
+                <th className="pb-2.5 pr-3 font-semibold text-right">Mínimo</th>
+                <th className="pb-2.5 pr-3 font-semibold text-right">Custo/un</th>
+                <th className="pb-2.5 font-semibold text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.04]">
+              {filtered.map((ins) => (
+                <tr key={ins.id} className={`hover:bg-white/[0.02] transition-colors ${ins.low_stock ? 'bg-red-500/5' : ''}`}>
+                  <td className="py-2.5 pr-3">
+                    <span className="font-semibold text-gray-200">{ins.name}</span>
+                    {ins.low_stock && <span className="ml-2 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-bold">BAIXO</span>}
+                  </td>
+                  <td className="py-2.5 pr-3 text-center text-gray-500">{ins.unit}</td>
+                  <td className={`py-2.5 pr-3 text-right font-bold tabular-nums ${ins.low_stock ? 'text-red-400' : 'text-white'}`}>
+                    {parseFloat(ins.qty_in_stock).toFixed(3)}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right text-gray-500 tabular-nums">{parseFloat(ins.min_qty).toFixed(3)}</td>
+                  <td className="py-2.5 pr-3 text-right text-gray-500 tabular-nums">{fmt(ins.cost_per_unit)}</td>
+                  <td className="py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setAdjItem(ins)}
+                        className="px-2 py-1 rounded-lg bg-orange-500/15 text-orange-400 text-xs font-semibold hover:bg-orange-500/30 transition-colors">
+                        Ajustar
+                      </button>
+                      <button onClick={() => setFormItem(ins)}
+                        className="px-2 py-1 rounded-lg bg-white/5 text-gray-400 text-xs font-semibold hover:bg-white/10 transition-colors">
+                        Editar
+                      </button>
+                      <button onClick={() => handleDelete(ins.id)}
+                        className="px-2 py-1 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-colors">
+                        ✕
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {formItem !== null && (
+        <InsumoFormModal
+          insumo={formItem?.id ? formItem : null}
+          onClose={() => setFormItem(null)}
+          onSave={handleSave}
+        />
+      )}
+      {adjItem && (
+        <AdjustModal
+          insumo={adjItem}
+          onClose={() => setAdjItem(null)}
+          onDone={(saved) => { handleSave(saved); setAdjItem(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────
 
@@ -267,6 +528,7 @@ export default function StockPage() {
         {[
           ['stock',     '📦 Produtos'],
           ['movements', '📋 Movimentações'],
+          ['insumos',   '🧂 Insumos'],
         ].map(([t, label]) => (
           <button
             key={t}
@@ -282,7 +544,9 @@ export default function StockPage() {
 
       {/* ── Content ──────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto p-4">
-        {loading ? (
+        {tab === 'insumos' ? (
+          <InsumosTab />
+        ) : loading ? (
           <div className="flex items-center justify-center h-48">
             <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>

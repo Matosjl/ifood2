@@ -34,4 +34,45 @@ router.patch('/chatbot',
   ctrl.setChatbot
 );
 
+// GET  /api/tenant/cashback — retorna configuração de cashback
+router.get('/cashback', ctrl.getCashbackConfig);
+
+// PUT  /api/tenant/cashback — atualiza configuração (owner only)
+router.put('/cashback',
+  authorize('owner'),
+  ctrl.setCashbackConfig
+);
+
+// GET /api/tenant/loyalty-customers — lista clientes fidelidade
+router.get('/loyalty-customers', ctrl.getLoyaltyCustomers);
+
+// GET /api/tenant/ratings — avaliações dos pedidos
+router.get('/ratings', ctrl.getRatings);
+
+// GET  /api/tenant/full-settings — settings para uso no modal de pedido
+router.get('/full-settings', ctrl.getFullSettings);
+
+// PATCH /api/tenant/settings — zonas, formas de pagamento, coords
+router.patch('/settings', authorize('owner'), ctrl.updateSettings);
+
+// POST /api/tenant/leads — criar/upsert lead manual
+router.post('/leads', authorize('owner', 'manager'), ctrl.createLead);
+
+// POST /api/tenant/leads/import — importar lista de leads (CSV/JSON)
+router.post('/leads/import', authorize('owner', 'manager'), ctrl.importLeads);
+
+// ── CRM ───────────────────────────────────────────────────────
+router.get('/crm',     ctrl.listCRMCustomers);
+router.get('/crm/:id', ctrl.getCRMCustomer);
+router.patch('/crm/:id', authorize('owner', 'manager'), ctrl.updateCRMCustomer);
+
+// GET    /api/tenant/whatsapp/status  — estado da conexão + QR code
+router.get('/whatsapp/status', ctrl.getWhatsappStatus);
+
+// POST   /api/tenant/whatsapp/connect — cria instância e retorna QR
+router.post('/whatsapp/connect', authorize('owner'), ctrl.connectWhatsapp);
+
+// DELETE /api/tenant/whatsapp/disconnect — logout WhatsApp
+router.delete('/whatsapp/disconnect', authorize('owner'), ctrl.disconnectWhatsapp);
+
 module.exports = router;

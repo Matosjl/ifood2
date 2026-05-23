@@ -14,17 +14,30 @@ const diasAtraso = (ultimo) => {
   return diff;
 };
 
+const WEEKDAY_LABELS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+function acertoLabel(c) {
+  if (!c) return null;
+  if (c.acerto_type === 'day_of_week' && c.acerto_weekday != null) {
+    return `toda ${WEEKDAY_LABELS[c.acerto_weekday]}`;
+  }
+  if (c.dia_acerto) return `dia ${c.dia_acerto} de cada mês`;
+  return null;
+}
+
 // ── Modal de cliente ──────────────────────────────────────────
 function ClienteModal({ cliente, onClose, onSaved }) {
   const [form, setForm] = useState({
-    name: cliente?.name ?? '',
-    phone: cliente?.phone ?? '',
-    address: cliente?.address ?? '',
-    dia_acerto: cliente?.dia_acerto ?? '',
-    notes: cliente?.notes ?? '',
+    name:           cliente?.name ?? '',
+    phone:          cliente?.phone ?? '',
+    address:        cliente?.address ?? '',
+    dia_acerto:     cliente?.dia_acerto ?? '',
+    notes:          cliente?.notes ?? '',
+    acerto_type:    cliente?.acerto_type ?? 'day_of_month',
+    acerto_weekday: cliente?.acerto_weekday ?? 5, // sexta como padrão
   });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [error,  setError]  = useState(null);
   const set = (f) => (e) => setForm(p => ({ ...p, [f]: e.target.value }));
 
   const handleSave = async () => {
@@ -43,24 +56,77 @@ function ClienteModal({ cliente, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 rounded-2xl border border-white/10 w-full max-w-md p-6 space-y-4">
         <h3 className="text-lg font-bold text-white">{cliente ? 'Editar Cliente' : 'Novo Cliente'}</h3>
-        {[
-          { label: 'Nome *', field: 'name', placeholder: 'João Silva' },
-          { label: 'Telefone', field: 'phone', placeholder: '(51) 99999-9999' },
-          { label: 'Dia de acerto', field: 'dia_acerto', placeholder: '15 (dia do mês)' },
-        ].map(({ label, field, placeholder }) => (
-          <div key={field}>
-            <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">{label}</label>
-            <input value={form[field]} onChange={set(field)} placeholder={placeholder} className="input w-full" />
+
+        {/* Nome */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Nome *</label>
+          <input value={form.name} onChange={set('name')} placeholder="João Silva" className="input w-full" />
+        </div>
+
+        {/* Telefone */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Telefone</label>
+          <input value={form.phone} onChange={set('phone')} placeholder="(51) 99999-9999" className="input w-full" />
+        </div>
+
+        {/* Dia de acerto */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">Dia de acerto</label>
+          {/* Toggle tipo */}
+          <div className="flex gap-2 mb-3">
+            {[
+              { value: 'day_of_month', label: '📅 Dia do mês' },
+              { value: 'day_of_week',  label: '🗓️ Dia da semana' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setForm(p => ({ ...p, acerto_type: value }))}
+                className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                  form.acerto_type === value
+                    ? 'bg-orange-500 text-white'
+                    : 'border border-white/10 text-gray-400 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-        ))}
+
+          {form.acerto_type === 'day_of_month' ? (
+            <input
+              type="number"
+              min={1} max={31}
+              value={form.dia_acerto}
+              onChange={set('dia_acerto')}
+              placeholder="Ex: 15"
+              className="input w-full"
+            />
+          ) : (
+            <select
+              value={form.acerto_weekday}
+              onChange={e => setForm(p => ({ ...p, acerto_weekday: Number(e.target.value) }))}
+              className="input w-full"
+            >
+              {WEEKDAY_LABELS.map((label, i) => (
+                <option key={i} value={i}>{label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Endereço */}
         <div>
           <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Endereço</label>
           <textarea value={form.address} onChange={set('address')} rows={2} placeholder="Rua, número, bairro" className="input w-full resize-none" />
         </div>
+
+        {/* Observações */}
         <div>
           <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Observações</label>
           <textarea value={form.notes} onChange={set('notes')} rows={2} className="input w-full resize-none" />
         </div>
+
         {error && <p className="text-red-400 text-sm bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
         <div className="flex gap-2 pt-2">
           <button onClick={onClose} className="flex-1 py-2 rounded-xl border border-white/10 text-gray-400 hover:text-white transition-colors">Cancelar</button>
@@ -171,9 +237,9 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
         </div>
 
         {/* Dia de acerto */}
-        {cliente.dia_acerto && (
+        {acertoLabel(cliente) && (
           <div className="px-6 py-3 border-b border-white/10 text-sm text-gray-400">
-            Dia de acerto: <span className="text-white font-semibold">dia {cliente.dia_acerto} de cada mês</span>
+            🗓️ Dia de acerto: <span className="text-white font-semibold">{acertoLabel(cliente)}</span>
           </div>
         )}
 
@@ -400,7 +466,7 @@ export default function FiadoPage() {
                     </div>
                     <p className="text-sm text-gray-500 truncate">
                       {c.phone || 'Sem telefone'}
-                      {c.dia_acerto ? ` · Acerto dia ${c.dia_acerto}` : ''}
+                      {acertoLabel(c) ? ` · Acerto ${acertoLabel(c)}` : ''}
                     </p>
                   </div>
 

@@ -21,6 +21,10 @@ router.post('/ocr/invoice',           ctrl.submitOcrInvoice);
 router.get('/ocr/jobs/:jobId',        ctrl.getOcrJob);
 router.post('/ocr/apply',             ctrl.applyOcrResult);
 
+// Cardápio do Dia (WhatsApp)
+router.get('/menu',                   ctrl.getWhatsAppMenu);
+router.delete('/menu',                ctrl.clearWhatsAppMenu);
+
 // Uso
 router.get('/usage',                  ctrl.getUsage);
 

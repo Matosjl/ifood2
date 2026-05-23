@@ -5,6 +5,125 @@ const Tenant       = require('../../models/Tenant');
 const AppError     = require('../../utils/AppError');
 const eventService = require('../../socket/eventService');
 
+// ── Cashback helpers (compartilhados com public.controller) ───
+
+/** Normaliza telefone: mantém apenas dígitos */
+const normalizePhone = (phone) => (phone ?? '').replace(/\D/g, '').trim();
+
+/**
+ * Busca ou cria loyalty_customer pelo telefone.
+ * Fire-and-forget safe: nunca lança.
+ */
+const upsertLoyaltyCustomer = async (tenantId, phone, name) => {
+  const normPhone = normalizePhone(phone);
+  if (!normPhone) return null;
+  const { rows } = await db.query(
+    `INSERT INTO loyalty_customers (tenant_id, phone, name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (tenant_id, phone) DO UPDATE
+       SET name = COALESCE(EXCLUDED.name, loyalty_customers.name), updated_at = NOW()
+     RETURNING id, cashback_balance, total_orders, total_spent`,
+    [tenantId, normPhone, name || null]
+  );
+  return rows[0] ?? null;
+};
+
+/**
+ * Aplica cashback após criação de pedido manual.
+ * Chamado fire-and-forget — nunca propaga erro.
+ *
+ * @param {string} tenantId
+ * @param {string} orderId
+ * @param {string|null} customerPhone
+ * @param {string|null} customerName
+ * @param {number} orderTotal
+ * @param {number} cashbackUsed  — saldo que o cliente quis usar (0 por padrão)
+ * @param {string|null} loyaltyCustomerId — pré-resolvido se o frontend enviou
+ */
+const applyManualOrderCashback = async (
+  tenantId, orderId, customerPhone, customerName, orderTotal,
+  cashbackUsed = 0, loyaltyCustomerId = null
+) => {
+  try {
+    // 1. Busca config do tenant
+    const { rows: cfg } = await db.query(
+      `SELECT cashback_enabled, cashback_rate, cashback_min_order FROM tenants WHERE id = $1`,
+      [tenantId]
+    );
+    const config = cfg[0];
+    if (!config?.cashback_enabled || !customerPhone) return;
+
+    // 2. Upsert loyalty customer
+    const loyalty = loyaltyCustomerId
+      ? (await db.query(
+          `SELECT id, cashback_balance FROM loyalty_customers WHERE id = $1`,
+          [loyaltyCustomerId]
+        )).rows[0]
+      : await upsertLoyaltyCustomer(tenantId, customerPhone, customerName);
+
+    if (!loyalty) return;
+
+    // 3. Calcula cashback ganho
+    const total    = parseFloat(orderTotal) || 0;
+    const minOrder = parseFloat(config.cashback_min_order ?? 10);
+    const earned   = total >= minOrder
+      ? Math.round((total * parseFloat(config.cashback_rate) / 100) * 100) / 100
+      : 0;
+
+    // 4. Casha cashback usado (cap no saldo real disponível)
+    const used = Math.min(
+      parseFloat(cashbackUsed) || 0,
+      parseFloat(loyalty.cashback_balance) || 0
+    );
+
+    // 5. Atualiza saldo e estatísticas do loyalty customer
+    await db.query(
+      `UPDATE loyalty_customers
+       SET cashback_balance = cashback_balance + $2 - $3,
+           total_orders     = total_orders + 1,
+           total_spent      = total_spent + $4,
+           updated_at       = NOW()
+       WHERE id = $1`,
+      [loyalty.id, earned, used, total]
+    );
+
+    // 6. Registra transações de cashback
+    const orderNum = (await db.query(`SELECT order_number FROM orders WHERE id = $1`, [orderId]))
+      .rows[0]?.order_number ?? orderId;
+
+    if (earned > 0) {
+      await db.query(
+        `INSERT INTO cashback_transactions (tenant_id, customer_id, order_id, type, amount, description)
+         VALUES ($1,$2,$3,'earn',$4,$5)`,
+        [tenantId, loyalty.id, orderId, earned,
+          `Pedido #${orderNum} — cashback ${config.cashback_rate}%`]
+      );
+    }
+    if (used > 0) {
+      await db.query(
+        `INSERT INTO cashback_transactions (tenant_id, customer_id, order_id, type, amount, description)
+         VALUES ($1,$2,$3,'use',$4,$5)`,
+        [tenantId, loyalty.id, orderId, used,
+          `Cashback usado no Pedido #${orderNum}`]
+      );
+    }
+
+    // 7. Vincula loyalty customer e valores ao pedido
+    await db.query(
+      `UPDATE orders
+       SET loyalty_customer_id = $2, cashback_earned = $3, cashback_used = $4
+       WHERE id = $1`,
+      [orderId, loyalty.id, earned, used]
+    );
+  } catch (err) {
+    // Cashback não é crítico — nunca deixa o pedido falhar
+    const { createLogger } = require('../../utils/logger');
+    createLogger('cashback').warn('Falha ao aplicar cashback em pedido manual', {
+      orderId, tenantId, error: err.message
+    });
+  }
+};
+
 // ── Leitura ───────────────────────────────────────────────────
 
 const listOrders = (tenantId, query) => Order.findAll(tenantId, query);
@@ -31,6 +150,7 @@ const createOrder = async (tenantId, {
   customerName, customerPhone, customerAddress,
   channel = 'manual', notes, items, deliveryType = 'pickup', paymentMethod = 'cash',
   deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey,
+  loyaltyCustomerId = null, cashbackUsed = 0,
 }) => {
   if (!items?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
 
@@ -79,6 +199,13 @@ const createOrder = async (tenantId, {
         lineTotal = parseFloat(product.sale_price) * item.quantity;
       }
 
+      // Soma preço dos complementos escolhidos
+      const addonsTotal = (item.addons ?? []).reduce(
+        (sum, a) => sum + (parseFloat(a.unit_price) || 0) * (a.qty || 1) * qty,
+        0
+      );
+      lineTotal += addonsTotal;
+
       orderTotal += lineTotal;
       resolvedItems.push({ ...item, product, qty, lineTotal });
     }
@@ -97,10 +224,12 @@ const createOrder = async (tenantId, {
       deliveryType, paymentMethod, deliveryFee: parseFloat(deliveryFee) || 0,
       neighborhood: neighborhood || null,
       initialStatus, idempotencyKey,
+      loyaltyCustomerId: loyaltyCustomerId || null,
+      cashbackUsed: parseFloat(cashbackUsed) || 0,
     }, client);
 
     for (const item of resolvedItems) {
-      await Order.createItem({
+      const orderItem = await Order.createItem({
         orderId:     order.id,
         productId:   item.product.id,
         productName: item.product.name,
@@ -110,6 +239,24 @@ const createOrder = async (tenantId, {
         total:       parseFloat(item.lineTotal.toFixed(2)),
         notes:       item.notes,
       }, client);
+
+      // Salva complementos selecionados para este item
+      if (item.addons?.length && orderItem?.id) {
+        for (const a of item.addons) {
+          await client.query(
+            `INSERT INTO order_item_addons (order_item_id, addon_item_id, addon_name, qty, unit_price, total)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              orderItem.id,
+              a.addon_item_id || null,
+              a.addon_name,
+              a.qty || 1,
+              parseFloat(a.unit_price) || 0,
+              parseFloat(a.total) || 0,
+            ]
+          );
+        }
+      }
 
       await Product.createMovement({
         tenantId,
@@ -127,7 +274,26 @@ const createOrder = async (tenantId, {
     // Incrementa contador mensal de pedidos (fire-and-forget)
     Tenant.incrementOrderCount(tenantId).catch(() => {});
 
-    return Order.findById(order.id, tenantId);
+    const createdOrder = await Order.findById(order.id, tenantId);
+
+    // Deduz insumos se pedido já nasce confirmado (pedido manual)
+    if (initialStatus === 'confirmed') {
+      const insumosSvc = require('../insumos/insumos.service');
+      insumosSvc.deductForOrder(tenantId, createdOrder.id).catch(() => {});
+    }
+
+    // Aplica cashback para pedidos manuais (fire-and-forget)
+    if (customerPhone) {
+      applyManualOrderCashback(
+        tenantId, createdOrder.id,
+        customerPhone, customerName,
+        createdOrder.total,
+        parseFloat(cashbackUsed) || 0,
+        loyaltyCustomerId || null
+      ).catch(() => {});
+    }
+
+    return createdOrder;
 
   } catch (err) {
     await client.query('ROLLBACK');
@@ -151,6 +317,12 @@ const createOrder = async (tenantId, {
 
 const updateStatus = async (id, tenantId, status) => {
   const updatedOrder = await Order.updateStatus(id, tenantId, status);
+
+  // Deduz insumos quando pedido é confirmado
+  if (status === 'confirmed') {
+    const insumosSvc = require('../insumos/insumos.service');
+    insumosSvc.deductForOrder(tenantId, id).catch(() => {});
+  }
 
   // When an order is ready for delivery, notify connected drivers
   if (status === 'ready' && updatedOrder?.delivery_type === 'delivery') {

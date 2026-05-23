@@ -22,6 +22,9 @@ export const searchCustomers = (q, limit) =>
 export const createCustomer = (payload) =>
   api.post('/orders/customers', payload);
 
+export const getCustomerFunnel = () =>
+  api.get('/orders/customers/funnel');
+
 /** Registra pagamento de um pedido (paid_at + payment_method). */
 export const markOrderPaid = (id, paymentMethod) =>
   api.patch(`/orders/${id}/paid`, { paymentMethod });

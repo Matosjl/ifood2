@@ -36,6 +36,13 @@ export const submitOcrInvoice = (imageBase64) =>
 export const getOcrJob = (jobId) =>
   api.get(`/ai/ocr/jobs/${jobId}`);
 
+// ── Cardápio do Dia (WhatsApp) ─────────────────────────────────────
+export const getWhatsAppMenu = () =>
+  api.get('/ai/menu');
+
+export const clearWhatsAppMenu = () =>
+  api.delete('/ai/menu');
+
 // ── Admin: IA health + usage ───────────────────────────────────────
 export const getAdminAiHealth = (key) =>
   adminApi(key).get('/ai/health');

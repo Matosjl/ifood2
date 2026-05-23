@@ -4,12 +4,26 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getProducts, createOrder, searchCustomers } from '../api/orders';
+import { getProducts, createOrder, searchCustomers, createCustomer } from '../api/orders';
+import { getProductAddonGroups } from '../api/addons';
 import { getCurrentCaixa } from '../api/caixa';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
+import { getFullSettings, validateCoupon } from '../api/users';
 import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
+
+// Ray-casting point-in-polygon — [lng,lat] ponto, polygon = [[lng,lat],...]
+function pointInPolygon([px, py], polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
 // Reverse-geocode [lng, lat] → { road, number, suburb, allSuburbs[] } via Nominatim
 async function reverseGeocode(lng, lat) {
@@ -21,9 +35,11 @@ async function reverseGeocode(lng, lat) {
     const data = await res.json();
     const addr = data.address ?? {};
     // Coleta todos os campos geográficos possíveis para matching de bairro
+    // Prioridade: mais específico (neighbourhood/quarter) antes do genérico (suburb/county)
     const allSuburbs = [
-      addr.suburb, addr.neighbourhood, addr.quarter, addr.city_district,
-      addr.district, addr.borough, addr.county, addr.town, addr.village,
+      addr.neighbourhood, addr.quarter, addr.city_district,
+      addr.suburb, addr.district, addr.borough,
+      addr.county, addr.town, addr.village,
       addr.municipality, addr.state_district,
     ].filter(Boolean);
     return {
@@ -69,8 +85,9 @@ async function forwardGeocode(query) {
 
 const CITY_CENTER = [-49.7802, -29.3965]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
 
-function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
-  const [markerPos,    setMarkerPos]    = useState(CITY_CENTER);
+function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter }) {
+  const mapCenter = restaurantCenter ?? CITY_CENTER;
+  const [markerPos,    setMarkerPos]    = useState(mapCenter);
   const [loading,      setLoading]      = useState(false);
   const [previewRoad,  setPreviewRoad]  = useState(initialStreet || '');
   const [previewNum,   setPreviewNum]   = useState('');
@@ -183,7 +200,7 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose }) {
 
       {/* Map */}
       <div className="flex-1 relative min-h-0">
-        <Map ref={mapRef} center={CITY_CENTER} zoom={14} theme="dark" className="h-full w-full">
+        <Map ref={mapRef} center={mapCenter} zoom={14} theme="dark" className="h-full w-full">
           <MapControls position="top-right" showZoom showLocate
             onLocate={({ longitude, latitude }) => setMarkerPos([longitude, latitude])} />
           <MapMarker longitude={markerPos[0]} latitude={markerPos[1]} draggable
@@ -326,6 +343,7 @@ function CategoryAccordion({ name, items, cart, onAdd, onQty, onWeight }) {
 function StepCustomer({
   name, setName, phone, setPhone,
   fetchSuggestions, showSug, suggestions, applySuggestion,
+  addNewCustomer, addingCustomer,
   pickupMode, setPickupMode, deliveryType,
   allCustomers, custLoading,
 }) {
@@ -352,7 +370,7 @@ function StepCustomer({
             ) : allCustomers.length === 0 ? (
               <p className="text-[11px] text-gray-600 italic py-2">Nenhum cliente ainda</p>
             ) : allCustomers.slice(0, 8).map((c, i) => {
-              const initials = (c.customer_name ?? 'C').split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
+              const initials = ((c.name ?? c.customer_name) ?? 'C').split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
               const orders   = c.order_count ?? 1;
               const isVip    = orders >= 10;
               return (
@@ -364,7 +382,7 @@ function StepCustomer({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <p className="text-[11px] font-semibold text-gray-300 truncate group-hover:text-white leading-none">
-                        {c.customer_name}
+                        {c.name ?? c.customer_name}
                       </p>
                       {isVip && <span className="text-[8px] text-yellow-400">★</span>}
                     </div>
@@ -388,12 +406,12 @@ function StepCustomer({
           </p>
           <div className="space-y-1">
             <button type="button"
-              onMouseDown={() => { setPickupMode(true); }}
+              onMouseDown={() => setPickupMode(true)}
               className="w-full text-left px-2 py-1.5 rounded-xl hover:bg-orange-500/10 text-[11px] text-gray-400 hover:text-orange-300 transition-colors flex items-center gap-1.5 font-medium">
               🏃 Retirada balcão
             </button>
             <button type="button"
-              onMouseDown={() => { applySuggestion({ customer_name: 'Cliente', customer_phone: '' }); }}
+              onMouseDown={() => { applySuggestion({ name: 'Cliente', phone: '' }); }}
               className="w-full text-left px-2 py-1.5 rounded-xl hover:bg-gray-700/40 text-[11px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1.5 font-medium">
               🎭 Anônimo
             </button>
@@ -453,10 +471,34 @@ function StepCustomer({
                 {suggestions.map((s, i) => (
                   <button key={i} onMouseDown={() => applySuggestion(s)}
                     className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors">
-                    <p className="text-sm text-gray-200 font-medium">{s.customer_name}</p>
-                    {s.customer_phone && <p className="text-xs text-gray-500">{s.customer_phone}</p>}
+                    <p className="text-sm text-gray-200 font-medium">{s.name ?? s.customer_name}</p>
+                    {(s.phone ?? s.customer_phone) && <p className="text-xs text-gray-500">{s.phone ?? s.customer_phone}</p>}
                   </button>
                 ))}
+              </motion.div>
+            )}
+            {showSug && suggestions.length === 0 && name.trim().length >= 2 && !pickupMode && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                className="absolute left-0 right-0 top-full mt-1 z-10"
+              >
+                <button
+                  type="button"
+                  onMouseDown={addNewCustomer}
+                  disabled={addingCustomer}
+                  className="w-full text-left px-3 py-2.5 bg-gray-800 border border-white/10 rounded-xl shadow-xl hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm"
+                >
+                  {addingCustomer ? (
+                    <span className="text-gray-400 animate-pulse">Salvando...</span>
+                  ) : (
+                    <>
+                      <span className="text-green-400 font-bold text-base leading-none">＋</span>
+                      <span className="text-gray-200">
+                        Adicionar <span className="font-semibold text-white">{name.trim()}</span> como novo cliente
+                      </span>
+                    </>
+                  )}
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -482,6 +524,123 @@ function StepCustomer({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Addon Picker Modal ─────────────────────────────────────────
+
+function AddonPicker({ product, groups, currentAddons = [], onConfirm, onClose }) {
+  // Initialize selections from currentAddons
+  const initSel = () => {
+    const map = {};
+    for (const g of groups) {
+      map[g.id] = {};
+      for (const item of g.items) {
+        const existing = currentAddons.find((a) => a.addon_item_id === item.id);
+        if (existing) map[g.id][item.id] = existing.qty ?? 1;
+      }
+    }
+    return map;
+  };
+  const [selections, setSelections] = useState(initSel);
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const toggle = (groupId, item) => {
+    setSelections((prev) => {
+      const grp = { ...(prev[groupId] ?? {}) };
+      if (grp[item.id]) { delete grp[item.id]; }
+      else              { grp[item.id] = 1; }
+      return { ...prev, [groupId]: grp };
+    });
+  };
+
+  const handleConfirm = () => {
+    const addons = [];
+    for (const g of groups) {
+      for (const item of g.items) {
+        const qty = selections[g.id]?.[item.id];
+        if (qty) addons.push({ addon_item_id: item.id, addon_name: item.name, qty, unit_price: parseFloat(item.price), total: parseFloat(item.price) * qty });
+      }
+    }
+    onConfirm(addons);
+  };
+
+  const addonsTotal = groups.reduce((sum, g) => {
+    for (const item of g.items) {
+      const qty = selections[g.id]?.[item.id] ?? 0;
+      sum += qty * parseFloat(item.price);
+    }
+    return sum;
+  }, 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: -10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: -10 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+        className="bg-gray-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+      >
+        <div className="px-5 py-4 border-b border-white/10 flex items-start justify-between">
+          <div>
+            <h3 className="text-base font-black text-white">{product.name}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Escolha os complementos</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors ml-2 shrink-0">✕</button>
+        </div>
+
+        <div className="overflow-y-auto max-h-80 p-4 space-y-5">
+          {groups.map((g) => (
+            <div key={g.id}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-gray-300 uppercase tracking-wide">{g.name}</p>
+                {g.min_qty > 0 && <span className="text-[10px] text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded-full">mín {g.min_qty}</span>}
+                {g.max_qty  && <span className="text-[10px] text-gray-500 ml-1">máx {g.max_qty}</span>}
+              </div>
+              <div className="space-y-1">
+                {g.items.filter((i) => i.active !== false).map((item) => {
+                  const selected = !!(selections[g.id]?.[item.id]);
+                  return (
+                    <button key={item.id} type="button" onClick={() => toggle(g.id, item)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border transition-all text-sm ${
+                        selected
+                          ? 'bg-orange-500/15 border-orange-500/40 text-white'
+                          : 'bg-gray-800/50 border-white/[0.06] text-gray-300 hover:bg-gray-700/60'
+                      }`}
+                    >
+                      <span className="font-medium">{item.name}</span>
+                      <div className="flex items-center gap-2">
+                        {parseFloat(item.price) > 0 && (
+                          <span className="text-xs text-gray-400">+R$ {parseFloat(item.price).toFixed(2)}</span>
+                        )}
+                        <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors text-[10px] font-black ${
+                          selected ? 'bg-orange-500 border-orange-500 text-white' : 'border-gray-600'
+                        }`}>{selected ? '✓' : ''}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-5 py-4 border-t border-white/10 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs text-gray-500">Base: <span className="text-gray-300">{product.sale_price !== undefined ? `R$ ${parseFloat(product.sale_price).toFixed(2)}` : ''}</span></p>
+            {addonsTotal > 0 && <p className="text-xs text-orange-400 font-semibold">+R$ {addonsTotal.toFixed(2)} em extras</p>}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-2 rounded-xl bg-gray-800 text-gray-400 text-sm font-semibold hover:bg-gray-700">Sem extras</button>
+            <button onClick={handleConfirm} className="px-4 py-2 rounded-xl bg-orange-500 text-white text-sm font-bold hover:bg-orange-400">Confirmar</button>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -542,7 +701,7 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
               <span className="text-3xl">🛒</span>
               <p className="text-xs italic text-center">Adicione itens ao pedido</p>
             </div>
-          ) : cartEntries.map(({ product: p, qty, weightKg }) => (
+          ) : cartEntries.map(({ product: p, qty, weightKg, addons }) => (
             <div key={p.id} className="bg-gray-800/60 rounded-xl p-2 space-y-1">
               <div className="flex items-start justify-between gap-1">
                 <p className="text-xs font-semibold text-gray-200 leading-tight flex-1 min-w-0 truncate">{p.name}</p>
@@ -569,6 +728,15 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
                   <span className="text-xs text-green-400 font-semibold">{fmt(parseFloat(p.sale_price) * qty)}</span>
                 </div>
               )}
+              {addons?.length > 0 && (
+                <div className="pl-1 space-y-0.5">
+                  {addons.map((a) => (
+                    <p key={a.addon_item_id} className="text-[10px] text-orange-400 leading-none">
+                      + {a.addon_name}{a.unit_price > 0 ? ` (+R$${parseFloat(a.unit_price).toFixed(2)})` : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -584,7 +752,7 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
 }
 
 const MAX_SPLITS = 3;
-const PAY_OPTIONS_SPLIT = PAY_OPTIONS.filter((p) => !['fiado','pending'].includes(p.value));
+// PAY_OPTIONS_SPLIT é calculado dinamicamente no StepPayment usando effectivePay
 
 function StepPayment({
   channel, setChannel,
@@ -606,7 +774,23 @@ function StepPayment({
   showMapPicker, setShowMapPicker,
   orderTotal,
   phoneOk,
+  pickupMode,
+  cashbackBalance, useCashback, setUseCashback,
+  tenantPayMethods,
+  tenantZones, tenantZoneType,
+  couponCode, setCouponCode,
+  couponResult, couponError, validatingCoupon,
+  onValidateCoupon, onClearCoupon,
 }) {
+  // Zonas efetivas: usa tenant (qualquer tipo) ou NEIGHBORHOODS como fallback
+  const effectiveZones = tenantZones?.length > 0
+    ? tenantZones.map((z) => ({ bairro: z.name, taxa: z.fee }))
+    : NEIGHBORHOODS;
+  // Formas de pagamento efetivas
+  const effectivePay = tenantPayMethods?.length > 0
+    ? PAY_OPTIONS.filter((p) => tenantPayMethods.includes(p.value))
+    : PAY_OPTIONS;
+  const effectivePaySplit = effectivePay.filter((p) => !['fiado','pending'].includes(p.value));
   const splitTotal    = splitPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const splitRemain   = Math.max(0, (parseFloat(orderTotal) || 0) - splitTotal);
   const splitOk       = Math.abs(splitRemain) < 0.01;
@@ -748,13 +932,13 @@ function StepPayment({
                       onChange={(e) => {
                         const b = e.target.value;
                         setNeighborhood(b);
-                        const found = NEIGHBORHOODS.find((n) => n.bairro === b);
+                        const found = effectiveZones.find((n) => n.bairro === b);
                         setDeliveryFee(found ? String(found.taxa) : '');
                       }}
                       className="input w-full text-sm">
                       <option value="">— Selecione o bairro —</option>
-                      {NEIGHBORHOODS.map(({ bairro, taxa }) => (
-                        <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
+                      {effectiveZones.map(({ bairro, taxa }) => (
+                        <option key={bairro} value={bairro}>{bairro} — R$ {parseFloat(taxa).toFixed(2)}</option>
                       ))}
                       <option value="outro">Outro (taxa manual)</option>
                     </select>
@@ -777,6 +961,63 @@ function StepPayment({
         </AnimatePresence>
       </div>
 
+      {/* Cashback disponível */}
+      {!pickupMode && cashbackBalance > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl px-4 py-3">
+          <div>
+            <p className="text-sm font-bold text-emerald-400">💰 Saldo cashback</p>
+            <p className="text-xs text-emerald-300/70">R$ {cashbackBalance.toFixed(2)} disponível</p>
+          </div>
+          <button type="button" onClick={() => setUseCashback((v) => !v)}
+            className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all ${
+              useCashback
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                : 'bg-gray-800/60 text-gray-400 border-white/10 hover:border-emerald-500/30 hover:text-emerald-400'
+            }`}>
+            {useCashback ? '✓ Desconto aplicado' : 'Usar como desconto'}
+          </button>
+        </div>
+      )}
+
+      {/* Cupom de desconto */}
+      <div>
+        <label className="text-xs text-gray-400 font-semibold mb-1 block">
+          🎫 Cupom de desconto <span className="text-gray-600 font-normal">(opcional)</span>
+        </label>
+        {couponResult ? (
+          <div className="flex items-center justify-between gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
+            <div>
+              <p className="text-sm font-bold text-emerald-400">✓ Cupom <span className="tracking-wider">{couponResult.code}</span> aplicado</p>
+              <p className="text-xs text-emerald-300/70">Desconto: R$ {parseFloat(couponResult.discount).toFixed(2)}</p>
+            </div>
+            <button type="button" onClick={onClearCoupon}
+              className="text-xs text-gray-500 hover:text-red-400 transition-colors font-semibold px-2 py-1 rounded-lg hover:bg-red-400/10">
+              Remover
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Código do cupom..."
+              value={couponCode}
+              onChange={(e) => { setCouponCode(e.target.value.toUpperCase()); if (couponError) setCouponError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && onValidateCoupon()}
+              className="input flex-1 text-sm uppercase tracking-wider"
+            />
+            <button
+              type="button"
+              onClick={onValidateCoupon}
+              disabled={!couponCode.trim() || validatingCoupon}
+              className="px-3 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold text-xs transition-colors disabled:opacity-40 shrink-0"
+            >
+              {validatingCoupon ? '...' : 'Aplicar'}
+            </button>
+          </div>
+        )}
+        {couponError && <p className="text-xs text-red-400 mt-1">{couponError}</p>}
+      </div>
+
       {/* Pagamento */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
@@ -793,7 +1034,7 @@ function StepPayment({
         {!splitMode && (
           <>
             <div className="grid grid-cols-3 gap-2">
-              {PAY_OPTIONS.map(({ value, label, color }) => {
+              {effectivePay.map(({ value, label, color }) => {
                 const active = paymentMethod === value;
                 const [emoji, ...rest] = label.split(' ');
                 const name = rest.join(' ');
@@ -872,7 +1113,7 @@ function StepPayment({
               <div key={i} className="flex gap-2 items-center">
                 <select value={sp.method} onChange={(e) => updateSplit(i, 'method', e.target.value)}
                   className="input flex-1 text-xs">
-                  {PAY_OPTIONS_SPLIT.map(({ value, label }) => (
+                  {effectivePaySplit.map(({ value, label }) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
@@ -910,11 +1151,16 @@ function StepPayment({
 }
 
 function StepReview({ name, phone, cart, deliveryType, street, streetNumber, complement, neighborhood, deliveryFee,
-  paymentMethod, splitMode, splitPayments, channel, notes, scheduledFor, fiadoClientes, fiadoClienteId }) {
-  const items    = Object.values(cart);
-  const subtotal = cartTotal(cart);
-  const fee      = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
-  const total    = subtotal + fee;
+  paymentMethod, splitMode, splitPayments, channel, notes, scheduledFor, fiadoClientes, fiadoClienteId,
+  useCashback, cashbackBalance, pickupMode, couponResult }) {
+  const items        = Object.values(cart);
+  const subtotal     = cartTotal(cart);
+  const fee          = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
+  const cashbackUsed = (!pickupMode && useCashback && cashbackBalance > 0)
+    ? Math.min(cashbackBalance, subtotal + fee)
+    : 0;
+  const couponDiscount = parseFloat(couponResult?.discount ?? 0);
+  const total    = subtotal + fee - cashbackUsed - couponDiscount;
   const address  = [street, streetNumber, complement].filter(Boolean).join(', ');
 
   const PAY_LABELS = { cash: 'Dinheiro', pix: 'Pix', credit: 'Crédito', debit: 'Débito', voucher: 'Vale', fiado: 'Fiado', pending: 'A cobrar', other: 'Outro', split: 'Dividido' };
@@ -974,6 +1220,22 @@ function StepReview({ name, phone, cart, deliveryType, street, streetNumber, com
           </div>
         </div>
 
+        {/* Cashback deduction */}
+        {cashbackUsed > 0 && (
+          <div className="px-4 py-2 flex items-center justify-between border-t border-white/[0.04]">
+            <p className="text-sm text-emerald-400">💰 Cashback aplicado</p>
+            <p className="text-sm font-semibold text-emerald-400">−{fmt(cashbackUsed)}</p>
+          </div>
+        )}
+
+        {/* Coupon deduction */}
+        {couponDiscount > 0 && (
+          <div className="px-4 py-2 flex items-center justify-between border-t border-white/[0.04]">
+            <p className="text-sm text-violet-400">🎫 Cupom {couponResult?.code}</p>
+            <p className="text-sm font-semibold text-violet-400">−{fmt(couponDiscount)}</p>
+          </div>
+        )}
+
         {/* Total */}
         <div className="px-4 py-3 flex items-center justify-between">
           <p className="text-sm text-gray-400">Total do pedido</p>
@@ -1011,8 +1273,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [suggestions,   setSuggestions]   = useState([]);
   const [showSug,       setShowSug]       = useState(false);
   const [pickupMode,    setPickupMode]    = useState(false);
-  const [allCustomers,  setAllCustomers]  = useState([]);
-  const [custLoading,   setCustLoading]   = useState(false);
+  const [allCustomers,   setAllCustomers]   = useState([]);
+  const [custLoading,    setCustLoading]    = useState(false);
+  const [addingCustomer, setAddingCustomer] = useState(false);
   const sugTimer   = useRef(null);
   const fiadoTimer = useRef(null);
 
@@ -1035,6 +1298,23 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [fiadoClientes,    setFiadoClientes]    = useState([]);
   const [fiadoClienteId,   setFiadoClienteId]   = useState('');
   const [fiadoClienteSearch, setFiadoClienteSearch] = useState('');
+  // Cashback do cliente selecionado
+  const [cashbackBalance,  setCashbackBalance]  = useState(0);   // saldo disponível
+  const [useCashback,      setUseCashback]      = useState(false); // toggle
+  // Tenant settings (formas de pagamento + zonas de entrega)
+  const [tenantPayMethods,   setTenantPayMethods]   = useState(null);  // null = loading (usa PAY_OPTIONS completo)
+  const [tenantZones,        setTenantZones]        = useState(null);  // null = usa NEIGHBORHOODS
+  const [tenantZoneType,     setTenantZoneType]     = useState('named');
+  const [restaurantCenter,   setRestaurantCenter]   = useState(null);  // [lng, lat]
+  // Cupom
+  const [couponCode,         setCouponCode]         = useState('');
+  const [couponResult,       setCouponResult]       = useState(null);  // { discount, code, ... }
+  const [couponError,        setCouponError]        = useState('');
+  const [validatingCoupon,   setValidatingCoupon]   = useState(false);
+  // Addon picker
+  const [addonPickerProduct,  setAddonPickerProduct]  = useState(null);
+  const [addonPickerGroups,   setAddonPickerGroups]   = useState([]);
+  const addonGroupsCache = useRef({});  // productId → groups[]
 
   // ── Load ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1045,6 +1325,22 @@ export default function NewOrderModal({ onClose, onCreated }) {
     getCurrentCaixa()
       .then(({ data }) => setCaixaOpen(!!data.data))
       .catch(() => setCaixaOpen(true));
+    // Carrega configurações do restaurante (formas de pagamento + zonas)
+    getFullSettings()
+      .then(({ data }) => {
+        const d = data.data;
+        if (Array.isArray(d?.accepted_payment_methods) && d.accepted_payment_methods.length > 0) {
+          setTenantPayMethods(d.accepted_payment_methods);
+        }
+        if (Array.isArray(d?.delivery_zones) && d.delivery_zones.length > 0) {
+          setTenantZones(d.delivery_zones);
+          setTenantZoneType(d.delivery_zone_type || 'named');
+        }
+        if (d?.restaurant_lat && d?.restaurant_lng) {
+          setRestaurantCenter([parseFloat(d.restaurant_lng), parseFloat(d.restaurant_lat)]);
+        }
+      })
+      .catch(() => { /* usa defaults */ });
   }, []);
 
   useEffect(() => {
@@ -1062,20 +1358,18 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setCustLoading(true);
     searchCustomers('')
       .then(({ data }) => {
-        const list = data.data ?? [];
-        // Deduplica por telefone (ou nome se sem telefone)
-        const seen = new Set();
-        const unique = list.filter((c) => {
-          const key = c.customer_phone?.trim() || c.customer_name?.trim();
-          if (!key || seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        setAllCustomers(unique);
+        setAllCustomers(data.data ?? []);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error('[NewOrderModal] Erro ao carregar clientes:', err?.response?.data?.message ?? err?.message);
+      })
       .finally(() => setCustLoading(false));
   }, []);
+
+  // Reset cashback quando modo retirada é ativado (sem histórico de cliente)
+  useEffect(() => {
+    if (pickupMode) { setCashbackBalance(0); setUseCashback(false); }
+  }, [pickupMode]);
 
   // Quando seleciona cliente fiado, preenche nome e telefone automaticamente
   useEffect(() => {
@@ -1106,7 +1400,23 @@ export default function NewOrderModal({ onClose, onCreated }) {
       phone, splitMode, paymentMethod, fiadoClienteId]);
 
   // ── Cart ──────────────────────────────────────────────────
-  const handleAdd    = useCallback((p) => setCart((c) => addToCart(c, p)), []);
+  const handleAdd = useCallback(async (p) => {
+    // Check if this product has addon groups (use cache)
+    if (!(p.id in addonGroupsCache.current)) {
+      try {
+        const { data } = await getProductAddonGroups(p.id);
+        addonGroupsCache.current[p.id] = data.data ?? [];
+      } catch { addonGroupsCache.current[p.id] = []; }
+    }
+    const groups = addonGroupsCache.current[p.id] ?? [];
+    if (groups.length > 0) {
+      setAddonPickerProduct(p);
+      setAddonPickerGroups(groups);
+    } else {
+      setCart((c) => addToCart(c, p));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const handleQty    = useCallback((id, qty) => {
     if (qty <= 0) setCart((c) => removeFromCart(c, id));
     else setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
@@ -1117,22 +1427,47 @@ export default function NewOrderModal({ onClose, onCreated }) {
   // ── Autocomplete ──────────────────────────────────────────
   const fetchSuggestions = useCallback((q) => {
     clearTimeout(sugTimer.current);
-    if (!q || q.length < 2) { setSuggestions([]); return; }
+    if (!q || q.length < 2) { setSuggestions([]); setShowSug(false); return; }
     sugTimer.current = setTimeout(async () => {
       try {
         const { data } = await searchCustomers(q);
         setSuggestions(data.data ?? []);
         setShowSug(true);
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.error('[NewOrderModal] Erro ao buscar clientes:', err?.response?.data?.message ?? err?.message);
+      }
     }, 300);
   }, []);
 
+  // ── Coupon ────────────────────────────────────────────────
+  const handleValidateCoupon = useCallback(async () => {
+    if (!couponCode.trim()) return;
+    setCouponError('');
+    setValidatingCoupon(true);
+    try {
+      const orderTot = cartTotal(cart) + (deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0);
+      const { data } = await validateCoupon({ code: couponCode.trim(), orderTotal: orderTot });
+      setCouponResult(data.data);
+    } catch (err) {
+      setCouponError(err.response?.data?.message ?? 'Cupom inválido.');
+      setCouponResult(null);
+    } finally {
+      setValidatingCoupon(false);
+    }
+  }, [couponCode, cart, deliveryType, deliveryFee]);
+
+  const clearCoupon = () => { setCouponCode(''); setCouponResult(null); setCouponError(''); };
+
   const applySuggestion = (s) => {
-    setName(s.customer_name ?? '');
-    setPhone(s.customer_phone ?? '');
-    if (s.customer_address) {
+    setName(s.name ?? s.customer_name ?? '');
+    setPhone(s.phone ?? s.customer_phone ?? '');
+    const bal = parseFloat(s.cashback_balance ?? 0);
+    setCashbackBalance(bal);
+    if (bal <= 0) setUseCashback(false);
+    if (s.address ?? s.customer_address) {
+      const s_address = s.address ?? s.customer_address;
       // Tenta separar "Rua X, 123, Complemento" em partes
-      const parts = s.customer_address.split(',').map((p) => p.trim());
+      const parts = s_address.split(',').map((p) => p.trim());
       setStreet(parts[0] ?? '');
       setStreetNumber(parts[1] ?? '');
       setComplement(parts.slice(2).join(', '));
@@ -1140,6 +1475,31 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setShowSug(false);
     setSuggestions([]);
   };
+
+  const handleAddNewCustomer = useCallback(async () => {
+    if (!name.trim() || addingCustomer) return;
+    setAddingCustomer(true);
+    try {
+      await createCustomer({ name: name.trim(), phone: phone.trim() || undefined });
+      // Recarrega lista de clientes na sidebar
+      const { data } = await searchCustomers('');
+      const list = data.data ?? [];
+      const seen = new Set();
+      const unique = list.filter((c) => {
+        const key = c.customer_phone?.trim() || c.customer_name?.trim();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setAllCustomers(unique);
+    } catch { /* non-fatal — cliente ainda pode avançar sem salvar */ }
+    finally {
+      setAddingCustomer(false);
+      setShowSug(false);
+      setSuggestions([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, phone, addingCustomer]);
 
   // ── Navigation ─────────────────────────────────────────────
   const canAdvance = () => {
@@ -1186,9 +1546,10 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setError(null);
     setSubmitting(true);
 
-    const items = cartEntries.map(({ product, qty, weightKg }) => ({
+    const items = cartEntries.map(({ product, qty, weightKg, addons }) => ({
       productId: product.id,
       ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
+      ...(addons?.length ? { addons } : {}),
     }));
 
     const customerAddress = [street, streetNumber, complement].filter(Boolean).join(', ');
@@ -1210,6 +1571,11 @@ export default function NewOrderModal({ onClose, onCreated }) {
     ].filter(Boolean).join(' | ');
 
     const fee = deliveryType === 'delivery' ? parseFloat(deliveryFee) || 0 : 0;
+    const subtotal = cartTotal(cart);
+    const cbUsed = (!pickupMode && useCashback && cashbackBalance > 0)
+      ? Math.min(cashbackBalance, subtotal + fee)
+      : 0;
+    const couponDiscount = couponResult?.discount ?? 0;
     const finalPayMethod = splitMode ? splitPayments[0]?.method ?? 'cash' : paymentMethod;
 
     try {
@@ -1225,6 +1591,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
         channel,
         notes: fullNotes || undefined,
         items,
+        cashbackUsed:    cbUsed > 0 ? cbUsed : undefined,
+        couponCode:      couponResult?.code || undefined,
+        couponDiscount:  couponDiscount > 0 ? couponDiscount : undefined,
       });
       if (paymentMethod === 'fiado' && data.data?.id) {
         const subtotal = cartTotal(cart);
@@ -1272,6 +1641,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
         {showMapPicker && (
           <MapAddressPicker
             initialStreet={street}
+            restaurantCenter={restaurantCenter}
             onClose={() => setShowMapPicker(false)}
             onConfirm={({ street: s, streetNumber: sn, suburb, allSuburbs = [] }) => {
               // Aplica rua do mapa
@@ -1280,36 +1650,73 @@ export default function NewOrderModal({ onClose, onCreated }) {
               if (sn) setStreetNumber(sn);
               else setStreetNumber(''); // senão limpa — usuário digita
 
-              // Tenta detectar bairro usando TODOS os campos geográficos do Nominatim
-              const candidates = [suburb, ...allSuburbs].filter(Boolean);
-              let matched = null;
-              for (const candidate of candidates) {
-                const c = candidate.toLowerCase().trim();
-                // Tenta match exato primeiro
-                const exact = NEIGHBORHOODS.find(
-                  (nb) => nb.bairro.toLowerCase() === c
+              let matchedZone = null;
+
+              // ── Prioridade 1: polígono desenhado + coordenadas ──────
+              if (tenantZoneType === 'polygon' && coords && tenantZones?.length > 0) {
+                const hit = tenantZones.find((z) =>
+                  z.polygon?.length >= 3 && pointInPolygon(coords, z.polygon)
                 );
-                if (exact) { matched = exact; break; }
-                // Tenta match parcial (contém)
-                const partial = NEIGHBORHOODS.find(
-                  (nb) => c.includes(nb.bairro.toLowerCase()) || nb.bairro.toLowerCase().includes(c)
-                );
-                if (partial) { matched = partial; break; }
-                // Tenta match por palavras (ex: "Itapeva Norte" vs "Norte Itapeva")
-                const words = c.split(/\s+/).filter(w => w.length > 3);
-                const wordMatch = NEIGHBORHOODS.find(
-                  (nb) => words.some(w => nb.bairro.toLowerCase().includes(w))
-                );
-                if (wordMatch) { matched = wordMatch; break; }
+                if (hit) matchedZone = { bairro: hit.name, taxa: hit.fee };
               }
-              if (matched) {
-                setNeighborhood(matched.bairro);
-                setDeliveryFee(String(matched.taxa));
+
+              // ── Prioridade 2: match textual por nome de bairro ──────
+              if (!matchedZone) {
+                const candidates = [...(allSuburbs || []), suburb].filter(Boolean);
+                const normed = (s) => s.toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                const zonesNamed = (tenantZones?.length > 0 && (tenantZoneType === 'named' || tenantZoneType === 'polygon'))
+                  ? tenantZones.map((z) => ({ bairro: z.name, taxa: z.fee }))
+                  : NEIGHBORHOODS;
+
+                for (const candidate of candidates) {
+                  const c = normed(candidate);
+                  const exact = zonesNamed.find((nb) => normed(nb.bairro) === c);
+                  if (exact) { matchedZone = exact; break; }
+                }
+                if (!matchedZone) {
+                  for (const candidate of candidates) {
+                    const c = normed(candidate);
+                    const partial = zonesNamed.find(
+                      (nb) => c.includes(normed(nb.bairro)) || normed(nb.bairro).includes(c)
+                    );
+                    if (partial) { matchedZone = partial; break; }
+                  }
+                }
+                if (!matchedZone) {
+                  for (const candidate of candidates) {
+                    const words = normed(candidate).split(/\s+/).filter((w) => w.length > 3);
+                    const wordMatch = zonesNamed.find(
+                      (nb) => words.some((w) => normed(nb.bairro).includes(w))
+                    );
+                    if (wordMatch) { matchedZone = wordMatch; break; }
+                  }
+                }
+              }
+
+              if (matchedZone) {
+                setNeighborhood(matchedZone.bairro);
+                setDeliveryFee(String(matchedZone.taxa));
               }
               setShowMapPicker(false);
             }}
           />
         )}
+
+        {/* Addon picker overlay */}
+        <AnimatePresence>
+          {addonPickerProduct && (
+            <AddonPicker
+              product={addonPickerProduct}
+              groups={addonPickerGroups}
+              currentAddons={cart[addonPickerProduct.id]?.addons ?? []}
+              onClose={() => setAddonPickerProduct(null)}
+              onConfirm={(addons) => {
+                setCart((c) => addToCart(c, addonPickerProduct, addons));
+                setAddonPickerProduct(null);
+              }}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Header */}
         <div className="px-5 pt-4 pb-0 border-b border-white/[0.06] shrink-0">
@@ -1404,6 +1811,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
                     <StepCustomer name={name} setName={setName} phone={phone} setPhone={setPhone}
                       fetchSuggestions={fetchSuggestions} showSug={showSug} suggestions={suggestions}
                       applySuggestion={applySuggestion}
+                      addNewCustomer={handleAddNewCustomer} addingCustomer={addingCustomer}
                       pickupMode={pickupMode} setPickupMode={setPickupMode}
                       deliveryType={deliveryType}
                       allCustomers={allCustomers} custLoading={custLoading} />
@@ -1433,7 +1841,15 @@ export default function NewOrderModal({ onClose, onCreated }) {
                       fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId}
                       setFiadoClienteId={setFiadoClienteId}
                       fiadoClienteSearch={fiadoClienteSearch} setFiadoClienteSearch={setFiadoClienteSearch}
-                      phoneOk={pickupMode || !!phone.trim()} />
+                      phoneOk={pickupMode || !!phone.trim()}
+                      pickupMode={pickupMode}
+                      cashbackBalance={cashbackBalance} useCashback={useCashback} setUseCashback={setUseCashback}
+                      tenantPayMethods={tenantPayMethods}
+                      tenantZones={tenantZones} tenantZoneType={tenantZoneType}
+                      couponCode={couponCode} setCouponCode={setCouponCode}
+                      couponResult={couponResult} couponError={couponError}
+                      validatingCoupon={validatingCoupon}
+                      onValidateCoupon={handleValidateCoupon} onClearCoupon={clearCoupon} />
                   )}
                   {stepIndex === 3 && (
                     <StepReview name={name} phone={phone} cart={cart} deliveryType={deliveryType}
@@ -1441,7 +1857,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
                       neighborhood={neighborhood} deliveryFee={deliveryFee}
                       paymentMethod={paymentMethod} splitMode={splitMode} splitPayments={splitPayments}
                       channel={channel} notes={notes} scheduledFor={scheduledFor}
-                      fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId} />
+                      fiadoClientes={fiadoClientes} fiadoClienteId={fiadoClienteId}
+                      useCashback={useCashback} cashbackBalance={cashbackBalance} pickupMode={pickupMode}
+                      couponResult={couponResult} />
                   )}
                 </motion.div>
               </AnimatePresence>

@@ -432,3 +432,182 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_clients_phone
   WHERE phone IS NOT NULL AND phone <> '';
 CREATE INDEX IF NOT EXISTS idx_tenant_clients_tenant
   ON tenant_clients(tenant_id);
+
+-- ── COMPLEMENTOS / ADICIONAIS ─────────────────────────────────
+
+-- Grupo de complementos (ex: "Extras de proteína", "Ingredientes do hotdog")
+CREATE TABLE IF NOT EXISTS addon_groups (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name        VARCHAR(100) NOT NULL,
+  description TEXT,
+  min_qty     INTEGER      NOT NULL DEFAULT 0,  -- mínimo a selecionar (0 = opcional)
+  max_qty     INTEGER,                           -- máximo (NULL = sem limite)
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- Itens dentro de um grupo de complementos
+CREATE TABLE IF NOT EXISTS addon_items (
+  id         UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id   UUID          NOT NULL REFERENCES addon_groups(id) ON DELETE CASCADE,
+  tenant_id  UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name       VARCHAR(150)  NOT NULL,
+  price      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  active     BOOLEAN       NOT NULL DEFAULT true,
+  sort_order INTEGER       NOT NULL DEFAULT 0
+);
+
+-- Ligação produtos <-> grupos de complementos (N:N)
+CREATE TABLE IF NOT EXISTS product_addon_groups (
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  group_id   UUID NOT NULL REFERENCES addon_groups(id) ON DELETE CASCADE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (product_id, group_id)
+);
+
+-- Snapshot dos complementos selecionados em um item de pedido
+CREATE TABLE IF NOT EXISTS order_item_addons (
+  id            UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_item_id UUID          NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+  addon_item_id UUID          REFERENCES addon_items(id) ON DELETE SET NULL,
+  addon_name    VARCHAR(150)  NOT NULL,
+  qty           INTEGER       NOT NULL DEFAULT 1,
+  unit_price    DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(10,2) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_addon_groups_tenant   ON addon_groups(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_addon_items_group     ON addon_items(group_id);
+CREATE INDEX IF NOT EXISTS idx_product_addon_groups  ON product_addon_groups(product_id);
+CREATE INDEX IF NOT EXISTS idx_order_item_addons     ON order_item_addons(order_item_id);
+
+-- ── INSUMOS (controle de estoque de ingredientes) ────────────
+
+CREATE TABLE IF NOT EXISTS insumos (
+  id            UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id     UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name          VARCHAR(200)  NOT NULL,
+  unit          VARCHAR(20)   NOT NULL DEFAULT 'un',
+  -- unit: 'g' | 'kg' | 'ml' | 'l' | 'un' | 'cx' | 'pct'
+  qty_in_stock  DECIMAL(12,3) NOT NULL DEFAULT 0,
+  min_qty       DECIMAL(12,3) NOT NULL DEFAULT 0,   -- alerta quando abaixo
+  cost_per_unit DECIMAL(10,4) NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Receita: quais insumos cada produto consome por unidade vendida
+CREATE TABLE IF NOT EXISTS product_insumos (
+  id           UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id   UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  insumo_id    UUID          NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
+  tenant_id    UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  qty_per_unit DECIMAL(12,3) NOT NULL DEFAULT 1,
+  UNIQUE(product_id, insumo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_insumos_tenant       ON insumos(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_product_insumos_prod ON product_insumos(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_insumos_ins  ON product_insumos(insumo_id);
+
+-- ── FIDELIDADE / CASHBACK ────────────────────────────────────────
+
+-- Configuração de cashback por tenant
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS cashback_enabled   BOOLEAN      NOT NULL DEFAULT false;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS cashback_rate      DECIMAL(5,2) NOT NULL DEFAULT 5.00;
+-- cashback_rate: % do total do pedido que vira crédito (ex: 5 = 5%)
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS cashback_min_order DECIMAL(10,2) NOT NULL DEFAULT 10.00;
+-- cashback_min_order: valor mínimo do pedido para ganhar cashback
+
+-- Clientes identificados por telefone (para fidelidade)
+CREATE TABLE IF NOT EXISTS loyalty_customers (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name             VARCHAR(200),
+  phone            VARCHAR(50)   NOT NULL,
+  cashback_balance DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total_orders     INTEGER       NOT NULL DEFAULT 0,
+  total_spent      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, phone)
+);
+
+-- Histórico de movimentações de cashback
+CREATE TABLE IF NOT EXISTS cashback_transactions (
+  id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id UUID          NOT NULL REFERENCES loyalty_customers(id) ON DELETE CASCADE,
+  order_id    UUID          REFERENCES orders(id) ON DELETE SET NULL,
+  type        VARCHAR(10)   NOT NULL CHECK (type IN ('earn', 'use', 'expire', 'manual')),
+  amount      DECIMAL(10,2) NOT NULL,
+  description VARCHAR(300),
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Avaliações de pedidos (estrelas + comentário)
+CREATE TABLE IF NOT EXISTS order_ratings (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  order_id    UUID        NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  customer_id UUID        REFERENCES loyalty_customers(id) ON DELETE SET NULL,
+  stars       SMALLINT    NOT NULL CHECK (stars BETWEEN 1 AND 5),
+  comment     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(order_id)
+);
+
+-- Colunas nas orders: vínculo com cliente fidelidade + cashback
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS loyalty_customer_id UUID          REFERENCES loyalty_customers(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashback_earned     DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashback_used       DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_customers_tenant ON loyalty_customers(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_loyalty_customers_phone  ON loyalty_customers(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_cashback_tx_customer     ON cashback_transactions(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cashback_tx_tenant       ON cashback_transactions(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_ratings_tenant     ON order_ratings(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_loyalty_customer  ON orders(loyalty_customer_id) WHERE loyalty_customer_id IS NOT NULL;
+
+-- ── TENANT SETTINGS (v2) ──────────────────────────────────────
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS restaurant_lat      NUMERIC(10,7);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS restaurant_lng      NUMERIC(10,7);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS accepted_payment_methods JSONB DEFAULT '["cash","pix","credit","debit","voucher","fiado","pending","other"]'::jsonb;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zones      JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zone_type  VARCHAR(10) DEFAULT 'named';
+
+-- ── COUPONS ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS coupons (
+  id             UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id      UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  code           VARCHAR(50) NOT NULL,
+  description    TEXT,
+  discount_type  VARCHAR(10) NOT NULL CHECK (discount_type IN ('percent', 'fixed')),
+  discount_value NUMERIC(10,2) NOT NULL,
+  min_order      NUMERIC(10,2) NOT NULL DEFAULT 0,
+  max_uses       INT,
+  uses_count     INT         NOT NULL DEFAULT 0,
+  active         BOOLEAN     NOT NULL DEFAULT true,
+  expires_at     TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_coupons_tenant ON coupons(tenant_id);
+
+-- ── RESTAURANT TABLES (mesas) ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS restaurant_tables (
+  id         UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id  UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  number     VARCHAR(20) NOT NULL,
+  name       VARCHAR(100),
+  active     BOOLEAN     NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_restaurant_tables_tenant ON restaurant_tables(tenant_id);
+
+-- ── ORDERS: coupon + table tracking ───────────────────────────
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code     VARCHAR(50);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_discount NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS table_number    VARCHAR(20);

@@ -14,6 +14,7 @@ exports.listClientes = async (req, res, next) => {
     const { rows } = await db.query(
       `SELECT
          fc.id, fc.name, fc.phone, fc.address, fc.dia_acerto,
+         fc.acerto_type, fc.acerto_weekday,
          fc.bloqueado, fc.notes, fc.created_at,
          COALESCE(SUM(CASE WHEN c.status='pendente' AND COALESCE(c.tipo,'compra')='compra'       THEN c.valor ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor ELSE 0 END), 0) AS total_aberto,
@@ -36,13 +37,17 @@ exports.listClientes = async (req, res, next) => {
 exports.createCliente = async (req, res, next) => {
   try {
     const { tenantId } = req.user;
-    const { name, phone, address, dia_acerto, notes } = req.body;
+    const { name, phone, address, dia_acerto, notes, acerto_type = 'day_of_month', acerto_weekday } = req.body;
     if (!name?.trim()) throw new AppError('Nome é obrigatório.', 400);
 
     const { rows } = await db.query(
-      `INSERT INTO fiado_clientes (tenant_id, name, phone, address, dia_acerto, notes)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [tenantId, name.trim(), phone || null, address || null, dia_acerto || null, notes || null]
+      `INSERT INTO fiado_clientes (tenant_id, name, phone, address, dia_acerto, notes, acerto_type, acerto_weekday)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [tenantId, name.trim(), phone || null, address || null,
+       acerto_type === 'day_of_month' ? (dia_acerto || null) : null,
+       notes || null,
+       acerto_type,
+       acerto_type === 'day_of_week' ? (acerto_weekday ?? null) : null]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
@@ -52,13 +57,19 @@ exports.updateCliente = async (req, res, next) => {
   try {
     const { tenantId } = req.user;
     const { id } = req.params;
-    const { name, phone, address, dia_acerto, notes } = req.body;
+    const { name, phone, address, dia_acerto, notes, acerto_type = 'day_of_month', acerto_weekday } = req.body;
 
     const { rows } = await db.query(
       `UPDATE fiado_clientes
-       SET name=$1, phone=$2, address=$3, dia_acerto=$4, notes=$5, updated_at=NOW()
-       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
-      [name, phone || null, address || null, dia_acerto || null, notes || null, id, tenantId]
+       SET name=$1, phone=$2, address=$3, dia_acerto=$4, notes=$5,
+           acerto_type=$6, acerto_weekday=$7, updated_at=NOW()
+       WHERE id=$8 AND tenant_id=$9 RETURNING *`,
+      [name, phone || null, address || null,
+       acerto_type === 'day_of_month' ? (dia_acerto || null) : null,
+       notes || null,
+       acerto_type,
+       acerto_type === 'day_of_week' ? (acerto_weekday ?? null) : null,
+       id, tenantId]
     );
     if (!rows[0]) throw new AppError('Cliente não encontrado.', 404);
     res.json({ success: true, data: rows[0] });

@@ -70,7 +70,7 @@ class Order {
     return rows;
   }
 
-  /** Busca pedido completo por ID (com items). */
+  /** Busca pedido completo por ID (com items + addons). */
   static async findById(id, tenantId, dbClient = db) {
     const { rows } = await dbClient.query(
       `SELECT o.*,
@@ -83,7 +83,18 @@ class Order {
                   'weight_kg',    oi.weight_kg,
                   'unit_price',   oi.unit_price,
                   'total',        oi.total,
-                  'notes',        oi.notes
+                  'notes',        oi.notes,
+                  'addons',       (
+                    SELECT COALESCE(json_agg(json_build_object(
+                      'id',            oia.id,
+                      'addon_item_id', oia.addon_item_id,
+                      'addon_name',    oia.addon_name,
+                      'qty',           oia.qty,
+                      'unit_price',    oia.unit_price,
+                      'total',         oia.total
+                    )), '[]'::json)
+                    FROM order_item_addons oia WHERE oia.order_item_id = oi.id
+                  )
                 ) ORDER BY oi.id
               ) AS items
        FROM   orders o
@@ -121,19 +132,24 @@ class Order {
   static async createOrder(
     { tenantId, orderNumber, customerName, customerPhone, customerAddress,
       channel, total, notes, deliveryType = 'pickup', paymentMethod = 'cash',
-      deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey = null },
+      deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey = null,
+      loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0 },
     dbClient = db
   ) {
     const { rows } = await dbClient.query(
       `INSERT INTO orders
          (tenant_id, order_number, customer_name, customer_phone, customer_address,
-          channel, total, notes, delivery_type, payment_method, delivery_fee, neighborhood, status, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          channel, total, notes, delivery_type, payment_method, delivery_fee, neighborhood, status, idempotency_key,
+          loyalty_customer_id, cashback_earned, cashback_used)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [tenantId, orderNumber, customerName || null, customerPhone || null,
        customerAddress || null, channel || 'manual', total, notes || null,
        deliveryType, paymentMethod, parseFloat(deliveryFee) || 0,
-       neighborhood || null, initialStatus, idempotencyKey]
+       neighborhood || null, initialStatus, idempotencyKey,
+       loyaltyCustomerId || null,
+       parseFloat(cashbackEarned) || 0,
+       parseFloat(cashbackUsed)   || 0]
     );
     return rows[0];
   }
