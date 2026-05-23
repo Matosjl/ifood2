@@ -201,11 +201,16 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       {/* Items */}
       <ul className="px-3 py-1.5 space-y-0.5 border-t border-white/5">
         {(order.items ?? []).map((item, i) => (
-          <li key={item.id ?? i} className="flex justify-between items-baseline gap-2">
-            <span className="text-sm text-gray-300 truncate leading-5">
-              {item.weightKg ? `${item.weightKg}kg` : `${item.quantity}×`} {item.productName}
-            </span>
-            <span className="text-xs text-gray-500 shrink-0">R$ {parseFloat(item.total).toFixed(2)}</span>
+          <li key={item.id ?? i} className="space-y-0">
+            <div className="flex justify-between items-baseline gap-2">
+              <span className="text-sm text-gray-300 truncate leading-5">
+                {item.weightKg ? `${item.weightKg}kg` : `${item.quantity}×`} {item.productName}
+              </span>
+              <span className="text-xs text-gray-500 shrink-0">R$ {parseFloat(item.total).toFixed(2)}</span>
+            </div>
+            {item.notes && (
+              <p className="text-[11px] text-amber-400 pl-1">↳ {item.notes}</p>
+            )}
           </li>
         ))}
       </ul>

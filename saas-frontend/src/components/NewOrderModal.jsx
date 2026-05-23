@@ -645,7 +645,7 @@ function AddonPicker({ product, groups, currentAddons = [], onConfirm, onClose }
   );
 }
 
-function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, onWeight, onRemove }) {
+function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, onWeight, onRemove, onItemNotes }) {
   const categories = groupByCategory(products);
 
   const searchResults = search
@@ -701,7 +701,7 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
               <span className="text-3xl">🛒</span>
               <p className="text-xs italic text-center">Adicione itens ao pedido</p>
             </div>
-          ) : cartEntries.map(({ product: p, qty, weightKg, addons }) => (
+          ) : cartEntries.map(({ product: p, qty, weightKg, addons, notes: itemNotes }) => (
             <div key={p.id} className="bg-gray-800/60 rounded-xl p-2 space-y-1">
               <div className="flex items-start justify-between gap-1">
                 <p className="text-xs font-semibold text-gray-200 leading-tight flex-1 min-w-0 truncate">{p.name}</p>
@@ -737,6 +737,14 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
                   ))}
                 </div>
               )}
+              {/* Observação por item */}
+              <input
+                type="text"
+                value={itemNotes ?? ''}
+                onChange={(e) => onItemNotes?.(p.id, e.target.value)}
+                placeholder="Obs.: sem cebola..."
+                className="w-full text-[11px] bg-gray-700/60 border border-white/10 rounded-lg px-2 py-1 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/50 transition-colors"
+              />
             </div>
           ))}
         </div>
@@ -1417,6 +1425,9 @@ export default function NewOrderModal({ onClose, onCreated }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const handleItemNotes = useCallback((id, val) =>
+    setCart((c) => ({ ...c, [id]: { ...c[id], notes: val } })), []);
+
   const handleQty    = useCallback((id, qty) => {
     if (qty <= 0) setCart((c) => removeFromCart(c, id));
     else setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
@@ -1552,10 +1563,11 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setError(null);
     setSubmitting(true);
 
-    const items = cartEntries.map(({ product, qty, weightKg, addons }) => ({
+    const items = cartEntries.map(({ product, qty, weightKg, addons, notes: itemNotes }) => ({
       productId: product.id,
       ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
       ...(addons?.length ? { addons } : {}),
+      ...(itemNotes?.trim() ? { notes: itemNotes.trim() } : {}),
     }));
 
     const customerAddress = [street, streetNumber, complement].filter(Boolean).join(', ');
@@ -1824,7 +1836,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
                   )}
                   {stepIndex === 1 && (
                     <StepItems products={products} loading={loading} search={search} setSearch={setSearch}
-                      cart={cart} onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} onRemove={handleRemove} />
+                      cart={cart} onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} onRemove={handleRemove} onItemNotes={handleItemNotes} />
                   )}
                   {stepIndex === 2 && (
                     <StepPayment

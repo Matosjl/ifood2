@@ -3,10 +3,10 @@
 
 export const addToCart = (cart, product, addons = []) => {
   const prev = cart[product.id];
-  // If product already in cart and has no addons (or same addons), just bump qty
+  // If product already in cart and has no addons (or same addons), just bump qty (preserve notes)
   if (prev && addons.length === 0) return { ...cart, [product.id]: { ...prev, qty: prev.qty + 1 } };
-  // Addons provided (or first add): set/overwrite
-  return { ...cart, [product.id]: { product, qty: prev?.qty ?? 1, weightKg: prev?.weightKg ?? '', addons } };
+  // Addons provided (or first add): set/overwrite (preserve notes if re-adding)
+  return { ...cart, [product.id]: { product, qty: prev?.qty ?? 1, weightKg: prev?.weightKg ?? '', addons, notes: prev?.notes ?? '' } };
 };
 
 export const removeFromCart = (cart, id) => {
