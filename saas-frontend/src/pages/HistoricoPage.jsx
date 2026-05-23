@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getOrders } from '../api/orders';
+import { issueNfce, checkNfce } from '../api/nfce';
+import { printOrder } from '../utils/print';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -34,7 +36,83 @@ const weekAgoISO = () => {
 
 // ── Order detail row ──────────────────────────────────────────
 
-function DetailRow({ order }) {
+function NfceButton({ order, onUpdate }) {
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState(null);
+
+  const nfceStatus = order.nfce_status;
+  const issued     = nfceStatus === 'Issued';
+
+  const handleIssue = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const { data } = await issueNfce(order.id);
+      onUpdate(order.id, data);
+    } catch (e) {
+      setErr(e?.response?.data?.message ?? 'Erro ao emitir NFC-e');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCheck = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const { data } = await checkNfce(order.id);
+      onUpdate(order.id, data);
+    } catch (e) {
+      setErr(e?.response?.data?.message ?? 'Erro ao consultar status');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 flex items-center gap-2 flex-wrap">
+      {!nfceStatus && (
+        <button
+          onClick={handleIssue}
+          disabled={busy}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 transition-colors disabled:opacity-50"
+        >
+          {busy ? '⏳ Emitindo...' : '🧾 Emitir NFC-e'}
+        </button>
+      )}
+      {nfceStatus && (
+        <>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+            issued ? 'bg-emerald-500/20 text-emerald-300' : 'bg-yellow-500/20 text-yellow-300'
+          }`}>
+            NF-e: {nfceStatus}
+            {order.nfce_number && ` #${order.nfce_number}`}
+          </span>
+          {order.nfce_url && (
+            <a
+              href={order.nfce_url}
+              target="_blank"
+              rel="noreferrer"
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 transition-colors"
+            >
+              📄 PDF
+            </a>
+          )}
+          {!issued && (
+            <button
+              onClick={handleCheck}
+              disabled={busy}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-700/60 hover:bg-gray-700 text-gray-300 border border-white/10 transition-colors disabled:opacity-50"
+            >
+              {busy ? '⏳' : '🔄 Atualizar status'}
+            </button>
+          )}
+        </>
+      )}
+      {err && <p className="text-xs text-red-400">{err}</p>}
+    </div>
+  );
+}
+
+function DetailRow({ order, onNfceUpdate }) {
   return (
     <tr>
       <td colSpan={8} className="px-4 pb-3">
@@ -54,14 +132,24 @@ function DetailRow({ order }) {
                 ))}
               </ul>
             </div>
-            {/* Info */}
+            {/* Info + ações */}
             <div className="space-y-1 text-sm">
               {order.customer_name  && <p className="text-gray-300"><span className="text-gray-500">Cliente: </span>{order.customer_name}</p>}
               {order.customer_phone && <p className="text-gray-300"><span className="text-gray-500">Tel: </span>{order.customer_phone}</p>}
               {order.notes          && <p className="text-gray-300"><span className="text-gray-500">Obs: </span>{order.notes}</p>}
               <p className="text-gray-400 text-xs mt-2">Criado: {fmtDate(order.created_at)}</p>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => printOrder({ ...order, orderNumber: order.order_number, customerName: order.customer_name, customerPhone: order.customer_phone, customerAddress: order.customer_address, deliveryType: order.delivery_type, deliveryFee: order.delivery_fee, paymentMethod: order.payment_method })}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-700/60 hover:bg-gray-700 text-gray-300 border border-white/10 transition-colors"
+                >
+                  🖨️ Reimprimir
+                </button>
+              </div>
             </div>
           </div>
+          {/* NFC-e */}
+          <NfceButton order={order} onUpdate={onNfceUpdate} />
         </div>
       </td>
     </tr>
@@ -78,6 +166,14 @@ export default function HistoricoPage() {
   const [page,      setPage]      = useState(1);
   const [hasMore,   setHasMore]   = useState(false);
   const [expanded,  setExpanded]  = useState(null);
+
+  const handleNfceUpdate = useCallback((orderId, nfceData) => {
+    setOrders((prev) => prev.map((o) =>
+      o.id === orderId
+        ? { ...o, nfce_status: nfceData.status, nfce_number: nfceData.number, nfce_url: nfceData.pdfUrl }
+        : o
+    ));
+  }, []);
 
   // Filters
   const [status,    setStatus]    = useState('');
@@ -243,7 +339,7 @@ export default function HistoricoPage() {
                         {fmtDate(o.created_at)}
                       </td>
                     </tr>,
-                    isOpen && <DetailRow key={`${o.id}-detail`} order={o} />,
+                    isOpen && <DetailRow key={`${o.id}-detail`} order={o} onNfceUpdate={handleNfceUpdate} />,
                   ];
                 })}
               </tbody>

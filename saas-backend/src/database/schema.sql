@@ -580,6 +580,17 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_hours      JSONB DEFAULT N
 ALTER TABLE categories ADD COLUMN IF NOT EXISTS printer_target   VARCHAR(20) DEFAULT 'kitchen';
 -- printer_target: 'kitchen' | 'bar' | 'both' | 'none'
 
+-- ── NFC-e ─────────────────────────────────────────────────────
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nfce_config        JSONB DEFAULT NULL;
+-- {apiKey, companyId, environment, defaultNcm, cfop}
+
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_id            VARCHAR(100) DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_status        VARCHAR(30)  DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_key           VARCHAR(100) DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_number        VARCHAR(20)  DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_url           TEXT         DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS nfce_issued_at     TIMESTAMPTZ  DEFAULT NULL;
+
 -- ── VARIAÇÕES DE PRODUTO ──────────────────────────────────────
 -- Grupo: ex. "Tamanho", "Sabor", "Borda"
 CREATE TABLE IF NOT EXISTS product_variation_groups (

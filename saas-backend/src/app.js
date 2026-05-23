@@ -128,6 +128,7 @@ app.use('/api/insumos',    insumosRoutes);  // Controle de insumos / ingrediente
 app.use('/api/coupons',    couponsRoutes);
 app.use('/api/tables',     tablesRoutes);
 app.use('/api/campaigns',  campaignsRoutes);
+app.use('/api/nfce',       require('./modules/nfce/nfce.routes'));
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

@@ -1452,6 +1452,132 @@ const DAYS = [
 
 const DEFAULT_HOURS = DAYS.map(() => ({ open: true, start: '08:00', end: '22:00' }));
 
+// ── NFC-e Tab ────────────────────────────────────────────────
+
+function NfceTab({ onToast }) {
+  const [form,    setForm]    = useState({ apiKey: '', companyId: '', environment: 'Homologation', defaultNcm: '21069090', cfop: '5102' });
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+
+  useEffect(() => {
+    api.get('/nfce/config')
+      .then(({ data }) => {
+        if (data.data) setForm((f) => ({ ...f, ...data.data }));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put('/nfce/config', form);
+      onToast('Configurações NFC-e salvas!', 'success');
+    } catch (e) {
+      onToast(e?.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <p className="text-gray-500 text-sm">Carregando...</p>;
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-1">🧾 NFC-e / Nota Fiscal</h3>
+        <p className="text-sm text-gray-400">
+          Integração com <a href="https://nfe.io" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">NFe.io</a>.
+          Crie sua conta, registre a empresa e cole a API Key abaixo. A NFC-e é emitida por pedido no histórico.
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">API Key (NFe.io)</label>
+          <input
+            type="password"
+            value={form.apiKey}
+            onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
+            placeholder="Sua API Key do NFe.io"
+            className="input w-full"
+          />
+          <p className="text-xs text-gray-600 mt-1">Acesse nfe.io → Conta → API Keys</p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">Company ID</label>
+          <input
+            type="text"
+            value={form.companyId}
+            onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}
+            placeholder="ID da empresa no NFe.io"
+            className="input w-full"
+          />
+          <p className="text-xs text-gray-600 mt-1">Acesse nfe.io → Empresas → copie o ID</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">Ambiente</label>
+            <select
+              value={form.environment}
+              onChange={(e) => setForm((f) => ({ ...f, environment: e.target.value }))}
+              className="input w-full"
+            >
+              <option value="Homologation">Homologação (testes)</option>
+              <option value="Production">Produção</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-400 mb-1">NCM padrão</label>
+            <input
+              type="text"
+              value={form.defaultNcm}
+              onChange={(e) => setForm((f) => ({ ...f, defaultNcm: e.target.value }))}
+              placeholder="21069090"
+              className="input w-full"
+              maxLength={8}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">CFOP</label>
+          <input
+            type="text"
+            value={form.cfop}
+            onChange={(e) => setForm((f) => ({ ...f, cfop: e.target.value }))}
+            placeholder="5102"
+            className="input w-full"
+            maxLength={4}
+          />
+          <p className="text-xs text-gray-600 mt-1">5102 = venda dentro do estado | 6102 = venda para outro estado</p>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-green w-full"
+        >
+          {saving ? 'Salvando...' : 'Salvar configurações'}
+        </button>
+      </div>
+
+      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 text-sm text-yellow-300">
+        <p className="font-semibold mb-1">⚠️ Requisitos para emissão</p>
+        <ul className="space-y-1 text-yellow-300/80 list-disc list-inside text-xs">
+          <li>CNPJ ativo com inscrição estadual</li>
+          <li>Conta na NFe.io com empresa cadastrada e certificado digital (A1 ou A3)</li>
+          <li>Para NCM de alimentos preparados: use <strong>21069090</strong></li>
+          <li>Para bebidas: use <strong>22029000</strong></li>
+          <li>Emita no modo Homologação primeiro para testar</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ── Impressoras Tab ───────────────────────────────────────────
 
 const PRINTER_TARGETS = [
@@ -1980,6 +2106,9 @@ export default function ConfiguracoesPage() {
             <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
           )}
           {isOwner && (
+            <Tab active={tab === 'nfce'} onClick={() => setTab('nfce')}>🧾 NFC-e</Tab>
+          )}
+          {isOwner && (
             <Tab active={tab === 'impressoras'} onClick={() => setTab('impressoras')}>🖨️ Impressoras</Tab>
           )}
           {isOwner && (
@@ -2008,6 +2137,7 @@ export default function ConfiguracoesPage() {
         {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
         {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
         {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'nfce'        && <NfceTab        onToast={showToast} />}
         {tab === 'impressoras' && <ImpresorasTab  onToast={showToast} />}
         {tab === 'horarios'    && <HorariosTab    onToast={showToast} />}
         {tab === 'mesas'       && <MesasTab       currentUser={currentUser} onToast={showToast} />}
