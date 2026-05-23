@@ -1437,6 +1437,113 @@ function ZonasTab({ onToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Tab: Horários de Funcionamento
+// ─────────────────────────────────────────────────────────────
+
+const DAYS = [
+  { key: 'seg', label: 'Segunda-feira' },
+  { key: 'ter', label: 'Terça-feira' },
+  { key: 'qua', label: 'Quarta-feira' },
+  { key: 'qui', label: 'Quinta-feira' },
+  { key: 'sex', label: 'Sexta-feira' },
+  { key: 'sab', label: 'Sábado' },
+  { key: 'dom', label: 'Domingo' },
+];
+
+const DEFAULT_HOURS = DAYS.map(() => ({ open: true, start: '08:00', end: '22:00' }));
+
+function HorariosTab({ onToast }) {
+  const [hours,  setHours]  = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getFullSettings()
+      .then(({ data }) => {
+        const bh = data.data?.business_hours;
+        setHours(Array.isArray(bh) && bh.length === 7 ? bh : DEFAULT_HOURS);
+      })
+      .catch(() => setHours(DEFAULT_HOURS));
+  }, []);
+
+  const setDay = (i, field, val) =>
+    setHours((prev) => prev.map((d, idx) => idx === i ? { ...d, [field]: val } : d));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateSettings({ businessHours: hours });
+      onToast('Horários salvos!');
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally { setSaving(false); }
+  };
+
+  if (!hours) return (
+    <div className="flex items-center justify-center h-40">
+      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="max-w-lg space-y-4">
+      <p className="text-sm text-gray-400">
+        Configure os dias e horários em que o restaurante está aberto. Fora desses horários o cardápio digital exibirá uma mensagem de "fechado".
+      </p>
+
+      <div className="bg-gray-800/60 rounded-2xl border border-white/[0.06] overflow-hidden divide-y divide-white/[0.04]">
+        {DAYS.map(({ label }, i) => {
+          const d = hours[i];
+          return (
+            <div key={i} className={`flex items-center gap-3 px-4 py-3 transition-colors ${!d.open ? 'opacity-50' : ''}`}>
+              {/* Toggle aberto/fechado */}
+              <button
+                type="button"
+                onClick={() => setDay(i, 'open', !d.open)}
+                className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors ${
+                  d.open ? 'bg-green-500' : 'bg-gray-600'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                  d.open ? 'translate-x-5' : 'translate-x-1'
+                }`} />
+              </button>
+
+              {/* Nome do dia */}
+              <span className="text-sm font-semibold text-gray-200 w-32 shrink-0">{label}</span>
+
+              {/* Horários */}
+              {d.open ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    type="time"
+                    value={d.start}
+                    onChange={(e) => setDay(i, 'start', e.target.value)}
+                    className="input text-sm w-28"
+                  />
+                  <span className="text-gray-500 text-xs shrink-0">até</span>
+                  <input
+                    type="time"
+                    value={d.end}
+                    onChange={(e) => setDay(i, 'end', e.target.value)}
+                    className="input text-sm w-28"
+                  />
+                </div>
+              ) : (
+                <span className="text-xs text-gray-600 italic">Fechado</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button onClick={handleSave} disabled={saving} className="btn-green px-6 disabled:opacity-50">
+        {saving ? 'Salvando...' : 'Salvar horários'}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Tab: Mesas (QR Code por mesa)
 // ─────────────────────────────────────────────────────────────
 
@@ -1765,6 +1872,9 @@ export default function ConfiguracoesPage() {
             <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
           )}
           {isOwner && (
+            <Tab active={tab === 'horarios'} onClick={() => setTab('horarios')}>🕐 Horários</Tab>
+          )}
+          {isOwner && (
             <Tab active={tab === 'mesas'} onClick={() => setTab('mesas')}>🍽️ Mesas</Tab>
           )}
           {isOwner && (
@@ -1787,6 +1897,7 @@ export default function ConfiguracoesPage() {
         {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
         {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
         {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'horarios'    && <HorariosTab    onToast={showToast} />}
         {tab === 'mesas'       && <MesasTab       currentUser={currentUser} onToast={showToast} />}
         {tab === 'cupons'      && <CuponsTab      onToast={showToast} />}
         {tab === 'qrcode'      && <QrCodeTab      currentUser={currentUser} />}

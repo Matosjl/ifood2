@@ -185,11 +185,11 @@ const disconnectWhatsapp = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { message: 'WhatsApp desconectado.' } });
 });
 
-/** PATCH /api/tenant/settings — payment methods, delivery zones, restaurant coords */
+/** PATCH /api/tenant/settings — payment methods, delivery zones, restaurant coords, business hours */
 const updateSettings = asyncHandler(async (req, res) => {
   const {
     acceptedPaymentMethods, deliveryZones, deliveryZoneType,
-    restaurantLat, restaurantLng,
+    restaurantLat, restaurantLng, businessHours,
   } = req.body;
 
   const { rows } = await db.query(
@@ -199,10 +199,11 @@ const updateSettings = asyncHandler(async (req, res) => {
          delivery_zone_type       = COALESCE($4, delivery_zone_type),
          restaurant_lat           = COALESCE($5::numeric, restaurant_lat),
          restaurant_lng           = COALESCE($6::numeric, restaurant_lng),
+         business_hours           = COALESCE($7::jsonb, business_hours),
          updated_at               = NOW()
      WHERE id = $1
      RETURNING accepted_payment_methods, delivery_zones, delivery_zone_type,
-               restaurant_lat, restaurant_lng`,
+               restaurant_lat, restaurant_lng, business_hours`,
     [
       req.user.tenantId,
       acceptedPaymentMethods != null ? JSON.stringify(acceptedPaymentMethods) : null,
@@ -210,6 +211,7 @@ const updateSettings = asyncHandler(async (req, res) => {
       deliveryZoneType       || null,
       restaurantLat          != null ? String(restaurantLat)                  : null,
       restaurantLng          != null ? String(restaurantLng)                  : null,
+      businessHours          != null ? JSON.stringify(businessHours)          : null,
     ]
   );
   if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
@@ -220,7 +222,7 @@ const updateSettings = asyncHandler(async (req, res) => {
 const getFullSettings = asyncHandler(async (req, res) => {
   const { rows } = await db.query(
     `SELECT accepted_payment_methods, delivery_zones, delivery_zone_type,
-            restaurant_lat, restaurant_lng, whatsapp_instance
+            restaurant_lat, restaurant_lng, whatsapp_instance, business_hours
      FROM tenants WHERE id = $1`,
     [req.user.tenantId]
   );

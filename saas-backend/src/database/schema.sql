@@ -576,6 +576,7 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS restaurant_lng      NUMERIC(10,7);
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS accepted_payment_methods JSONB DEFAULT '["cash","pix","credit","debit","voucher","fiado","pending","other"]'::jsonb;
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zones      JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zone_type  VARCHAR(10) DEFAULT 'named';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_hours      JSONB DEFAULT NULL;
 
 -- ── COUPONS ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS coupons (
