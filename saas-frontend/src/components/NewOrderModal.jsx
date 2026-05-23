@@ -1472,6 +1472,11 @@ export default function NewOrderModal({ onClose, onCreated }) {
       setStreetNumber(parts[1] ?? '');
       setComplement(parts.slice(2).join(', '));
     }
+    // Restaura bairro e taxa do último pedido do cliente
+    if (s.neighborhood) {
+      setNeighborhood(s.neighborhood);
+      if (s.delivery_fee != null) setDeliveryFee(String(s.delivery_fee));
+    }
     setShowSug(false);
     setSuggestions([]);
   };
@@ -1506,7 +1511,8 @@ export default function NewOrderModal({ onClose, onCreated }) {
     if (stepIndex === 0) return name.trim().length > 0;
     if (stepIndex === 1) return Object.keys(cart).length > 0;
     if (stepIndex === 2) {
-      if (deliveryType === 'delivery' && !neighborhood) return false;
+      // Bairro obrigatório apenas se não houver endereço manual já preenchido
+      if (deliveryType === 'delivery' && !neighborhood && !street.trim()) return false;
       // Telefone obrigatório para entrega (exceto modo retirada)
       if (deliveryType === 'delivery' && !pickupMode && !phone.trim()) return false;
       if (!splitMode && paymentMethod === 'fiado' && !fiadoClienteId) return false;

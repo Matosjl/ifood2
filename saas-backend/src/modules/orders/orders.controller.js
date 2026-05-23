@@ -173,7 +173,7 @@ const searchCustomers = asyncHandler(async (req, res) => {
 
   const sql = `
     WITH ranked_orders AS (
-      SELECT customer_name, customer_phone, customer_address, total, created_at,
+      SELECT customer_name, customer_phone, customer_address, neighborhood, delivery_fee, total, created_at,
              -- normaliza telefone: remove não-dígitos para agrupar variações de formato
              regexp_replace(COALESCE(customer_phone,''), '[^0-9]', '', 'g') AS phone_norm,
              ROW_NUMBER() OVER (
@@ -190,6 +190,8 @@ const searchCustomers = asyncHandler(async (req, res) => {
       SELECT MIN(customer_name)   AS name,
              NULLIF(phone_norm,'')AS phone,
              MAX(CASE WHEN rn = 1 THEN customer_address END) AS address,
+             MAX(CASE WHEN rn = 1 THEN neighborhood END)     AS neighborhood,
+             MAX(CASE WHEN rn = 1 THEN delivery_fee END)     AS delivery_fee,
              COUNT(*)::int        AS order_count,
              MAX(created_at)      AS last_order_date,
              SUM(total)::numeric  AS total_spent,
@@ -199,6 +201,8 @@ const searchCustomers = asyncHandler(async (req, res) => {
     ),
     manual_only AS (
       SELECT tc.name, tc.phone, tc.address,
+             NULL::text          AS neighborhood,
+             NULL::numeric       AS delivery_fee,
              0::int              AS order_count,
              NULL::timestamptz   AS last_order_date,
              0::numeric          AS total_spent,
