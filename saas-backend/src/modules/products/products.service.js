@@ -86,8 +86,17 @@ const deleteCategory = async (id, tenantId) => {
   return cat;
 };
 
+const updateCategory = async (id, tenantId, data) => {
+  const VALID_TARGETS = new Set(['kitchen', 'bar', 'both', 'none']);
+  if (data.printer_target && !VALID_TARGETS.has(data.printer_target))
+    throw new AppError('printer_target inválido. Use: kitchen, bar, both ou none.', 400);
+  const cat = await Product.updateCategory(id, tenantId, data);
+  if (!cat) throw new AppError('Categoria não encontrada.', 404);
+  return cat;
+};
+
 module.exports = {
   listProducts, getProduct, createProduct, updateProduct, deleteProduct,
   replenishStock, listMovements,
-  listCategories, createCategory, deleteCategory,
+  listCategories, createCategory, deleteCategory, updateCategory,
 };

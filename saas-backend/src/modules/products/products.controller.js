@@ -99,6 +99,13 @@ const createCat = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: cat });
 });
 
+/** PATCH /api/categories/:id */
+const updateCat = asyncHandler(async (req, res) => {
+  const { name, printer_target } = req.body;
+  const cat = await service.updateCategory(req.params.id, req.user.tenantId, { name, printer_target });
+  res.json({ success: true, data: cat });
+});
+
 /** DELETE /api/categories/:id */
 const deleteCat = asyncHandler(async (req, res) => {
   await service.deleteCategory(req.params.id, req.user.tenantId);
@@ -219,7 +226,7 @@ const deleteOption = asyncHandler(async (req, res) => {
 module.exports = {
   list, getOne, create, update, remove,
   replenish, movements, allMovements,
-  listCats, createCat, deleteCat,
+  listCats, createCat, updateCat, deleteCat,
   uploadImage,
   createGroup, updateGroup, deleteGroup,
   createOption, updateOption, deleteOption,

@@ -143,8 +143,9 @@ app.get('/api/plans', (req, res) => {
 
 // Categorias e movimentações globais de estoque (requerem auth)
 app.use('/api/categories',        authenticate, require('express').Router()
-  .get('/',     productCtrl.listCats)
-  .post('/',    productCtrl.createCat)
+  .get('/',       productCtrl.listCats)
+  .post('/',      productCtrl.createCat)
+  .patch('/:id',  productCtrl.updateCat)
   .delete('/:id', productCtrl.deleteCat)
 );
 app.get('/api/stock/movements', authenticate, productCtrl.allMovements);

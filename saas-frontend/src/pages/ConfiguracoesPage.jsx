@@ -1452,6 +1452,114 @@ const DAYS = [
 
 const DEFAULT_HOURS = DAYS.map(() => ({ open: true, start: '08:00', end: '22:00' }));
 
+// ── Impressoras Tab ───────────────────────────────────────────
+
+const PRINTER_TARGETS = [
+  { value: 'kitchen', label: '🍳 Cozinha',    cls: 'bg-orange-500/20 text-orange-300' },
+  { value: 'bar',     label: '🍺 Bar',         cls: 'bg-cyan-500/20 text-cyan-300'    },
+  { value: 'both',    label: '🔀 Ambos',       cls: 'bg-purple-500/20 text-purple-300'},
+  { value: 'none',    label: '🚫 Não imprimir',cls: 'bg-gray-700 text-gray-400'       },
+];
+
+function ImpresorasTab({ onToast }) {
+  const [cats,    setCats]    = useState([]);
+  const [saving,  setSaving]  = useState(null); // id da categoria sendo salva
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/categories')
+      .then(({ data }) => setCats(data.data ?? []))
+      .catch(() => onToast('Erro ao carregar categorias.', 'error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleTarget = async (cat, value) => {
+    setSaving(cat.id);
+    // Optimistic update
+    setCats((prev) => prev.map((c) => c.id === cat.id ? { ...c, printer_target: value } : c));
+    try {
+      await api.patch(`/categories/${cat.id}`, { printer_target: value });
+      onToast(`${cat.name}: destino atualizado.`, 'success');
+    } catch {
+      setCats((prev) => prev.map((c) => c.id === cat.id ? cat : c));
+      onToast('Erro ao salvar.', 'error');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (loading) return <p className="text-gray-500 text-sm">Carregando...</p>;
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-1">🖨️ Roteamento de Impressoras</h3>
+        <p className="text-sm text-gray-400">
+          Defina para qual impressora cada categoria deve ir ao imprimir a comanda.
+          Configure uma impressora para <span className="text-orange-400 font-medium">Cozinha</span> e
+          outra para <span className="text-cyan-400 font-medium">Bar</span> no seu sistema operacional,
+          depois selecione aqui o destino de cada categoria.
+        </p>
+      </div>
+
+      <div className="bg-gray-800/60 rounded-xl border border-white/10 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-white/10">
+              <th className="text-left px-4 py-2.5 text-gray-400 font-semibold">Categoria</th>
+              <th className="text-left px-4 py-2.5 text-gray-400 font-semibold">Impressora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cats.length === 0 && (
+              <tr><td colSpan={2} className="px-4 py-6 text-center text-gray-500 text-sm">
+                Nenhuma categoria cadastrada. Adicione categorias na página de Produtos.
+              </td></tr>
+            )}
+            {cats.map((cat) => {
+              const current = PRINTER_TARGETS.find((t) => t.value === (cat.printer_target ?? 'kitchen'))
+                           ?? PRINTER_TARGETS[0];
+              return (
+                <tr key={cat.id} className="border-b border-white/5 last:border-0">
+                  <td className="px-4 py-3 text-white font-medium">{cat.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRINTER_TARGETS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          disabled={saving === cat.id}
+                          onClick={() => handleTarget(cat, opt.value)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors border ${
+                            cat.printer_target === opt.value || (!cat.printer_target && opt.value === 'kitchen')
+                              ? `${opt.cls} border-current`
+                              : 'bg-gray-700/40 text-gray-500 border-transparent hover:border-white/20'
+                          } disabled:opacity-50`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-sm text-blue-300">
+        <p className="font-semibold mb-1">💡 Como configurar dois computadores</p>
+        <ol className="space-y-1 text-blue-300/80 list-decimal list-inside">
+          <li>No computador do caixa: deixe a impressora 58mm como padrão do browser</li>
+          <li>No computador/tablet da cozinha: deixe a impressora 80mm como padrão</li>
+          <li>Na cozinha, acesse o ZapFome e ligue o <strong>toggle de comanda automática</strong> (ícone chef 🍳 no cabeçalho)</li>
+          <li>Cada vez que chegar um pedido, a comanda imprime automaticamente no destino correto</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function HorariosTab({ onToast }) {
   const [hours,  setHours]  = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1872,6 +1980,9 @@ export default function ConfiguracoesPage() {
             <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
           )}
           {isOwner && (
+            <Tab active={tab === 'impressoras'} onClick={() => setTab('impressoras')}>🖨️ Impressoras</Tab>
+          )}
+          {isOwner && (
             <Tab active={tab === 'horarios'} onClick={() => setTab('horarios')}>🕐 Horários</Tab>
           )}
           {isOwner && (
@@ -1897,6 +2008,7 @@ export default function ConfiguracoesPage() {
         {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
         {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
         {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'impressoras' && <ImpresorasTab  onToast={showToast} />}
         {tab === 'horarios'    && <HorariosTab    onToast={showToast} />}
         {tab === 'mesas'       && <MesasTab       currentUser={currentUser} onToast={showToast} />}
         {tab === 'cupons'      && <CuponsTab      onToast={showToast} />}

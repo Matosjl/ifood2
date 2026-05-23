@@ -49,18 +49,21 @@ class Order {
       `SELECT o.*,
               json_agg(
                 json_build_object(
-                  'id',           oi.id,
-                  'product_id',   oi.product_id,
-                  'product_name', oi.product_name,
-                  'quantity',     oi.quantity,
-                  'weight_kg',    oi.weight_kg,
-                  'unit_price',   oi.unit_price,
-                  'total',        oi.total,
-                  'notes',        oi.notes
+                  'id',              oi.id,
+                  'product_id',      oi.product_id,
+                  'product_name',    oi.product_name,
+                  'quantity',        oi.quantity,
+                  'weight_kg',       oi.weight_kg,
+                  'unit_price',      oi.unit_price,
+                  'total',           oi.total,
+                  'notes',           oi.notes,
+                  'printer_target',  COALESCE(c.printer_target, 'kitchen')
                 ) ORDER BY oi.id
               ) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
+       LEFT   JOIN products p   ON p.id = oi.product_id
+       LEFT   JOIN categories c ON c.id = p.category_id
        WHERE  ${conditions.join(' AND ')}
        GROUP  BY o.id
        ORDER  BY o.created_at DESC
@@ -76,14 +79,15 @@ class Order {
       `SELECT o.*,
               json_agg(
                 json_build_object(
-                  'id',           oi.id,
-                  'product_id',   oi.product_id,
-                  'product_name', oi.product_name,
-                  'quantity',     oi.quantity,
-                  'weight_kg',    oi.weight_kg,
-                  'unit_price',   oi.unit_price,
-                  'total',        oi.total,
-                  'notes',        oi.notes,
+                  'id',              oi.id,
+                  'product_id',      oi.product_id,
+                  'product_name',    oi.product_name,
+                  'quantity',        oi.quantity,
+                  'weight_kg',       oi.weight_kg,
+                  'unit_price',      oi.unit_price,
+                  'total',           oi.total,
+                  'notes',           oi.notes,
+                  'printer_target',  COALESCE(c.printer_target, 'kitchen'),
                   'addons',       (
                     SELECT COALESCE(json_agg(json_build_object(
                       'id',            oia.id,
@@ -99,6 +103,8 @@ class Order {
               ) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
+       LEFT   JOIN products p   ON p.id = oi.product_id
+       LEFT   JOIN categories c ON c.id = p.category_id
        WHERE  o.id = $1 AND o.tenant_id = $2
        GROUP  BY o.id`,
       [id, tenantId]

@@ -245,6 +245,26 @@ class Product {
     return rows[0];
   }
 
+  static async updateCategory(id, tenantId, data, dbClient = db) {
+    const fields = [];
+    const params = [id, tenantId];
+    if (data.name != null) {
+      params.push(data.name.trim());
+      fields.push(`name = $${params.length}`);
+    }
+    if (data.printer_target != null) {
+      params.push(data.printer_target);
+      fields.push(`printer_target = $${params.length}`);
+    }
+    if (fields.length === 0) return null;
+    const { rows } = await dbClient.query(
+      `UPDATE categories SET ${fields.join(', ')}
+       WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      params
+    );
+    return rows[0] || null;
+  }
+
   static async deleteCategory(id, tenantId, dbClient = db) {
     const { rows } = await dbClient.query(
       `DELETE FROM categories WHERE id = $1 AND tenant_id = $2 RETURNING id`,

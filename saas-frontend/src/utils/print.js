@@ -268,11 +268,24 @@ export function printOrder(order) {
 }
 
 // ── Comanda de cozinha — 80mm ─────────────────────────────────
-export function printKitchen(order) {
+// target: 'kitchen' | 'bar' | 'both' | null (null = todos os itens)
+export function printKitchen(order, target = null) {
   const now  = new Date();
   const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  const itemRows = (order.items ?? []).map((item) => {
+  // Filtra itens pelo destino se informado
+  const allItems = order.items ?? [];
+  const items = target == null ? allItems : allItems.filter((item) => {
+    const t = item.printerTarget ?? item.printer_target ?? 'kitchen';
+    return t === target || t === 'both';
+  });
+
+  // Nada a imprimir para este destino
+  if (items.length === 0) return false;
+
+  const targetLabel = target === 'bar' ? '🍺 BAR' : '⭐ COZINHA ⭐';
+
+  const itemRows = items.map((item) => {
     const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}×`;
     const name = item.productName ?? item.product_name ?? '';
     const note = item.notes
@@ -388,7 +401,7 @@ export function printKitchen(order) {
 </head>
 <body>
 
-  <div class="header-label">⭐ COZINHA ⭐</div>
+  <div class="header-label">${targetLabel}</div>
   <p class="num">#${order.orderNumber ?? order.order_number}</p>
   <p class="hora">${time}</p>
   <p class="tipo">${tipoLabel}</p>

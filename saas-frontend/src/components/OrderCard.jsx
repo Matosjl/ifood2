@@ -188,7 +188,7 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
 
           {/* Imprimir comanda de cozinha (80mm) */}
           <button
-            onClick={() => printKitchen(order)}
+            onClick={() => printKitchen(order, 'kitchen')}
             title="Imprimir comanda de cozinha (80mm)"
             className="p-1 rounded text-gray-600 hover:text-orange-400 hover:bg-orange-400/10 transition-colors"
           >
@@ -197,6 +197,24 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
               <line x1="6" y1="17" x2="18" y2="17"/>
             </svg>
           </button>
+
+          {/* Imprimir comanda do bar (80mm) — aparece só se tiver itens de bar */}
+          {(order.items ?? []).some((i) => {
+            const t = i.printerTarget ?? i.printer_target ?? 'kitchen';
+            return t === 'bar' || t === 'both';
+          }) && (
+            <button
+              onClick={() => printKitchen(order, 'bar')}
+              title="Imprimir comanda do bar (80mm)"
+              className="p-1 rounded text-gray-600 hover:text-cyan-400 hover:bg-cyan-400/10 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 11H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1Z"/>
+                <path d="M16 11V6a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v5"/>
+                <line x1="12" y1="16" x2="12" y2="20"/>
+              </svg>
+            </button>
+          )}
 
           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.badge}`}>{cfg.label}</span>
         </div>

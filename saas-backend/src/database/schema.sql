@@ -577,6 +577,8 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS accepted_payment_methods JSONB DEFA
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zones      JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS delivery_zone_type  VARCHAR(10) DEFAULT 'named';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_hours      JSONB DEFAULT NULL;
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS printer_target   VARCHAR(20) DEFAULT 'kitchen';
+-- printer_target: 'kitchen' | 'bar' | 'both' | 'none'
 
 -- ── VARIAÇÕES DE PRODUTO ──────────────────────────────────────
 -- Grupo: ex. "Tamanho", "Sabor", "Borda"

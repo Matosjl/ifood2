@@ -8,9 +8,10 @@ export const updateProduct = (id, data) => api.put(`/products/${id}`, data);
 export const deleteProduct = (id)     => api.delete(`/products/${id}`);
 
 // ── Categories ────────────────────────────────────────────────
-export const listCategories = ()       => api.get('/categories');
-export const createCategory = (name)   => api.post('/categories', { name });
-export const deleteCategory = (id)     => api.delete(`/categories/${id}`);
+export const listCategories  = ()           => api.get('/categories');
+export const createCategory  = (name)       => api.post('/categories', { name });
+export const updateCategory  = (id, data)   => api.patch(`/categories/${id}`, data);
+export const deleteCategory  = (id)         => api.delete(`/categories/${id}`);
 
 // ── Stock ─────────────────────────────────────────────────────
 export const replenishStock   = (id, data) => api.post(`/products/${id}/replenish`, data);

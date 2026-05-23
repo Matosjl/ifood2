@@ -184,8 +184,17 @@ export default function useOrders() {
     const o = norm(order);
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
     if (soundRef.current) playAlert();
-    if (autoPrintRef.current)        printOrder(o);
-    if (autoPrintKitchenRef.current) printKitchen(o);
+    if (autoPrintRef.current) printOrder(o);
+    if (autoPrintKitchenRef.current) {
+      // Imprime comanda de cozinha; se tiver itens de bar, imprime separado
+      printKitchen(o, 'kitchen');
+      // Pequeno delay para não abrir duas janelas simultâneas
+      const hasBar = (o.items ?? []).some((i) => {
+        const t = i.printerTarget ?? i.printer_target ?? 'kitchen';
+        return t === 'bar' || t === 'both';
+      });
+      if (hasBar) setTimeout(() => printKitchen(o, 'bar'), 800);
+    }
     // Agenda auto-confirmação se configurado e pedido em pending
     if (autoConfirmDelayRef.current > 0 && o.status === 'pending') {
       const tid = setTimeout(() => {
