@@ -611,3 +611,17 @@ CREATE INDEX IF NOT EXISTS idx_restaurant_tables_tenant ON restaurant_tables(ten
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code     VARCHAR(50);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_discount NUMERIC(10,2) DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS table_number    VARCHAR(20);
+
+-- ── CAIXA MOVEMENTS (sangria / suprimento) ────────────────────
+CREATE TABLE IF NOT EXISTS caixa_movements (
+  id               UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  cash_register_id UUID        NOT NULL REFERENCES cash_registers(id) ON DELETE CASCADE,
+  type             VARCHAR(20) NOT NULL CHECK (type IN ('sangria','suprimento')),
+  amount           NUMERIC(10,2) NOT NULL CHECK (amount > 0),
+  reason           TEXT,
+  created_by       UUID        REFERENCES users(id),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_caixa_movements_register ON caixa_movements(cash_register_id);
+CREATE INDEX IF NOT EXISTS idx_caixa_movements_tenant   ON caixa_movements(tenant_id);

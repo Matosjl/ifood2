@@ -184,4 +184,72 @@ const getOne = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows[0] });
 });
 
-module.exports = { getCurrent, openCaixa, closeCaixa, getHistory, getOne };
+// ── Helper: caixa aberto do tenant ───────────────────────────
+const getOpenCaixa = async (tenantId) => {
+  const { rows } = await db.query(
+    `SELECT id FROM cash_registers WHERE tenant_id = $1 AND status = 'open' LIMIT 1`,
+    [tenantId]
+  );
+  if (!rows[0]) throw new AppError('Nenhum caixa aberto. Abra o caixa antes de registrar movimentos.', 400);
+  return rows[0];
+};
+
+// ── POST /api/caixa/sangria ───────────────────────────────────
+const sangria = asyncHandler(async (req, res) => {
+  const { amount, reason } = req.body;
+  if (!amount || parseFloat(amount) <= 0) throw new AppError('Valor da sangria deve ser maior que zero.', 400);
+
+  const caixa = await getOpenCaixa(req.user.tenantId);
+
+  const { rows } = await db.query(
+    `INSERT INTO caixa_movements (tenant_id, cash_register_id, type, amount, reason, created_by)
+     VALUES ($1, $2, 'sangria', $3, $4, $5) RETURNING *`,
+    [req.user.tenantId, caixa.id, parseFloat(amount), reason ?? null, req.user.userId]
+  );
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
+// ── POST /api/caixa/suprimento ────────────────────────────────
+const suprimento = asyncHandler(async (req, res) => {
+  const { amount, reason } = req.body;
+  if (!amount || parseFloat(amount) <= 0) throw new AppError('Valor do suprimento deve ser maior que zero.', 400);
+
+  const caixa = await getOpenCaixa(req.user.tenantId);
+
+  const { rows } = await db.query(
+    `INSERT INTO caixa_movements (tenant_id, cash_register_id, type, amount, reason, created_by)
+     VALUES ($1, $2, 'suprimento', $3, $4, $5) RETURNING *`,
+    [req.user.tenantId, caixa.id, parseFloat(amount), reason ?? null, req.user.userId]
+  );
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
+// ── GET /api/caixa/movements?cash_register_id=... ────────────
+const getMovements = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+
+  // Se não informar id, usa o caixa atualmente aberto
+  let registerId = req.query.cash_register_id;
+  if (!registerId) {
+    const { rows } = await db.query(
+      `SELECT id FROM cash_registers WHERE tenant_id = $1 AND status = 'open' LIMIT 1`,
+      [tenantId]
+    );
+    registerId = rows[0]?.id;
+  }
+  if (!registerId) {
+    return res.json({ success: true, data: [] });
+  }
+
+  const { rows } = await db.query(
+    `SELECT cm.*, u.name AS created_by_name
+     FROM   caixa_movements cm
+     LEFT   JOIN users u ON u.id = cm.created_by
+     WHERE  cm.cash_register_id = $1 AND cm.tenant_id = $2
+     ORDER  BY cm.created_at ASC`,
+    [registerId, tenantId]
+  );
+  res.json({ success: true, data: rows });
+});
+
+module.exports = { getCurrent, openCaixa, closeCaixa, sangria, suprimento, getMovements, getHistory, getOne };

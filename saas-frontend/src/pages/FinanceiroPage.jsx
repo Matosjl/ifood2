@@ -3,7 +3,7 @@ import {
   getSummary, getExpenses, createExpense, updateExpense,
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
-import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory } from '../api/caixa';
+import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory, postSangria, postSuprimento, getCaixaMovements } from '../api/caixa';
 import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBancoTransaction } from '../api/banco';
 
 // ── Formatters ────────────────────────────────────────────────
@@ -915,6 +915,13 @@ function TabCaixa() {
   const [cashCounted, setCashCounted] = useState('');
   const [cardCounted, setCardCounted] = useState('');
   const [pixCounted,  setPixCounted]  = useState('');
+  // Sangria / Suprimento
+  const [movements,      setMovements]      = useState([]);
+  const [movModal,       setMovModal]       = useState(null); // null | 'sangria' | 'suprimento'
+  const [movAmount,      setMovAmount]      = useState('');
+  const [movReason,      setMovReason]      = useState('');
+  const [movSaving,      setMovSaving]      = useState(false);
+  const [movErr,         setMovErr]         = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -925,6 +932,9 @@ function TabCaixa() {
       ]);
       setCaixa(currRes.data.data);
       setHistory(histRes.data.data ?? []);
+      // Carrega movimentos do caixa atual
+      const movRes = await getCaixaMovements();
+      setMovements(movRes.data.data ?? []);
     } catch { setCaixa(null); }
     finally { setLoading(false); }
   }, []);
@@ -961,6 +971,22 @@ function TabCaixa() {
     } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao fechar caixa.'); }
     finally { setSaving(false); }
   };
+
+  const handleMovimento = async () => {
+    if (!movAmount || parseFloat(movAmount) <= 0) { setMovErr('Informe um valor maior que zero.'); return; }
+    setMovSaving(true); setMovErr('');
+    try {
+      const fn = movModal === 'sangria' ? postSangria : postSuprimento;
+      await fn({ amount: parseFloat(movAmount), reason: movReason || undefined });
+      setMovModal(null); setMovAmount(''); setMovReason('');
+      const movRes = await getCaixaMovements();
+      setMovements(movRes.data.data ?? []);
+    } catch (e) { setMovErr(e?.response?.data?.message ?? 'Erro ao registrar.'); }
+    finally { setMovSaving(false); }
+  };
+
+  const totalSangrias    = movements.filter(m => m.type === 'sangria').reduce((s,m) => s + parseFloat(m.amount), 0);
+  const totalSuprimentos = movements.filter(m => m.type === 'suprimento').reduce((s,m) => s + parseFloat(m.amount), 0);
 
   const fmtDt = (s) => {
     if (!s) return '—';
@@ -1035,6 +1061,103 @@ function TabCaixa() {
               <span className="text-4xl">💰</span>
             </div>
           </div>
+
+          {/* Sangria / Suprimento */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => { setMovModal('sangria'); setMovAmount(''); setMovReason(''); setMovErr(''); }}
+              className="py-2.5 rounded-xl border border-orange-500/30 text-orange-400 font-semibold text-sm hover:bg-orange-500/10 transition-colors flex items-center justify-center gap-1.5"
+            >
+              📤 Sangria
+            </button>
+            <button
+              onClick={() => { setMovModal('suprimento'); setMovAmount(''); setMovReason(''); setMovErr(''); }}
+              className="py-2.5 rounded-xl border border-blue-500/30 text-blue-400 font-semibold text-sm hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-1.5"
+            >
+              📥 Suprimento
+            </button>
+          </div>
+
+          {/* Resumo de movimentos do caixa atual */}
+          {movements.length > 0 && (
+            <div className="bg-gray-800/50 rounded-xl border border-white/[0.06] overflow-hidden">
+              <div className="px-4 py-2 border-b border-white/[0.06] flex items-center justify-between">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Movimentos do Caixa</p>
+                <div className="flex gap-3 text-xs">
+                  {totalSangrias > 0 && <span className="text-orange-400">📤 -{fmtBRL(totalSangrias)}</span>}
+                  {totalSuprimentos > 0 && <span className="text-blue-400">📥 +{fmtBRL(totalSuprimentos)}</span>}
+                </div>
+              </div>
+              <div className="divide-y divide-white/[0.04] max-h-40 overflow-y-auto">
+                {movements.map((m) => (
+                  <div key={m.id} className="px-4 py-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-base">{m.type === 'sangria' ? '📤' : '📥'}</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-white capitalize">{m.type}</p>
+                        {m.reason && <p className="text-[10px] text-gray-500 truncate">{m.reason}</p>}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-bold ${m.type === 'sangria' ? 'text-orange-400' : 'text-blue-400'}`}>
+                        {m.type === 'sangria' ? '-' : '+'}{fmtBRL(parseFloat(m.amount))}
+                      </p>
+                      <p className="text-[10px] text-gray-600">{fmtDt(m.created_at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Modal sangria/suprimento */}
+          {movModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-gray-900 border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-white text-base">
+                    {movModal === 'sangria' ? '📤 Sangria de Caixa' : '📥 Suprimento de Caixa'}
+                  </p>
+                  <button onClick={() => setMovModal(null)} className="text-gray-400 hover:text-white p-1">✕</button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  {movModal === 'sangria'
+                    ? 'Registre a retirada de dinheiro do caixa (ex: depósito, troco, pagamento).'
+                    : 'Registre a entrada de dinheiro no caixa (ex: troco adicional, reforço).'}
+                </p>
+                {movErr && <p className="text-red-400 text-xs bg-red-500/10 rounded-lg px-3 py-2">{movErr}</p>}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">Valor (R$) *</label>
+                  <input
+                    type="number" step="0.01" min="0.01" placeholder="0,00"
+                    value={movAmount} onChange={(e) => setMovAmount(e.target.value)}
+                    autoFocus
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">Motivo (opcional)</label>
+                  <input
+                    type="text"
+                    placeholder={movModal === 'sangria' ? 'Ex: Depósito no banco' : 'Ex: Reforço de troco'}
+                    value={movReason} onChange={(e) => setMovReason(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setMovModal(null)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-gray-400 text-sm font-semibold hover:bg-gray-800 transition-colors">
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleMovimento} disabled={movSaving}
+                    className={`flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition-colors disabled:opacity-50 ${movModal === 'sangria' ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'}`}
+                  >
+                    {movSaving ? 'Salvando...' : `Confirmar ${movModal === 'sangria' ? 'Sangria' : 'Suprimento'}`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Close caixa */}
           {!confirm ? (
