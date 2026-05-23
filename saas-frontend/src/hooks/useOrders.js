@@ -170,22 +170,8 @@ export default function useOrders() {
     unackRef.current.delete(id);
   }, []);
 
-  const socketConnected = useSocket({
-    onActiveOrders: handleActiveOrders,
-    onOrderCreated: handleOrderCreated,
-    onOrderUpdated: handleOrderUpdated,
-    onOrderDeleted: handleOrderDeleted,
-    onReconnect:    fetchToday,   // re-fetch ao reconectar para não perder pedidos
-  });
-
-  // Ref para usar socketConnected dentro do interval sem recriar o effect
-  const socketConnectedRef = useRef(false);
-  socketConnectedRef.current = socketConnected;
-
   // ── Carga inicial de todos os pedidos do dia ─────────────────
-  // Fonte primária de dados. O snapshot do socket só tem pedidos ativos;
-  // isso garante que delivered/cancelled persistam após F5.
-  //
+  // Declarado ANTES do useSocket para que onReconnect possa referenciar fetchToday.
   // isFetchingRef evita fetches paralelos (inflight lock).
 
   // Guarda contra double-click: IDs de pedidos com request em voo
@@ -207,6 +193,18 @@ export default function useOrders() {
       isFetchingRef.current = false;
     }
   }, []);
+
+  const socketConnected = useSocket({
+    onActiveOrders: handleActiveOrders,
+    onOrderCreated: handleOrderCreated,
+    onOrderUpdated: handleOrderUpdated,
+    onOrderDeleted: handleOrderDeleted,
+    onReconnect:    fetchToday,   // re-fetch ao reconectar para não perder pedidos
+  });
+
+  // Ref para usar socketConnected dentro do interval sem recriar o effect
+  const socketConnectedRef = useRef(false);
+  socketConnectedRef.current = socketConnected;
 
   // Carga inicial: chama fetchToday e libera o spinner.
   // O flag `alive` impede setLoading(false) se o componente desmontar antes do fetch terminar.
