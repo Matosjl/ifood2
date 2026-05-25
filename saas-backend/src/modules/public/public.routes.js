@@ -26,5 +26,6 @@ router.get('/:slug/customer/:phone',    ctrl.getCustomer);
 router.get('/:slug/history/:phone',     ctrl.getOrderHistory);
 router.post('/:slug/ratings',           ratingLimit, ctrl.submitRating);
 router.get('/:slug/loyalty-config',     ctrl.getLoyaltyConfig);
+router.get('/:slug/tables',             ctrl.getTables);
 
 module.exports = router;

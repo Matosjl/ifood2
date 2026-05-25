@@ -61,9 +61,14 @@ function OrderCard({ order, onAction, actionLabel, actionColor, disabled }) {
         urgency > 10 ? 'bg-yellow-500/5' : 'bg-gray-800/60',
       ].join(' ')}>
         <div>
-          <p className="text-base font-black text-white">#{order.order_number ?? order.id.slice(0,8)}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-base font-black text-white">#{order.order_number ?? order.id.slice(0,8)}</p>
+            {order.table_number && (
+              <span className="text-xs bg-orange-500/25 text-orange-300 px-1.5 py-0.5 rounded font-bold">🪑 Mesa {order.table_number}</span>
+            )}
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">
-            {order.delivery_type === 'delivery' ? '🛵 Entrega' : '🏪 Retirada'}
+            {order.table_number ? '🪑 Mesa' : order.delivery_type === 'delivery' ? '🛵 Entrega' : '🏪 Retirada'}
             {order.customer_name && ` · ${order.customer_name.split(' ')[0]}`}
           </p>
         </div>

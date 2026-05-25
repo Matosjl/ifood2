@@ -35,6 +35,9 @@ dist
 .env.local
 .env.production
 .env.staging
+.env.sandbox
+!.env.example
+!.env.sandbox.example
 *token.json*
 *credentials.json*
 

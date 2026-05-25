@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { printOrder, printKitchen } from '../utils/print';
 import { PAY_ICONS, PAY_LABELS } from '../constants/orders';
+import PixQrModal from './PixQrModal';
 
 // ── Status config ─────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
   const [isNew,           setIsNew]           = useState(true);
   const [confirming,      setConfirming]       = useState(null);   // status sendo confirmado
   const [showPayPick,     setShowPayPick]      = useState(false);  // picker de forma de pgto
+  const [showPixModal,    setShowPixModal]     = useState(false);  // QR PIX
   const [payLoading,      setPayLoading]       = useState(false);
   const [showDriverPick,  setShowDriverPick]   = useState(false);  // picker de motoboy
   const [assigning,       setAssigning]        = useState(false);
@@ -150,6 +152,11 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       <div className="flex items-start justify-between gap-2 p-3 pb-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-lg font-black text-white shrink-0">#{order.orderNumber}</span>
+          {order.tableNumber && (
+            <span className="text-xs bg-orange-500/25 text-orange-300 px-1.5 py-0.5 rounded font-bold">
+              🪑 Mesa {order.tableNumber}
+            </span>
+          )}
           {order.channel && order.channel !== 'manual' && (
             <span className="text-xs bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-medium">
               {order.channel}
@@ -212,6 +219,21 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
                 <path d="M17 11H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1Z"/>
                 <path d="M16 11V6a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v5"/>
                 <line x1="12" y1="16" x2="12" y2="20"/>
+              </svg>
+            </button>
+          )}
+
+          {/* Gerar QR PIX */}
+          {order.status !== 'cancelled' && order.status !== 'delivered' && (
+            <button
+              onClick={() => setShowPixModal(true)}
+              title="Gerar QR Code PIX"
+              className="p-1 rounded text-gray-600 hover:text-green-400 hover:bg-green-400/10 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/>
+                <rect x="2" y="14" width="8" height="8" rx="1"/>
+                <path d="M14 14h2v2h-2zm4 0h2v2h-2zm0 4h-4v4h4v-4z"/>
               </svg>
             </button>
           )}
@@ -404,6 +426,15 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
             </div>
           )}
         </div>
+      )}
+
+      {/* ── PIX QR Code modal ─────────────────────────────────── */}
+      {showPixModal && (
+        <PixQrModal
+          order={order}
+          onClose={() => setShowPixModal(false)}
+          onPaid={() => setShowPixModal(false)}
+        />
       )}
     </div>
   );

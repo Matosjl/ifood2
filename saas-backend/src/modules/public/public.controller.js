@@ -175,7 +175,7 @@ const createOrder = asyncHandler(async (req, res) => {
   const {
     customerName, customerPhone, customerAddress,
     deliveryType, notes, items, paymentMethod,
-    useCashback,
+    useCashback, tableNumber,
   } = req.body;
 
   if (!items?.length) throw new AppError('Adicione pelo menos 1 item.', 400);
@@ -220,6 +220,7 @@ const createOrder = asyncHandler(async (req, res) => {
         items,
         loyaltyCustomerId: loyaltyCustomer?.id ?? null,
         cashbackUsed,
+        tableNumber: tableNumber || null,
       },
       idempotencyKey,
       isOnline: true,
@@ -393,4 +394,19 @@ const getLoyaltyConfig = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows[0] });
 });
 
-module.exports = { getMenu, getCustomer, createOrder, trackOrder, submitRating, getLoyaltyConfig, getOrderHistory };
+// ── GET /api/public/:slug/tables — mesas ativas do restaurante ─
+const getTables = asyncHandler(async (req, res) => {
+  const { rows: tenants } = await db.query(
+    `SELECT id FROM tenants WHERE slug = $1 AND active = true`,
+    [req.params.slug]
+  );
+  if (!tenants[0]) throw new AppError('Restaurante não encontrado.', 404);
+  const { rows } = await db.query(
+    `SELECT id, number, name FROM restaurant_tables
+     WHERE tenant_id = $1 AND active = true ORDER BY number ASC`,
+    [tenants[0].id]
+  );
+  res.json({ success: true, data: rows });
+});
+
+module.exports = { getMenu, getCustomer, createOrder, trackOrder, submitRating, getLoyaltyConfig, getOrderHistory, getTables };

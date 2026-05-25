@@ -1,0 +1,23 @@
+[Unit]
+Description=ZapFome Commander — Webhook WhatsApp + MCP Server
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zapfome-vigia
+EnvironmentFile=/opt/zapfome-vigia/.env
+ExecStart=/usr/bin/node /opt/zapfome-vigia/commander.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zapfome-commander
+
+# Limita uso de recursos
+MemoryMax=128M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

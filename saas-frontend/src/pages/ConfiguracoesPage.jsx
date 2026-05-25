@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Toast from '../components/Toast';
 import api from '../api/axios';
+import * as locationsApi from '../api/locations';
 import { Map, MapMarker, MarkerContent, MapControls, useMap } from '../components/ui/map';
 import {
   updateProfile, updateTenantProfile, getTenantInfo,
@@ -19,11 +20,21 @@ const getUser = () => {
   catch { return {}; }
 };
 
-const ROLE_LABELS = { owner: 'Proprietário', manager: 'Gerente', staff: 'Colaborador' };
-const ROLE_CLS    = {
+const ROLE_LABELS = {
+  owner:   'Proprietário',
+  manager: 'Gerente',
+  staff:   'Colaborador',
+  caixa:   'Caixa',
+  garcom:  'Garçom',
+  cozinha: 'Cozinha',
+};
+const ROLE_CLS = {
   owner:   'bg-orange-500/20 text-orange-300',
   manager: 'bg-blue-500/20 text-blue-300',
   staff:   'bg-gray-700/60 text-gray-400',
+  caixa:   'bg-yellow-500/20 text-yellow-300',
+  garcom:  'bg-green-500/20 text-green-300',
+  cozinha: 'bg-purple-500/20 text-purple-300',
 };
 
 // ── Tab button ────────────────────────────────────────────────
@@ -500,7 +511,7 @@ function ContaTab({ currentUser, onToast }) {
 // ─────────────────────────────────────────────────────────────
 
 function AddUserModal({ onClose, onAdded }) {
-  const [form,   setForm]   = useState({ name: '', email: '', password: '', role: 'staff' });
+  const [form,   setForm]   = useState({ name: '', email: '', password: '', role: 'garcom' });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
 
@@ -554,8 +565,11 @@ function AddUserModal({ onClose, onAdded }) {
           <div>
             <label className="text-xs text-gray-400 font-semibold mb-1 block">Função</label>
             <select value={form.role} onChange={(e) => set('role', e.target.value)} className="input w-full">
-              <option value="staff">Colaborador</option>
-              <option value="manager">Gerente</option>
+              <option value="garcom">Garçom (só vê Pedidos, Garçom, Reservas)</option>
+              <option value="cozinha">Cozinha (só vê KDS)</option>
+              <option value="caixa">Caixa (Pedidos + Financeiro + Fiado)</option>
+              <option value="staff">Colaborador (acesso geral)</option>
+              <option value="manager">Gerente (acesso total exceto Planos)</option>
             </select>
           </div>
           {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
@@ -658,6 +672,9 @@ function EquipeTab({ currentUser, onToast }) {
                 >
                   <option value="manager">Gerente</option>
                   <option value="staff">Colaborador</option>
+                  <option value="caixa">Caixa</option>
+                  <option value="garcom">Garçom</option>
+                  <option value="cozinha">Cozinha</option>
                 </select>
               ) : (
                 <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_CLS[u.role] ?? ROLE_CLS.staff}`}>
@@ -842,6 +859,168 @@ function MotoboyTab({ currentUser, onToast }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab: Chatbot WhatsApp (AI Engine)
+// ─────────────────────────────────────────────────────────────
+
+function ChatbotTab({ onToast }) {
+  const [config,      setConfig]      = useState(null);   // [{instance_name, ai_enabled, allow_self_messages}]
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [chatbot,     setChatbot]     = useState(null);   // { enabled }
+  const [savingBot,   setSavingBot]   = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [cfgRes, tenantRes] = await Promise.all([
+        api.get('/tenant/chatbot-config'),
+        api.get('/tenant/me'),
+      ]);
+      setConfig(cfgRes.data.data ?? []);
+      setChatbot({ enabled: tenantRes.data.data?.chatbot_enabled ?? true });
+    } catch { /* VPS2 offline */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleModeChange = async (testMode) => {
+    setSaving(true);
+    try {
+      await api.patch('/tenant/chatbot-mode', { testMode });
+      setConfig((prev) => prev.map((r) => ({ ...r, allow_self_messages: testMode })));
+      onToast(testMode ? 'Modo de teste ativado — só o dono pode testar o bot.' : 'Modo produção ativado — todos os clientes podem usar o bot! 🚀', 'success');
+    } catch {
+      onToast('Erro ao alterar modo do chatbot.', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleEnableToggle = async (enabled) => {
+    setSavingBot(true);
+    try {
+      await api.patch('/tenant/chatbot', { enabled });
+      setChatbot({ enabled });
+      onToast(enabled ? 'Chatbot ativado! 🤖' : 'Chatbot pausado.', 'success');
+    } catch {
+      onToast('Erro ao alterar chatbot.', 'error');
+    } finally { setSavingBot(false); }
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-40">
+      <div className="w-6 h-6 border-2 border-orange-400/50 border-t-orange-400 rounded-full animate-spin" />
+    </div>
+  );
+
+  const activeConfig  = config?.find((c) => c.ai_enabled);
+  const isTestMode    = activeConfig?.allow_self_messages ?? true;
+  const botEnabled    = chatbot?.enabled ?? true;
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-white">🤖 Chatbot WhatsApp</h2>
+        <p className="text-sm text-gray-400 mt-1">
+          O bot atende seus clientes automaticamente no WhatsApp, recebe pedidos e responde como um atendente humano.
+        </p>
+      </div>
+
+      {/* Master toggle */}
+      <div className={`flex items-center justify-between gap-4 p-4 rounded-2xl border transition-colors ${
+        botEnabled ? 'bg-green-500/10 border-green-500/30' : 'bg-gray-800/60 border-white/[0.06]'
+      }`}>
+        <div>
+          <p className="text-sm font-bold text-white">{botEnabled ? '✅ Bot ativo' : '⏸ Bot pausado'}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {botEnabled ? 'Atendendo clientes automaticamente no WhatsApp' : 'Não está respondendo mensagens'}
+          </p>
+        </div>
+        <button
+          onClick={() => handleEnableToggle(!botEnabled)}
+          disabled={savingBot}
+          className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+            botEnabled ? 'bg-green-500' : 'bg-gray-600'
+          }`}
+        >
+          <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${
+            botEnabled ? 'translate-x-6' : 'translate-x-1'
+          }`} />
+        </button>
+      </div>
+
+      {/* Mode toggle (test vs production) */}
+      {activeConfig && (
+        <div className="bg-gray-800/60 rounded-2xl border border-white/[0.06] p-5 space-y-4">
+          <div>
+            <p className="text-sm font-bold text-white mb-1">Modo de operação</p>
+            <p className="text-xs text-gray-500">
+              No modo de teste apenas o dono pode enviar mensagens para o bot. Em produção todos os clientes são atendidos.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => handleModeChange(true)}
+              disabled={saving}
+              className={`flex flex-col items-start gap-1 p-4 rounded-xl border-2 transition-all text-left disabled:opacity-50 ${
+                isTestMode ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-gray-700/50 hover:border-white/20'
+              }`}
+            >
+              <span className="text-lg">🧪</span>
+              <p className="text-sm font-semibold text-white">Modo de Teste</p>
+              <p className="text-[11px] text-gray-400">Só o dono consegue testar o bot</p>
+            </button>
+            <button
+              onClick={() => handleModeChange(false)}
+              disabled={saving}
+              className={`flex flex-col items-start gap-1 p-4 rounded-xl border-2 transition-all text-left disabled:opacity-50 ${
+                !isTestMode ? 'border-green-500 bg-green-500/10' : 'border-white/10 bg-gray-700/50 hover:border-white/20'
+              }`}
+            >
+              <span className="text-lg">🚀</span>
+              <p className="text-sm font-semibold text-white">Produção</p>
+              <p className="text-[11px] text-gray-400">Todos os clientes são atendidos</p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Instance info */}
+      {activeConfig && (
+        <div className="bg-gray-800/40 rounded-2xl border border-white/[0.06] p-5">
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">Instância WhatsApp conectada</p>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📱</span>
+            <div>
+              <p className="text-sm font-semibold text-white font-mono">{activeConfig.instance_name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                AI Engine VPS2 · {isTestMode ? '🧪 Modo de teste' : '🚀 Em produção'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!activeConfig && !loading && (
+        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-5 text-center">
+          <p className="text-sm text-yellow-400 font-semibold">⚠️ Chatbot não configurado</p>
+          <p className="text-xs text-gray-500 mt-1">O AI Engine não tem uma instância configurada para este restaurante.</p>
+        </div>
+      )}
+
+      {/* How it works */}
+      <div className="bg-gray-800/30 rounded-2xl border border-white/[0.06] p-5">
+        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">Como funciona</p>
+        <ol className="space-y-2 text-xs text-gray-400">
+          <li className="flex gap-2"><span className="text-orange-400 font-bold">1.</span> Cliente envia mensagem no WhatsApp do restaurante</li>
+          <li className="flex gap-2"><span className="text-orange-400 font-bold">2.</span> O bot responde como um atendente humano em segundos</li>
+          <li className="flex gap-2"><span className="text-orange-400 font-bold">3.</span> Cliente faz pedido pelo WhatsApp — aparece direto no Kanban</li>
+          <li className="flex gap-2"><span className="text-orange-400 font-bold">4.</span> Bot informa status do pedido quando cliente perguntar</li>
+        </ol>
       </div>
     </div>
   );
@@ -1451,6 +1630,87 @@ const DAYS = [
 ];
 
 const DEFAULT_HOURS = DAYS.map(() => ({ open: true, start: '08:00', end: '22:00' }));
+
+// ── PIX / OpenPix Tab ─────────────────────────────────────────
+
+function PixTab({ onToast }) {
+  const [appId,   setAppId]   = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+
+  useEffect(() => {
+    api.get('/pix/config')
+      .then(({ data }) => setAppId(data.data?.appId ?? ''))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put('/pix/config', { appId });
+      onToast('Configuração PIX salva!', 'success');
+    } catch (e) {
+      onToast(e?.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="text-gray-500 text-sm">Carregando...</div>;
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-1">📱 PIX Automático</h3>
+        <p className="text-sm text-gray-400">
+          Integração com <a href="https://openpix.com.br" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">OpenPix (Woovi)</a>.
+          Crie sua conta gratuita, gere um App ID e cole abaixo.
+          Quando um cliente pagar o PIX, o pedido é confirmado automaticamente no kanban.
+        </p>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 text-sm text-blue-300">
+        <p className="font-semibold mb-1">Como configurar:</p>
+        <ol className="space-y-1 list-decimal list-inside text-blue-300/80">
+          <li>Crie conta em <strong>openpix.com.br</strong></li>
+          <li>Vá em <strong>Configurações → Apps → Criar App</strong></li>
+          <li>Copie o <strong>App ID</strong> gerado</li>
+          <li>Cole abaixo e salve</li>
+          <li>Configure o webhook do OpenPix para: <code className="bg-blue-900/30 px-1 rounded text-xs">{window.location.origin.replace('3000','3001')}/api/pix/webhook</code></li>
+        </ol>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">App ID OpenPix</label>
+          <input
+            type="password"
+            value={appId}
+            onChange={(e) => setAppId(e.target.value)}
+            placeholder="Ex: Q29uZmlndXJhY2...***"
+            className="input w-full"
+          />
+          <p className="text-xs text-gray-600 mt-1">Mantenha em sigilo — nunca compartilhe este valor.</p>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-green disabled:opacity-40"
+        >
+          {saving ? 'Salvando...' : 'Salvar configuração PIX'}
+        </button>
+
+        {appId && (
+          <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 text-sm text-green-400">
+            ✅ PIX configurado. Botão "Gerar PIX" aparecerá nos pedidos.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Integrações Tab ──────────────────────────────────────────
 
@@ -2245,6 +2505,169 @@ function CuponsTab({ onToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Filiais Tab (multi-loja)
+// ─────────────────────────────────────────────────────────────
+
+function FiliaisTab({ onToast }) {
+  const [locations, setLocations] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [form,      setForm]      = useState({ name: '', address: '', phone: '' });
+  const [editing,   setEditing]   = useState(null); // id being edited
+  const [saving,    setSaving]    = useState(false);
+  const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await locationsApi.listLocations();
+      setLocations(data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return onToast('Nome é obrigatório.', 'error');
+    setSaving(true);
+    try {
+      if (editing) {
+        await locationsApi.updateLocation(editing, form);
+        onToast('Filial atualizada!');
+      } else {
+        await locationsApi.createLocation(form);
+        onToast('Filial criada!');
+      }
+      setForm({ name: '', address: '', phone: '' });
+      setEditing(null);
+      await reload();
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao salvar.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = (loc) => {
+    setEditing(loc.id);
+    setForm({ name: loc.name, address: loc.address ?? '', phone: loc.phone ?? '' });
+  };
+
+  const handleSetDefault = async (id) => {
+    try {
+      await locationsApi.updateLocation(id, { is_default: true });
+      onToast('Filial padrão atualizada!');
+      await reload();
+    } catch { onToast('Erro ao definir padrão.', 'error'); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remover esta filial?')) return;
+    try {
+      await locationsApi.deleteLocation(id);
+      onToast('Filial removida.');
+      await reload();
+    } catch (err) {
+      onToast(err.response?.data?.message ?? 'Erro ao remover.', 'error');
+    }
+  };
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-base font-black text-white mb-1">🏪 Filiais / Pontos de Venda</h2>
+        <p className="text-sm text-gray-500">Gerencie múltiplas unidades. Cada pedido pode ser vinculado a uma filial.</p>
+      </div>
+
+      {/* Form */}
+      <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4 space-y-3">
+        <h3 className="text-sm font-bold text-white">{editing ? '✏️ Editar Filial' : '+ Nova Filial'}</h3>
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome *</label>
+          <input value={form.name} onChange={(e) => setF('name', e.target.value)}
+            className="input w-full" placeholder="Ex: Loja Centro, Filial Norte…" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">Endereço</label>
+          <input value={form.address} onChange={(e) => setF('address', e.target.value)}
+            className="input w-full" placeholder="Rua, número, bairro…" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 font-semibold mb-1 block">Telefone</label>
+          <input value={form.phone} onChange={(e) => setF('phone', e.target.value)}
+            className="input w-full" placeholder="(51) 99999-9999" />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={handleSave} disabled={saving}
+            className="btn-green px-5 disabled:opacity-50">
+            {saving ? 'Salvando…' : editing ? 'Salvar' : 'Criar Filial'}
+          </button>
+          {editing && (
+            <button onClick={() => { setEditing(null); setForm({ name: '', address: '', phone: '' }); }}
+              className="px-4 py-2 rounded-xl text-sm text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+              Cancelar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : locations.length === 0 ? (
+        <p className="text-gray-600 text-sm italic text-center py-4">Nenhuma filial cadastrada.</p>
+      ) : (
+        <div className="space-y-2">
+          {locations.map((loc) => (
+            <div key={loc.id} className="flex items-center gap-3 bg-gray-900/60 rounded-xl border border-white/[0.06] p-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-white truncate">{loc.name}</span>
+                  {loc.is_default && (
+                    <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                      padrão
+                    </span>
+                  )}
+                  {!loc.active && (
+                    <span className="text-[10px] bg-gray-700/60 text-gray-500 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                      inativa
+                    </span>
+                  )}
+                </div>
+                {loc.address && <p className="text-xs text-gray-500 truncate mt-0.5">{loc.address}</p>}
+                {loc.phone   && <p className="text-xs text-gray-600 mt-0.5">{loc.phone}</p>}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {!loc.is_default && (
+                  <button onClick={() => handleSetDefault(loc.id)}
+                    className="text-xs text-gray-500 hover:text-orange-400 transition-colors px-2 py-1 rounded-lg hover:bg-orange-400/10">
+                    Tornar padrão
+                  </button>
+                )}
+                <button onClick={() => handleEdit(loc)}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors" title="Editar">
+                  ✏️
+                </button>
+                <button onClick={() => handleDelete(loc.id)}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Remover">
+                  🗑️
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-600">
+        💡 Com múltiplas filiais, você pode vincular cada pedido a uma unidade e filtrar relatórios por filial.
+      </p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────
 
@@ -2279,7 +2702,10 @@ export default function ConfiguracoesPage() {
             <Tab active={tab === 'zonas'} onClick={() => setTab('zonas')}>🗺️ Entrega</Tab>
           )}
           {isOwner && (
-            <Tab active={tab === 'integracoes'} onClick={() => setTab('integracoes')}>📱 Integrações</Tab>
+            <Tab active={tab === 'pix'} onClick={() => setTab('pix')}>📱 PIX Auto</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'integracoes'} onClick={() => setTab('integracoes')}>🤝 Integrações</Tab>
           )}
           {isOwner && (
             <Tab active={tab === 'nfce'} onClick={() => setTab('nfce')}>🧾 NFC-e</Tab>
@@ -2302,6 +2728,12 @@ export default function ConfiguracoesPage() {
           {isOwner && (
             <Tab active={tab === 'motoboys'} onClick={() => setTab('motoboys')}>🛵 Motoboys</Tab>
           )}
+          {isOwner && (
+            <Tab active={tab === 'filiais'} onClick={() => setTab('filiais')}>🏪 Filiais</Tab>
+          )}
+          {isOwner && (
+            <Tab active={tab === 'chatbot'} onClick={() => setTab('chatbot')}>🤖 Chatbot</Tab>
+          )}
         </div>
       </div>
 
@@ -2313,6 +2745,7 @@ export default function ConfiguracoesPage() {
         {tab === 'whatsapp'    && <WhatsappTab    onToast={showToast} />}
         {tab === 'pagamentos'  && <PagamentosTab  onToast={showToast} />}
         {tab === 'zonas'       && <ZonasTab       onToast={showToast} />}
+        {tab === 'pix'         && <PixTab           onToast={showToast} />}
         {tab === 'integracoes' && <IntegracoesTab  onToast={showToast} />}
         {tab === 'nfce'        && <NfceTab        onToast={showToast} />}
         {tab === 'impressoras' && <ImpresorasTab  onToast={showToast} />}
@@ -2321,6 +2754,8 @@ export default function ConfiguracoesPage() {
         {tab === 'cupons'      && <CuponsTab      onToast={showToast} />}
         {tab === 'qrcode'      && <QrCodeTab      currentUser={currentUser} />}
         {tab === 'motoboys'   && <MotoboyTab     currentUser={currentUser} onToast={showToast} />}
+        {tab === 'filiais'    && <FiliaisTab     onToast={showToast} />}
+        {tab === 'chatbot'    && <ChatbotTab     onToast={showToast} />}
       </div>
 
       {toast && (

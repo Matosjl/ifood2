@@ -1,0 +1,23 @@
+[Unit]
+Description=ZapFome Vigia — Monitor 24/7
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zapfome-vigia
+EnvironmentFile=/opt/zapfome-vigia/.env
+ExecStart=/usr/bin/node /opt/zapfome-vigia/monitor.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zapfome-monitor
+
+# Limita uso de recursos
+MemoryMax=128M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

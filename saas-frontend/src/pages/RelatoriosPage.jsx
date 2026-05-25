@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSummary } from '../api/financeiro';
-import { getOrders }  from '../api/orders';
+import { getOrders, getHourlyStats } from '../api/orders';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -29,9 +29,10 @@ const PERIODS = [
 ];
 
 const TABS = [
-  { id: 'demand',   label: 'Demanda', icon: '📈' },
+  { id: 'demand',   label: 'Demanda',  icon: '📈' },
   { id: 'products', label: 'Produtos', icon: '🥇' },
   { id: 'history',  label: 'Histórico', icon: '📋' },
+  { id: 'horarios', label: 'Horários', icon: '🕐' },
 ];
 
 const STATUS_META = {
@@ -238,18 +239,107 @@ function HistoryDetail({ order }) {
   );
 }
 
+// ── Heatmap (hourly grid) ─────────────────────────────────────
+
+/**
+ * Renders a 24-cell heatmap row. Each cell = 1 hour of the day.
+ * Intensity driven by `orders` count.
+ */
+function HeatmapGrid({ data = [], metric = 'orders' }) {
+  if (!data.length) return (
+    <p className="text-gray-600 text-sm italic text-center py-8">Sem dados para exibir</p>
+  );
+
+  const maxVal = Math.max(...data.map((d) => d[metric]), 1);
+
+  const fmtHour = (h) => `${String(h).padStart(2, '0')}h`;
+  const fmtRevenue = (n) =>
+    n >= 1000 ? `R$${(n / 1000).toFixed(1)}k` : `R$${n.toFixed(0)}`;
+
+  // Color: cool → warm (blue → orange → red)
+  const getColor = (val) => {
+    const pct = maxVal > 0 ? val / maxVal : 0;
+    if (pct === 0) return 'bg-gray-800/60';
+    if (pct < 0.2)  return 'bg-blue-500/20';
+    if (pct < 0.4)  return 'bg-blue-500/40';
+    if (pct < 0.6)  return 'bg-orange-400/50';
+    if (pct < 0.8)  return 'bg-orange-500/70';
+    return 'bg-red-500/80';
+  };
+
+  const getTextColor = (val) => {
+    const pct = maxVal > 0 ? val / maxVal : 0;
+    if (pct === 0) return 'text-gray-700';
+    if (pct < 0.4)  return 'text-blue-300';
+    return 'text-white';
+  };
+
+  // Split into rows: 0-5 (madrugada), 6-11 (manhã), 12-17 (tarde), 18-23 (noite)
+  const periods = [
+    { label: '🌙 Madrugada', hours: data.slice(0, 6) },
+    { label: '🌅 Manhã',    hours: data.slice(6, 12) },
+    { label: '☀️ Tarde',    hours: data.slice(12, 18) },
+    { label: '🌆 Noite',    hours: data.slice(18, 24) },
+  ];
+
+  return (
+    <div className="space-y-3">
+      {periods.map(({ label, hours }) => (
+        <div key={label} className="flex items-center gap-3">
+          <span className="text-xs text-gray-500 w-28 shrink-0 font-semibold">{label}</span>
+          <div className="flex-1 grid grid-cols-6 gap-1">
+            {hours.map((d) => (
+              <div
+                key={d.hour}
+                className={`relative rounded-lg p-2 text-center transition-all group cursor-default ${getColor(d[metric])}`}
+                title={`${fmtHour(d.hour)}: ${d.orders} pedidos · ${fmtRevenue(d.revenue)}`}
+              >
+                <div className={`text-[10px] font-bold ${getTextColor(d[metric])}`}>
+                  {d[metric] > 0 ? (metric === 'orders' ? d.orders : fmtRevenue(d.revenue)) : '·'}
+                </div>
+                <div className="text-[9px] text-gray-500 mt-0.5">{fmtHour(d.hour)}</div>
+                {/* Tooltip */}
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block z-10 pointer-events-none">
+                  <div className="bg-gray-800 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] whitespace-nowrap shadow-xl">
+                    <p className="text-white font-bold">{fmtHour(d.hour)}</p>
+                    <p className="text-blue-400">{d.orders} pedidos</p>
+                    <p className="text-green-400">{fmtRevenue(d.revenue)}</p>
+                    {d.orders > 0 && <p className="text-gray-400">Ticket: {fmtRevenue(d.avg_ticket)}</p>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Legend */}
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-[10px] text-gray-600">Menos</span>
+        {['bg-gray-800/60', 'bg-blue-500/20', 'bg-blue-500/40', 'bg-orange-400/50', 'bg-orange-500/70', 'bg-red-500/80'].map((cls, i) => (
+          <div key={i} className={`w-4 h-4 rounded ${cls}`} />
+        ))}
+        <span className="text-[10px] text-gray-600">Mais</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
 const PAGE_SIZE = 100;
 
 export default function RelatoriosPage() {
-  const [period,      setPeriod]      = useState('today');
-  const [activeTab,   setActiveTab]   = useState('demand');
-  const [summary,     setSummary]     = useState(null);
-  const [orders,      setOrders]      = useState([]);
-  const [loadingSum,  setLoadingSum]  = useState(true);
-  const [loadingHist, setLoadingHist] = useState(true);
-  const [expanded,    setExpanded]    = useState(null);
+  const [period,       setPeriod]       = useState('today');
+  const [activeTab,    setActiveTab]    = useState('demand');
+  const [summary,      setSummary]      = useState(null);
+  const [orders,       setOrders]       = useState([]);
+  const [hourlyData,   setHourlyData]   = useState([]);
+  const [heatMetric,   setHeatMetric]   = useState('orders');
+  const [loadingSum,   setLoadingSum]   = useState(true);
+  const [loadingHist,  setLoadingHist]  = useState(true);
+  const [loadingHeat,  setLoadingHeat]  = useState(false);
+  const [expanded,     setExpanded]     = useState(null);
 
   // ── Fetch summary (charts + KPIs) ────────────────────────────
   const fetchSummary = useCallback(async () => {
@@ -267,14 +357,11 @@ export default function RelatoriosPage() {
     try {
       const startDate = (() => {
         const now = new Date();
-        if (period === 'today') {
-          return now.toISOString().slice(0, 10);
-        }
+        if (period === 'today') return now.toISOString().slice(0, 10);
         if (period === 'week') {
           const d = new Date(); d.setDate(d.getDate() - 6);
           return d.toISOString().slice(0, 10);
         }
-        // month
         return `${now.toISOString().slice(0, 7)}-01`;
       })();
       const { data } = await getOrders({ limit: PAGE_SIZE, startDate });
@@ -283,10 +370,28 @@ export default function RelatoriosPage() {
     finally { setLoadingHist(false); }
   }, [period]);
 
+  // ── Fetch hourly heatmap (always last 30 days for full picture) ──
+  const fetchHourly = useCallback(async () => {
+    setLoadingHeat(true);
+    try {
+      const endDate   = new Date().toISOString().slice(0, 10);
+      const startDate = (() => {
+        const d = new Date();
+        if (period === 'today') return d.toISOString().slice(0, 10);
+        if (period === 'week')  { d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); }
+        return `${d.toISOString().slice(0, 7)}-01`;
+      })();
+      const { data } = await getHourlyStats({ startDate, endDate });
+      setHourlyData(data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoadingHeat(false); }
+  }, [period]);
+
   useEffect(() => {
     fetchSummary();
     fetchOrders();
-  }, [fetchSummary, fetchOrders]);
+    fetchHourly();
+  }, [fetchSummary, fetchOrders, fetchHourly]);
 
   // ── Derived data ──────────────────────────────────────────────
 
@@ -370,7 +475,7 @@ export default function RelatoriosPage() {
 
           {/* Refresh */}
           <button
-            onClick={() => { fetchSummary(); fetchOrders(); }}
+            onClick={() => { fetchSummary(); fetchOrders(); fetchHourly(); }}
             className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             title="Atualizar"
           >
@@ -711,6 +816,117 @@ export default function RelatoriosPage() {
                   <span className="text-green-400 font-black">
                     {fmtBRL(orders.filter((o) => ['ready','delivered'].includes(o.status)).reduce((s,o) => s + parseFloat(o.total??0), 0))} faturado
                   </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════════ */}
+          {/* TAB: HORÁRIOS (HEATMAP)                          */}
+          {/* ════════════════════════════════════════════════ */}
+          {activeTab === 'horarios' && (
+            <div className="space-y-4">
+
+              {/* Peak hours summary */}
+              {hourlyData.length > 0 && (() => {
+                const topHour = [...hourlyData].sort((a, b) => b.orders - a.orders)[0];
+                const topRev  = [...hourlyData].sort((a, b) => b.revenue - a.revenue)[0];
+                const totalOrders = hourlyData.reduce((s, d) => s + d.orders, 0);
+                return (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                      <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide">Horário de Pico</p>
+                      <p className="text-2xl font-black text-white mt-1">
+                        {String(topHour.hour).padStart(2,'0')}h
+                      </p>
+                      <p className="text-xs text-blue-300/70 mt-0.5">{topHour.orders} pedidos</p>
+                    </div>
+                    <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4">
+                      <p className="text-xs text-green-400 font-semibold uppercase tracking-wide">Maior Receita</p>
+                      <p className="text-2xl font-black text-white mt-1">
+                        {String(topRev.hour).padStart(2,'0')}h
+                      </p>
+                      <p className="text-xs text-green-300/70 mt-0.5">
+                        {fmtBRL(topRev.revenue)}
+                      </p>
+                    </div>
+                    <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4">
+                      <p className="text-xs text-orange-400 font-semibold uppercase tracking-wide">Total do Período</p>
+                      <p className="text-2xl font-black text-white mt-1">{totalOrders}</p>
+                      <p className="text-xs text-orange-300/70 mt-0.5">pedidos analisados</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Heatmap grid */}
+              <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-sm font-black text-white">🕐 Mapa de Calor por Hora</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Intensidade de pedidos em cada hora do dia no período selecionado
+                    </p>
+                  </div>
+                  {/* Metric toggle */}
+                  <div className="flex gap-1 bg-gray-800/60 rounded-lg p-0.5 border border-white/[0.06]">
+                    {[{ id: 'orders', label: 'Pedidos' }, { id: 'revenue', label: 'Receita' }].map(({ id, label }) => (
+                      <button
+                        key={id}
+                        onClick={() => setHeatMetric(id)}
+                        className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                          heatMetric === id ? 'bg-orange-500 text-white' : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {loadingHeat ? (
+                  <div className="flex justify-center py-12">
+                    <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : (
+                  <HeatmapGrid data={hourlyData} metric={heatMetric} />
+                )}
+              </div>
+
+              {/* Hourly table */}
+              {!loadingHeat && hourlyData.filter((d) => d.orders > 0).length > 0 && (
+                <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/[0.06]">
+                    <h2 className="text-sm font-black text-white">Detalhamento por Hora</h2>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/[0.05]">
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Hora</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Pedidos</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Faturamento</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Ticket Médio</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.03]">
+                        {hourlyData
+                          .filter((d) => d.orders > 0)
+                          .sort((a, b) => b.orders - a.orders)
+                          .map((d) => (
+                            <tr key={d.hour} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="px-4 py-2.5 font-bold text-white tabular-nums">
+                                {String(d.hour).padStart(2,'0')}:00 – {String(d.hour).padStart(2,'0')}:59
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-blue-400 font-semibold tabular-nums">{d.orders}</td>
+                              <td className="px-4 py-2.5 text-right text-green-400 font-semibold tabular-nums">{fmtBRL(d.revenue)}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">{fmtBRL(d.avg_ticket)}</td>
+                            </tr>
+                          ))
+                        }
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>

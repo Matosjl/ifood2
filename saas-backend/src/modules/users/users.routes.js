@@ -15,14 +15,14 @@ router.post('/',
   body('name').trim().notEmpty().withMessage('Nome é obrigatório.'),
   body('email').isEmail().normalizeEmail().withMessage('E-mail inválido.'),
   body('password').isLength({ min: 8 }).withMessage('Senha deve ter pelo menos 8 caracteres.'),
-  body('role').isIn(['manager', 'staff']).withMessage("Role deve ser 'manager' ou 'staff'."),
+  body('role').isIn(['manager', 'staff', 'caixa', 'garcom', 'cozinha']).withMessage("Role inválido."),
   ctrl.create
 );
 
 // Alterar role / ativar/desativar — owner only
 router.patch('/:id',
   authorize('owner'),
-  body('role').optional().isIn(['manager', 'staff']).withMessage("Role inválido."),
+  body('role').optional().isIn(['manager', 'staff', 'caixa', 'garcom', 'cozinha']).withMessage("Role inválido."),
   body('active').optional().isBoolean().withMessage('active deve ser boolean.'),
   ctrl.update
 );

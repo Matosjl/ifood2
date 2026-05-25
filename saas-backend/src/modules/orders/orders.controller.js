@@ -338,4 +338,43 @@ const getCustomerFunnel = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, createCustomer, setPaid, updateItems, updateInfo, getCustomerFunnel };
+/** GET /api/orders/analytics/hourly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD */
+const hourlyStats = asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const data = await service.getHourlyStats(req.user.tenantId, { startDate, endDate });
+  res.json({ success: true, data });
+});
+
+/** PATCH /api/orders/customers — edita nome e/ou telefone de um cliente */
+const updateCustomer = asyncHandler(async (req, res) => {
+  const { clientId, oldPhone, name, phone } = req.body;
+  const tenantId = req.user.tenantId;
+  const db = require('../../config/database');
+
+  if (!name?.trim() && !phone?.trim()) throw new AppError('Informe ao menos nome ou telefone.', 400);
+
+  if (clientId) {
+    // Cliente manual: atualiza tenant_clients
+    const { rows } = await db.query(
+      `UPDATE tenant_clients SET name = COALESCE($2, name), phone = COALESCE($3, phone), updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $4 RETURNING *`,
+      [clientId, name?.trim() || null, phone?.trim() || null, tenantId]
+    );
+    if (!rows[0]) throw new AppError('Cliente não encontrado.', 404);
+  }
+
+  // Atualiza loyalty_customers pelo telefone antigo (se existir)
+  const normOld = (oldPhone ?? '').replace(/\D/g, '');
+  if (normOld) {
+    const normNew = (phone ?? '').replace(/\D/g, '') || normOld;
+    await db.query(
+      `UPDATE loyalty_customers SET name = COALESCE($2, name), phone = COALESCE($3, phone), updated_at = NOW()
+       WHERE tenant_id = $1 AND phone = $4`,
+      [tenantId, name?.trim() || null, normNew || null, normOld]
+    );
+  }
+
+  res.json({ success: true });
+});
+
+module.exports = { list, getOne, create, updateStatus, cancel, transitions, searchCustomers, createCustomer, updateCustomer, setPaid, updateItems, updateInfo, getCustomerFunnel, hourlyStats };

@@ -22,6 +22,13 @@ import PlanWall          from './components/PlanWall';
 import CustomerApp       from './CustomerApp';
 import AdminApp          from './AdminApp';
 import DriverApp         from './pages/DriverApp';
+import GarcomPage        from './pages/GarcomPage';
+import PromocoesPage     from './pages/PromocoesPage';
+import AvaliarPage       from './pages/AvaliarPage';
+import AvaliacoesPage    from './pages/AvaliacoesPage';
+import ReservasPage      from './pages/ReservasPage';
+import MesasPage         from './pages/MesasPage';
+import OfflineBanner     from './components/OfflineBanner';
 
 // ── Routing helper ────────────────────────────────────────────
 const getRoute = () => window.location.pathname;
@@ -90,6 +97,16 @@ export default function App() {
   // ── Driver app (mobile PWA) ───────────────────────────────
   if (route.startsWith('/driver')) return <DriverApp />;
 
+  // ── Garçom app (tablet/mobile) ────────────────────────────
+  if (route.startsWith('/garcom')) {
+    if (!token) { navigate('/entrar'); return null; }
+    return <GarcomPage />;
+  }
+
+  // ── Avaliação pós-pedido (público) ────────────────────────
+  const avaliarMatch = route.match(/^\/avaliar\/([a-f0-9]{64})$/i);
+  if (avaliarMatch) return <AvaliarPage token={avaliarMatch[1]} />;
+
   // ── Admin panel ───────────────────────────────────────────
   if (route.startsWith('/admin')) return <AdminApp />;
 
@@ -134,6 +151,9 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-950 overflow-hidden">
 
+      {/* Offline mode indicator */}
+      <OfflineBanner />
+
       {/* Trial banner — dias restantes */}
       <TrialBanner onShowPlans={handleShowPlans} />
 
@@ -152,6 +172,11 @@ export default function App() {
             <>
               {page === 'orders'     && <DashboardPage />}
               {page === 'kds'        && <KdsPage />}
+              {page === 'mesas'      && <MesasPage />}
+              {page === 'garcom'     && <GarcomPage />}
+              {page === 'promocoes'  && <PromocoesPage />}
+              {page === 'avaliacoes' && <AvaliacoesPage />}
+              {page === 'reservas'   && <ReservasPage />}
               {page === 'products'   && <ProductsPage />}
               {page === 'stock'      && <StockPage />}
               {page === 'financial'  && <FinanceiroPage />}

@@ -22,10 +22,12 @@ const itemRules = [
 // ── Rotas ─────────────────────────────────────────────────────
 // Rota estática (/transitions/:status) declarada ANTES de /:id para não colidir
 
-router.get('/transitions/:status',  ctrl.transitions);
-router.get('/customers/funnel',     ctrl.getCustomerFunnel);
-router.get('/customers',            ctrl.searchCustomers);
+router.get('/transitions/:status',   ctrl.transitions);
+router.get('/analytics/hourly',      ctrl.hourlyStats);
+router.get('/customers/funnel',      ctrl.getCustomerFunnel);
+router.get('/customers',             ctrl.searchCustomers);
 router.post('/customers',           ctrl.createCustomer);
+router.patch('/customers',          ctrl.updateCustomer);
 router.get('/',                     ctrl.list);
 router.post('/',                    checkOrderLimit, itemRules, ctrl.create);
 router.get('/:id',                  ctrl.getOne);

@@ -1,5 +1,20 @@
 import { useMemo } from 'react';
 
+// ── Role definitions ──────────────────────────────────────────
+//
+// roles hierarquia: owner > manager > staff > caixa > garcom > cozinha
+// Se 'roles' não está definido, o item é visível para todos.
+// Se 'roles' está definido, só aparece para os roles listados.
+
+const ROLE_LABEL = {
+  owner:   'Proprietário',
+  manager: 'Gerente',
+  staff:   'Equipe',
+  caixa:   'Caixa',
+  garcom:  'Garçom',
+  cozinha: 'Cozinha',
+};
+
 // ── Nav groups ────────────────────────────────────────────────
 
 const NAV_GROUPS = [
@@ -7,40 +22,45 @@ const NAV_GROUPS = [
     label: 'Operação',
     items: [
       { key: 'orders',   emoji: '🍽️', label: 'Pedidos' },
-      { key: 'kds',      emoji: '👨‍🍳', label: 'KDS Cozinha' },
-      { key: 'entregas', emoji: '🛵', label: 'Entregas' },
+      { key: 'kds',      emoji: '👨‍🍳', label: 'KDS Cozinha',  roles: ['owner','manager','staff','cozinha'] },
+      { key: 'mesas',    emoji: '🪑', label: 'Mesas / QR',   roles: ['owner','manager'] },
+      { key: 'garcom',   emoji: '🧑‍🍳', label: 'App Garçom',   roles: ['owner','manager','staff','garcom'] },
+      { key: 'reservas', emoji: '📅', label: 'Reservas',      roles: ['owner','manager','staff','garcom'] },
+      { key: 'entregas', emoji: '🛵', label: 'Entregas',      roles: ['owner','manager','staff'] },
     ],
   },
   {
     label: 'Catálogo',
     items: [
-      { key: 'products', emoji: '📦', label: 'Produtos' },
-      { key: 'stock',    emoji: '📊', label: 'Estoque' },
-      { key: 'addons',   emoji: '🍟', label: 'Complementos' },
+      { key: 'products', emoji: '📦', label: 'Produtos',      roles: ['owner','manager','staff'] },
+      { key: 'stock',    emoji: '📊', label: 'Estoque',       roles: ['owner','manager','staff'] },
+      { key: 'addons',   emoji: '🍟', label: 'Complementos',  roles: ['owner','manager','staff'] },
     ],
   },
   {
     label: 'Gestão',
     items: [
-      { key: 'financial',  emoji: '💰', label: 'Financeiro' },
-      { key: 'clientes',   emoji: '👥', label: 'Clientes' },
-      { key: 'fidelidade', emoji: '⭐', label: 'Fidelidade' },
-      { key: 'fiado',      emoji: '🤝', label: 'Fiado' },
-      { key: 'relatorios', emoji: '📈', label: 'Relatórios' },
+      { key: 'financial',  emoji: '💰', label: 'Financeiro',  roles: ['owner','manager','caixa'] },
+      { key: 'clientes',   emoji: '👥', label: 'Clientes',    roles: ['owner','manager','staff','caixa'] },
+      { key: 'fidelidade', emoji: '⭐', label: 'Fidelidade',  roles: ['owner','manager'] },
+      { key: 'promocoes',  emoji: '🏷️', label: 'Promoções',  roles: ['owner','manager'] },
+      { key: 'avaliacoes', emoji: '💬', label: 'Avaliações',  roles: ['owner','manager'] },
+      { key: 'fiado',      emoji: '🤝', label: 'Fiado',       roles: ['owner','manager','caixa'] },
+      { key: 'relatorios', emoji: '📈', label: 'Relatórios',  roles: ['owner','manager'] },
     ],
   },
   {
     label: 'Inteligência',
     items: [
-      { key: 'ai',        emoji: '🤖', label: 'IA ZapFome' },
-      { key: 'marketing', emoji: '📣', label: 'Marketing IA', soon: true },
+      { key: 'ai',        emoji: '🤖', label: 'IA ZapFome',  roles: ['owner','manager'] },
+      { key: 'marketing', emoji: '📣', label: 'Marketing IA', soon: true, roles: ['owner','manager'] },
     ],
   },
   {
     label: 'Sistema',
     items: [
-      { key: 'settings', emoji: '⚙️', label: 'Configurações' },
-      { key: 'plans',    emoji: '💎', label: 'Planos', special: 'purple' },
+      { key: 'settings', emoji: '⚙️', label: 'Configurações', roles: ['owner','manager'] },
+      { key: 'plans',    emoji: '💎', label: 'Planos', special: 'purple', roles: ['owner'] },
     ],
   },
 ];
@@ -100,10 +120,20 @@ export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
     catch { return {}; }
   }, []);
 
+  const userRole = user.role ?? 'staff';
+
   const handleNav = (key) => {
     if (key === 'plans') { onShowPlans?.(); return; }
     setPage(key);
   };
+
+  // Filter groups / items based on role
+  const filteredGroups = useMemo(() => {
+    const canSee = (item) => !item.roles || item.roles.includes(userRole);
+    return NAV_GROUPS
+      .map((g) => ({ ...g, items: g.items.filter(canSee) }))
+      .filter((g) => g.items.length > 0);
+  }, [userRole]);
 
   return (
     <aside className="w-14 md:w-56 shrink-0 bg-gray-900 border-r border-white/[0.06] flex flex-col h-full z-10">
@@ -127,7 +157,7 @@ export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
 
       {/* Nav */}
       <nav className="flex-1 py-2 overflow-y-auto">
-        {NAV_GROUPS.map((group) => (
+        {filteredGroups.map((group) => (
           <div key={group.label} className="mb-1">
             {/* Group label */}
             <p className="hidden md:block text-[10px] font-bold text-gray-600 uppercase tracking-widest px-4 pt-3 pb-1 select-none">
@@ -186,7 +216,7 @@ export default function Sidebar({ page, setPage, onLogout, onShowPlans }) {
               {user.name ?? 'Usuário'}
             </p>
             <p className="text-[10px] text-gray-600 truncate capitalize">
-              {user.role ?? 'staff'}
+              {ROLE_LABEL[user.role] ?? user.role ?? 'Equipe'}
             </p>
           </div>
         </div>

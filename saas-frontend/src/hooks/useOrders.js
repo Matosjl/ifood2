@@ -74,7 +74,8 @@ const norm = (o) => ({
   })),
   deliveryFee:  parseFloat(o.deliveryFee ?? o.delivery_fee ?? 0),
   neighborhood: o.neighborhood ?? null,
-  paidAt:    o.paidAt    ?? o.paid_at    ?? null,
+  paidAt:      o.paidAt      ?? o.paid_at      ?? null,
+  tableNumber: o.tableNumber ?? o.table_number ?? null,
   createdAt: o.createdAt ?? o.created_at,
   updatedAt: o.updatedAt ?? o.updated_at,
 });

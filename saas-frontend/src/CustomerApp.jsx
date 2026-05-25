@@ -249,7 +249,7 @@ function ProfileModal({ slug, profile, onSave, onClose, cashbackEnabled }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-black text-gray-900 text-lg">
-                {isNew ? 'Criar Perfil' : (profile.name ?? 'Meu Perfil')}
+                {isNew ? 'Criar Perfil' : 'Editar Perfil'}
               </h3>
               {!isNew && profile.phone && (
                 <p className="text-xs text-gray-400 mt-0.5">{profile.phone}</p>
@@ -698,6 +698,9 @@ function TrackingPage({ order, tenant, onNewOrder, onBackToMenu, onRefresh, slug
 // ── Main Component ─────────────────────────────────────────────
 
 export default function CustomerApp({ slug }) {
+  // Detecta modo mesa via URL param ?mesa=X
+  const tableParam = new URLSearchParams(window.location.search).get('mesa');
+
   const [menuData,    setMenuData]    = useState(null);
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [menuError,   setMenuError]   = useState(null);
@@ -721,7 +724,7 @@ export default function CustomerApp({ slug }) {
   // Checkout form
   const [customerName,    setCustomerName]    = useState('');
   const [customerPhone,   setCustomerPhone]   = useState('');
-  const [deliveryType,    setDeliveryType]    = useState('pickup');
+  const [deliveryType,    setDeliveryType]    = useState(tableParam ? 'local' : 'pickup');
   const [customerAddress, setCustomerAddress] = useState('');
   const [notes,           setNotes]           = useState('');
   const [paymentMethod,   setPaymentMethod]   = useState('cash');
@@ -879,6 +882,7 @@ export default function CustomerApp({ slug }) {
         notes: finalNotes || undefined,
         items,
         useCashback: useCashback && !!loyaltyData,
+        tableNumber: tableParam || undefined,
       });
       const created = data.data ?? data;
       saveOrder(slug, created);
@@ -1073,27 +1077,37 @@ export default function CustomerApp({ slug }) {
             </div>
           </div>
 
-          {/* Delivery type */}
-          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Como quer receber?</p>
-            </div>
-            <div className="px-4 py-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                {[{ v: 'pickup', icon: '🏪', label: 'Retirar no Local' }, { v: 'delivery', icon: '🛵', label: 'Receber em Casa' }].map(({ v, icon, label }) => (
-                  <button key={v} onClick={() => setDeliveryType(v)}
-                    className={`flex flex-col items-center gap-1.5 py-4 rounded-xl font-bold text-sm border-2 transition-all ${deliveryType === v ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-                    <span className="text-2xl">{icon}</span>{label}
-                  </button>
-                ))}
+          {/* Delivery type — oculto em modo mesa */}
+          {tableParam ? (
+            <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3 flex items-center gap-3">
+              <span className="text-2xl">🪑</span>
+              <div>
+                <p className="text-sm font-black text-orange-700">Mesa {tableParam}</p>
+                <p className="text-xs text-orange-500">Consumo no local — sem entrega</p>
               </div>
-              {deliveryType === 'delivery' && (
-                <input type="text" placeholder="Endereço completo de entrega *"
-                  value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
-              )}
             </div>
-          </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Como quer receber?</p>
+              </div>
+              <div className="px-4 py-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ v: 'pickup', icon: '🏪', label: 'Retirar no Local' }, { v: 'delivery', icon: '🛵', label: 'Receber em Casa' }].map(({ v, icon, label }) => (
+                    <button key={v} onClick={() => setDeliveryType(v)}
+                      className={`flex flex-col items-center gap-1.5 py-4 rounded-xl font-bold text-sm border-2 transition-all ${deliveryType === v ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                      <span className="text-2xl">{icon}</span>{label}
+                    </button>
+                  ))}
+                </div>
+                {deliveryType === 'delivery' && (
+                  <input type="text" placeholder="Endereço completo de entrega *"
+                    value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Payment method */}
           <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
@@ -1219,6 +1233,13 @@ export default function CustomerApp({ slug }) {
             </div>
 
             <div className="flex flex-col items-end gap-2 shrink-0">
+              {/* Badge mesa */}
+              {tableParam && (
+                <div className="flex items-center gap-1.5 bg-orange-500 border border-orange-400/50 rounded-2xl px-3 py-2">
+                  <span className="text-base leading-none">🪑</span>
+                  <span className="text-xs font-black leading-none">Mesa {tableParam}</span>
+                </div>
+              )}
               {/* Ícone de perfil */}
               <button onClick={() => setShowProfile(true)}
                 className={`flex items-center gap-1.5 backdrop-blur border rounded-2xl px-3 py-2 hover:bg-white/30 transition-colors ${profile ? 'bg-white/20 border-white/30' : 'bg-orange-600/80 border-orange-400/50'}`}>
@@ -1226,6 +1247,11 @@ export default function CustomerApp({ slug }) {
                 <span className="text-xs font-bold leading-none">
                   {profile ? profile.name.split(' ')[0] : 'Perfil'}
                 </span>
+                {profile && (
+                  <svg className="w-3 h-3 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                )}
               </button>
 
             </div>

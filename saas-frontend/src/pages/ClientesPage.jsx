@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchCustomers, createCustomer, getCustomerFunnel } from '../api/orders';
+import { searchCustomers, createCustomer, getCustomerFunnel, updateCustomer } from '../api/orders';
 import { listCampaigns, previewCampaign, createCampaign, sendCampaign, createLead, importLeads, listCRMCustomers, getCRMCustomer, updateCRMCustomer } from '../api/users';
 import { Map, MapMarker, MarkerContent, MapControls } from '../components/ui/map';
 
@@ -301,7 +301,13 @@ function AddClientModal({ onClose, onSaved }) {
 
 // ── Painel de detalhes do cliente ─────────────────────────────
 
-function CustomerDetail({ customer, onClose }) {
+function CustomerDetail({ customer, onClose, onUpdated }) {
+  const [editing,   setEditing]   = useState(false);
+  const [editName,  setEditName]  = useState(customer.name ?? '');
+  const [editPhone, setEditPhone] = useState(customer.phone ?? '');
+  const [saving,    setSaving]    = useState(false);
+  const [editErr,   setEditErr]   = useState('');
+
   const ini  = initials(customer.name);
   const col  = avatarColor(customer.name);
   const avg  = customer.order_count > 0
@@ -310,6 +316,23 @@ function CustomerDetail({ customer, onClose }) {
   const isVip    = (customer.order_count ?? 0) >= 10;
   const isRecent = customer.last_order_date && (Date.now() - new Date(customer.last_order_date)) < 7 * 86400e3;
   const isManual = !customer.last_order_date && customer.client_id;
+
+  const handleSaveEdit = async () => {
+    if (!editName.trim()) { setEditErr('Nome é obrigatório.'); return; }
+    setSaving(true); setEditErr('');
+    try {
+      await updateCustomer({
+        clientId: customer.client_id ?? undefined,
+        oldPhone: customer.phone ?? undefined,
+        name: editName.trim(),
+        phone: editPhone.trim() || undefined,
+      });
+      setEditing(false);
+      onUpdated?.();
+    } catch (err) {
+      setEditErr(err.response?.data?.message ?? 'Erro ao salvar.');
+    } finally { setSaving(false); }
+  };
 
   return (
     <motion.div
@@ -322,12 +345,54 @@ function CustomerDetail({ customer, onClose }) {
       {/* Header */}
       <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
         <p className="text-sm font-black text-white">Detalhes</p>
-        <button onClick={onClose} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setEditing(v => !v); setEditErr(''); setEditName(customer.name ?? ''); setEditPhone(customer.phone ?? ''); }}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
+            title="Editar cliente"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Edit form */}
+      <AnimatePresence>
+        {editing && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden border-b border-white/[0.06]"
+          >
+            <div className="px-5 py-4 flex flex-col gap-3">
+              <p className="text-xs font-bold text-orange-400 uppercase tracking-widest">Editar Cliente</p>
+              <div>
+                <label className="text-[11px] text-gray-500 font-semibold mb-1 block">Nome</label>
+                <input value={editName} onChange={e => setEditName(e.target.value)} className="input w-full text-sm" placeholder="Nome completo" />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-500 font-semibold mb-1 block">Telefone</label>
+                <input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="input w-full text-sm" placeholder="(51) 99999-9999" />
+              </div>
+              {editErr && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{editErr}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => setEditing(false)} className="flex-1 py-2 rounded-xl border border-white/10 text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancelar</button>
+                <button onClick={handleSaveEdit} disabled={saving} className="flex-1 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold transition-colors disabled:opacity-50">
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Avatar + name */}
       <div className="px-5 py-5 flex flex-col items-center text-center gap-3 border-b border-white/[0.06]">
@@ -607,6 +672,7 @@ function TabTodos() {
               <CustomerDetail
                 customer={selected}
                 onClose={() => setSelected(null)}
+                onUpdated={() => { loadCustomers(search); setSelected(null); }}
               />
             )}
           </AnimatePresence>

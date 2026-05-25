@@ -25,6 +25,9 @@ export const createCustomer = (payload) =>
 export const getCustomerFunnel = () =>
   api.get('/orders/customers/funnel');
 
+export const updateCustomer = (payload) =>
+  api.patch('/orders/customers', payload);
+
 /** Registra pagamento de um pedido (paid_at + payment_method). */
 export const markOrderPaid = (id, paymentMethod) =>
   api.patch(`/orders/${id}/paid`, { paymentMethod });
@@ -45,6 +48,9 @@ export const editOrderItems = (id, items) =>
  */
 export const updateOrderInfo = (id, payload) =>
   api.patch(`/orders/${id}/info`, payload);
+
+export const getHourlyStats = (params) =>
+  api.get('/orders/analytics/hourly', { params });
 
 export const login = (email, password) =>
   api.post('/auth/login', { email, password });

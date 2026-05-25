@@ -151,7 +151,7 @@ const createOrder = async (tenantId, {
   customerName, customerPhone, customerAddress,
   channel = 'manual', notes, items, deliveryType = 'pickup', paymentMethod = 'cash',
   deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey,
-  loyaltyCustomerId = null, cashbackUsed = 0,
+  loyaltyCustomerId = null, cashbackUsed = 0, tableNumber = null,
 }) => {
   if (!items?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
 
@@ -227,6 +227,7 @@ const createOrder = async (tenantId, {
       initialStatus, idempotencyKey,
       loyaltyCustomerId: loyaltyCustomerId || null,
       cashbackUsed: parseFloat(cashbackUsed) || 0,
+      tableNumber: tableNumber || null,
     }, client);
 
     for (const item of resolvedItems) {
@@ -400,6 +401,22 @@ const updateStatus = async (id, tenantId, status) => {
   // When an order is ready for delivery, notify connected drivers
   if (status === 'ready' && updatedOrder?.delivery_type === 'delivery') {
     eventService.newDeliveryAvailable(tenantId, updatedOrder).catch(() => {});
+  }
+
+  // When delivered: create rating token + send WhatsApp (fire-and-forget)
+  if (status === 'delivered') {
+    const ratingSvc = require('../ratings/ratings.service');
+    ratingSvc.createRatingRequest(tenantId, id).then(async (token) => {
+      if (!token) return;
+      // Send WhatsApp if customer has phone
+      const phone = updatedOrder?.customer_phone;
+      if (!phone) return;
+      const baseUrl = process.env.FRONTEND_URL ?? 'https://zapfome.ddns.net';
+      const url = `${baseUrl}/avaliar/${token}`;
+      const msg = `Olá${updatedOrder.customer_name ? ` ${updatedOrder.customer_name}` : ''}! 😊 Como foi seu pedido #${updatedOrder.order_number ?? ''}? Avalie em 5 segundos: ${url}`;
+      const { sendMessage } = require('../../services/whatsapp.service');
+      sendMessage(tenantId, phone, msg).catch(() => {});
+    }).catch(() => {});
   }
 
   return updatedOrder;
@@ -632,4 +649,38 @@ const updateOrderInfo = async (id, tenantId, {
   return Order.findById(id, tenantId);
 };
 
-module.exports = { listOrders, getOrder, createOrder, createExternalOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems, updateOrderInfo };
+/**
+ * Retorna pedidos agrupados por hora do dia (0-23) para um período.
+ * Usado no heatmap de relatórios.
+ */
+const getHourlyStats = async (tenantId, { startDate, endDate } = {}) => {
+  const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const end   = endDate   || new Date().toISOString().slice(0, 10);
+
+  const { rows } = await db.query(
+    `SELECT
+       EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo')::int AS hour,
+       COUNT(*)::int                                                         AS orders,
+       COALESCE(SUM(total), 0)::numeric                                      AS revenue,
+       ROUND(AVG(total)::numeric, 2)                                         AS avg_ticket
+     FROM orders
+     WHERE tenant_id = $1
+       AND status NOT IN ('cancelled')
+       AND created_at >= ($2::date)
+       AND created_at <  ($3::date + INTERVAL '1 day')
+     GROUP BY hour
+     ORDER BY hour ASC`,
+    [tenantId, start, end]
+  );
+
+  // Fill all 24 hours (0-23) even if no data
+  const map = Object.fromEntries(rows.map((r) => [r.hour, r]));
+  return Array.from({ length: 24 }, (_, h) => ({
+    hour:       h,
+    orders:     map[h]?.orders  ?? 0,
+    revenue:    parseFloat(map[h]?.revenue  ?? 0),
+    avg_ticket: parseFloat(map[h]?.avg_ticket ?? 0),
+  }));
+};
+
+module.exports = { listOrders, getOrder, createOrder, createExternalOrder, updateStatus, cancelOrder, markAsPaid, editOrderItems, updateOrderInfo, getHourlyStats };

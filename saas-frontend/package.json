@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:sandbox": "vite --mode sandbox --port 5174"
   },
   "dependencies": {
     "@sentry/react": "^10.53.1",
     "axios": "^1.7.2",
     "framer-motion": "^12.38.0",
     "maplibre-gl": "^5.24.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io-client": "^4.7.5",

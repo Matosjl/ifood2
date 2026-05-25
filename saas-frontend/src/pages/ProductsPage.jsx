@@ -6,6 +6,7 @@ import {
   createVarOption, updateVarOption, deleteVarOption,
 } from '../api/products';
 import { uploadProductImage } from '../api/products_upload';
+import { listInsumos, getProductInsumos, setProductInsumos } from '../api/insumos';
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtPct = (n) => (n != null && n !== '' ? `${parseFloat(n).toFixed(1)}%` : '—');
@@ -167,6 +168,162 @@ function VariationManager({ productId }) {
           {addingGrp ? '...' : '+ Grupo'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Ficha Técnica manager (recipe = product → insumos links)
+// ─────────────────────────────────────────────────────────────
+
+function FichaTecnicaManager({ productId }) {
+  const [allInsumos,  setAllInsumos]  = useState([]);
+  const [recipe,      setRecipe]      = useState([]);   // [{insumo_id, name, unit, qty_per_unit}]
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [addId,       setAddId]       = useState('');
+  const [addQty,      setAddQty]      = useState('');
+  const [dirty,       setDirty]       = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [insRes, recRes] = await Promise.all([
+        listInsumos(),
+        getProductInsumos(productId),
+      ]);
+      setAllInsumos(insRes.data.data ?? []);
+      setRecipe(recRes.data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoading(false); }
+  }, [productId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleAdd = () => {
+    if (!addId || !addQty || parseFloat(addQty) <= 0) return;
+    const ins = allInsumos.find((i) => i.id === addId);
+    if (!ins) return;
+    if (recipe.some((r) => r.insumo_id === addId)) return; // already added
+    setRecipe((prev) => [...prev, { insumo_id: addId, name: ins.name, unit: ins.unit, qty_per_unit: parseFloat(addQty) }]);
+    setAddId('');
+    setAddQty('');
+    setDirty(true);
+  };
+
+  const handleRemove = (insumoId) => {
+    setRecipe((prev) => prev.filter((r) => r.insumo_id !== insumoId));
+    setDirty(true);
+  };
+
+  const handleQtyChange = (insumoId, val) => {
+    setRecipe((prev) => prev.map((r) => r.insumo_id === insumoId ? { ...r, qty_per_unit: val } : r));
+    setDirty(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await setProductInsumos(productId, recipe.map((r) => ({
+        insumo_id:    r.insumo_id,
+        qty_per_unit: parseFloat(r.qty_per_unit) || 1,
+      })));
+      setDirty(false);
+    } catch { /* non-fatal */ }
+    finally { setSaving(false); }
+  };
+
+  // Insumos not yet in recipe
+  const available = allInsumos.filter((i) => !recipe.some((r) => r.insumo_id === i.id));
+
+  if (loading) return (
+    <div className="flex justify-center py-6">
+      <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        Defina os ingredientes consumidos por unidade deste produto.
+        O estoque é deduzido automaticamente quando o pedido é confirmado.
+      </p>
+
+      {allInsumos.length === 0 ? (
+        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-3 py-2.5 text-xs text-yellow-300">
+          Nenhum insumo cadastrado. Acesse <strong>Estoque → Insumos</strong> para adicionar ingredientes.
+        </div>
+      ) : (
+        <>
+          {/* Recipe list */}
+          {recipe.length > 0 && (
+            <div className="space-y-1.5">
+              {recipe.map((r) => (
+                <div key={r.insumo_id} className="flex items-center gap-2 bg-gray-800/40 rounded-xl px-3 py-2 border border-white/[0.06]">
+                  <span className="flex-1 text-sm text-gray-200 truncate">{r.name}</span>
+                  <span className="text-xs text-gray-500 shrink-0">{r.unit}</span>
+                  <input
+                    type="number" min="0.001" step="0.1"
+                    value={r.qty_per_unit}
+                    onChange={(e) => handleQtyChange(r.insumo_id, e.target.value)}
+                    className="input w-20 text-xs py-1 text-right tabular-nums"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(r.insumo_id)}
+                    className="text-gray-600 hover:text-red-400 transition-colors text-sm shrink-0 ml-1"
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add ingredient row */}
+          {available.length > 0 && (
+            <div className="flex gap-2">
+              <select
+                value={addId}
+                onChange={(e) => setAddId(e.target.value)}
+                className="input flex-1 text-sm"
+              >
+                <option value="">Selecionar ingrediente…</option>
+                {available.map((i) => (
+                  <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>
+                ))}
+              </select>
+              <input
+                type="number" min="0.001" step="0.1" placeholder="Qtd"
+                value={addQty}
+                onChange={(e) => setAddQty(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
+                className="input w-20 text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={!addId || !addQty}
+                className="px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-sm font-bold disabled:opacity-40 transition-colors shrink-0"
+              >+</button>
+            </div>
+          )}
+
+          {/* Save button */}
+          {dirty && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white text-sm font-bold disabled:opacity-50 transition-colors"
+            >
+              {saving ? 'Salvando…' : '💾 Salvar Ficha Técnica'}
+            </button>
+          )}
+
+          {!dirty && recipe.length > 0 && (
+            <p className="text-xs text-green-500 text-center">✓ Ficha técnica salva</p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -464,6 +621,14 @@ function ProductModal({ product, categories, onClose, onSaved }) {
             <div className="pt-4 border-t border-white/[0.06]">
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🎛️ Variações</p>
               <VariationManager productId={product.id} />
+            </div>
+          )}
+
+          {/* Ficha Técnica — somente na edição */}
+          {isEdit && (
+            <div className="pt-4 border-t border-white/[0.06]">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🧪 Ficha Técnica (Ingredientes)</p>
+              <FichaTecnicaManager productId={product.id} />
             </div>
           )}
 

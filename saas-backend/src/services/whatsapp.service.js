@@ -97,4 +97,36 @@ async function disconnectInstance(tenantId) {
   );
 }
 
-module.exports = { connectInstance, getStatus, disconnectInstance, instanceName };
+/**
+ * Envia mensagem de texto para um número via Evolution API.
+ * Busca a instância do tenant pelo phone (último tenant que enviou mensagem de rating).
+ * Para mensagens de rating usamos um helper direto com tenantId.
+ */
+async function sendMessageForTenant(tenantId, toPhone, text) {
+  const { rows } = await db.query(
+    `SELECT whatsapp_instance FROM tenants WHERE id = $1`,
+    [tenantId]
+  );
+  const instance = rows[0]?.whatsapp_instance;
+  if (!instance) return null;
+
+  // Normaliza número: remove não-dígitos, adiciona 55 se necessário
+  let number = (toPhone ?? '').replace(/\D/g, '');
+  if (!number.startsWith('55')) number = '55' + number;
+
+  await evo().post(`/message/sendText/${instance}`, {
+    number,
+    text,
+  });
+  return true;
+}
+
+/**
+ * Compat alias used by ratings service.
+ * Signature: sendMessage(tenantId, phone, text)
+ */
+async function sendMessage(tenantId, phone, text) {
+  return sendMessageForTenant(tenantId, phone, text);
+}
+
+module.exports = { connectInstance, getStatus, disconnectInstance, instanceName, sendMessageForTenant, sendMessage };

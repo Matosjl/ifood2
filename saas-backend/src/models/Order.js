@@ -139,15 +139,15 @@ class Order {
     { tenantId, orderNumber, customerName, customerPhone, customerAddress,
       channel, total, notes, deliveryType = 'pickup', paymentMethod = 'cash',
       deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey = null,
-      loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0 },
+      loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0, tableNumber = null },
     dbClient = db
   ) {
     const { rows } = await dbClient.query(
       `INSERT INTO orders
          (tenant_id, order_number, customer_name, customer_phone, customer_address,
           channel, total, notes, delivery_type, payment_method, delivery_fee, neighborhood, status, idempotency_key,
-          loyalty_customer_id, cashback_earned, cashback_used)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          loyalty_customer_id, cashback_earned, cashback_used, table_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING *`,
       [tenantId, orderNumber, customerName || null, customerPhone || null,
        customerAddress || null, channel || 'manual', total, notes || null,
@@ -155,7 +155,8 @@ class Order {
        neighborhood || null, initialStatus, idempotencyKey,
        loyaltyCustomerId || null,
        parseFloat(cashbackEarned) || 0,
-       parseFloat(cashbackUsed)   || 0]
+       parseFloat(cashbackUsed)   || 0,
+       tableNumber || null]
     );
     return rows[0];
   }
