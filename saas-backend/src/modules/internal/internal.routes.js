@@ -33,7 +33,8 @@ router.post('/whatsapp/send-media', ctrl.sendWhatsAppMedia);
 router.post('/leads', ctrl.upsertLead);
 
 // Receipts (OCR de notas fiscais via WhatsApp) — chamado pela VPS2
-router.post('/receipts/ingest',       ctrl.ingestReceipt);
-router.post('/receipts/handle-reply', ctrl.handleReceiptReply);
+router.post('/receipts/ingest',            ctrl.ingestReceipt);
+router.post('/receipts/ingest-processed',  ctrl.ingestProcessedReceipt);  // VPS2 ocr.worker envia resultado pré-processado
+router.post('/receipts/handle-reply',      ctrl.handleReceiptReply);
 
 module.exports = router;

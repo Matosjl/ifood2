@@ -489,6 +489,72 @@ const handleReceiptReply = asyncHandler(async (req, res) => {
   return res.json({ success: true, data: { handled: true, action, pending: { id: pending.id, short_code: pending.short_code } } });
 });
 
+/**
+ * POST /api/internal/receipts/ingest-processed
+ * Chamado pelo VPS2 OCR worker APÓS já ter processado a nota.
+ * Não re-faz OCR — apenas salva o resultado já estruturado em pending_receipts
+ * e envia preview WhatsApp.
+ *
+ * Body: {
+ *   senderPhone,
+ *   evolutionInstance,
+ *   ocrResult: { supplier, invoiceDate, totalValue, confidence, items: [{name,qty,unit,unitPrice,total}] }
+ * }
+ */
+const ingestProcessedReceipt = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { senderPhone, evolutionInstance, ocrResult } = req.body;
+  if (!senderPhone)  throw new AppError('senderPhone obrigatório', 400);
+  if (!ocrResult)    throw new AppError('ocrResult obrigatório', 400);
+
+  const phone = senderPhone.replace(/\D/g, '');
+
+  // Traduz formato VPS2 → formato raw_extraction do pending_receipts
+  const rawExtraction = {
+    fornecedor:     ocrResult.supplier   || null,
+    cnpj:           ocrResult.cnpj       || null,
+    data_emissao:   ocrResult.invoiceDate || null,
+    total:          parseFloat(ocrResult.totalValue || 0),
+    confianca:      parseFloat(ocrResult.confidence || 0),
+    categoria_sugerida: 'food_supplier',
+    itens: (ocrResult.items || []).map((it) => ({
+      descricao:   it.name,
+      quantidade:  parseFloat(it.qty || 1),
+      unidade:     it.unit || 'un',
+      valor_unit:  parseFloat(it.unitPrice || 0),
+      valor_total: parseFloat(it.total || 0),
+    })),
+  };
+
+  // Roda matcher nos itens
+  const { matchAll } = require('../financeiro/matcher.service');
+  const matchedItems = await matchAll(req.tenantId, rawExtraction.itens);
+
+  // Gera short_code único
+  const shortCode = Math.random().toString(36).slice(2, 5).toUpperCase();
+
+  // Insere pending_receipts
+  const db = require('../../config/database');
+  const { rows } = await db.query(
+    `INSERT INTO pending_receipts
+       (tenant_id, sender_phone, source, raw_extraction, matched_items, status, short_code)
+     VALUES ($1, $2, 'whatsapp', $3, $4, 'awaiting_confirmation', $5)
+     RETURNING *`,
+    [req.tenantId, phone, JSON.stringify(rawExtraction), JSON.stringify(matchedItems), shortCode]
+  );
+  const pending = rows[0];
+
+  // Emite socket
+  const eventService = require('../../socket/eventService');
+  try { eventService.emit(req.tenantId, 'receipt:created', { ...pending, image_bytes: undefined }); } catch {}
+
+  // Envia preview WA
+  try { await waNotify.sendReceiptPreview(req.tenantId, senderPhone, pending); } catch {}
+
+  const { image_bytes, ...safe } = pending;
+  res.status(201).json({ success: true, data: safe });
+});
+
 module.exports = {
   getTenant, getAllTenants, getSuperStats,
   getProducts, getOrdersSummary,
@@ -496,5 +562,5 @@ module.exports = {
   getStock, bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
   getOrdersByPhone, createOrderFromWhatsApp,
   upsertLead,
-  ingestReceipt, handleReceiptReply,
+  ingestReceipt, handleReceiptReply, ingestProcessedReceipt,
 };
