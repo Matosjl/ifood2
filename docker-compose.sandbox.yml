@@ -1,0 +1,100 @@
+# =============================================================
+# SaaS Restaurant — SANDBOX (caixinha local) Docker Compose
+# =============================================================
+# Ambiente totalmente isolado da VPS. Portas e volumes separados.
+# Backend e frontend rodam fora do Docker (npm run dev) apontando
+# pra essas portas via .env.sandbox.
+#
+# Uso:
+#   docker compose -f docker-compose.sandbox.yml up -d
+#   (depois) cd saas-backend && npm run dev:sandbox
+#   (depois) cd saas-frontend && npm run dev:sandbox
+#
+# Derrubar:
+#   docker compose -f docker-compose.sandbox.yml down
+#
+# Wipe completo (apaga DB):
+#   docker compose -f docker-compose.sandbox.yml down -v
+# =============================================================
+
+name: zapfome-sandbox
+
+services:
+
+  # ── PostgreSQL sandbox (porta 5433) ─────────────────────────
+  postgres-sandbox:
+    image: postgres:16-alpine
+    container_name: zapfome_postgres_sandbox
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB:       zapfome_sandbox
+      POSTGRES_USER:     zapfome
+      POSTGRES_PASSWORD: sandbox
+    volumes:
+      - postgres_sandbox_data:/var/lib/postgresql/data
+      # Schema aplicado automaticamente no primeiro boot (volume vazio)
+      - ./saas-backend/src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Redis sandbox (porta 6380) ──────────────────────────────
+  redis-sandbox:
+    image: redis:7-alpine
+    container_name: zapfome_redis_sandbox
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_sandbox_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Evolution API sandbox (porta 8081) — OPCIONAL ───────────
+  # Comentado por padrão. Descomente se quiser uma instância
+  # Evolution dedicada à caixinha (usar com chip de teste).
+  # Caso prefira mockar o webhook, deixe comentado.
+  #
+  # evolution-sandbox:
+  #   image: atendai/evolution-api:v2.1.1
+  #   container_name: zapfome_evolution_sandbox
+  #   ports:
+  #     - "8081:8080"
+  #   environment:
+  #     AUTHENTICATION_API_KEY: sandbox-evolution-key-troque-isto
+  #     DATABASE_ENABLED: "true"
+  #     DATABASE_PROVIDER: postgresql
+  #     DATABASE_CONNECTION_URI: "postgresql://zapfome:sandbox@postgres-sandbox:5432/evolution_sandbox?schema=public"
+  #     CACHE_REDIS_ENABLED: "true"
+  #     CACHE_REDIS_URI: "redis://redis-sandbox:6379/0"
+  #     CACHE_REDIS_PREFIX_KEY: evolution_sandbox
+  #     WEBHOOK_GLOBAL_URL: "http://host.docker.internal:3010/webhook/evolution"
+  #     WEBHOOK_GLOBAL_ENABLED: "true"
+  #     WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+  #   volumes:
+  #     - evolution_sandbox_data:/evolution/instances
+  #   depends_on:
+  #     postgres-sandbox:
+  #       condition: service_healthy
+  #     redis-sandbox:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+# ── Volumes isolados (não compartilham com docker-compose.yml) ─
+volumes:
+  postgres_sandbox_data:
+  redis_sandbox_data:
+  # evolution_sandbox_data:
+
+# ── Rede isolada ──────────────────────────────────────────────
+networks:
+  default:
+    name: zapfome_sandbox_network

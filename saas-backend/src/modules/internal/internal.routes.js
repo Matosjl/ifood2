@@ -13,6 +13,7 @@ router.get('/super/stats',         ctrl.getSuperStats);
 
 // Products / Stock
 router.get('/products',            ctrl.getProducts);
+router.get('/stock',               ctrl.getStock);
 router.post('/stock/bulk-update',  ctrl.bulkUpdateStock);
 
 // Orders
@@ -30,5 +31,9 @@ router.post('/whatsapp/send-media', ctrl.sendWhatsAppMedia);
 
 // Leads CRM — chamado pelo chatbot VPS2 quando nova conversa inicia
 router.post('/leads', ctrl.upsertLead);
+
+// Receipts (OCR de notas fiscais via WhatsApp) — chamado pela VPS2
+router.post('/receipts/ingest',       ctrl.ingestReceipt);
+router.post('/receipts/handle-reply', ctrl.handleReceiptReply);
 
 module.exports = router;

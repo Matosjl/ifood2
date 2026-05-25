@@ -33,7 +33,8 @@ const driverRoutes   = require('./modules/driver/driver.routes');
 const internalRoutes = require('./modules/internal/internal.routes');
 const aiRoutes       = require('./modules/ai/ai.routes');
 const addonsRoutes   = require('./modules/addons/addons.routes');
-const insumosRoutes  = require('./modules/insumos/insumos.routes');
+const insumosRoutes    = require('./modules/insumos/insumos.routes');
+const locationsRoutes  = require('./modules/locations/locations.routes');
 const couponsRoutes    = require('./modules/coupons/coupons.routes');
 const tablesRoutes     = require('./modules/tables/tables.routes');
 const campaignsRoutes  = require('./modules/campaigns/campaigns.routes');
@@ -114,6 +115,7 @@ app.use('/api/products',   productRoutes);
 app.use('/api/orders',     orderRoutes);
 app.use('/api/tenant',     tenantRoutes);
 app.use('/api/financeiro', financeiroRoutes);
+app.use('/api/financeiro/receipts', require('./modules/financeiro/receipts.routes'));
 app.use('/api/caixa',     caixaRoutes);
 app.use('/api/users',      usersRoutes);
 app.use('/api/admin',      adminRoutes);
@@ -130,6 +132,11 @@ app.use('/api/tables',     tablesRoutes);
 app.use('/api/campaigns',  campaignsRoutes);
 app.use('/api/nfce',           require('./modules/nfce/nfce.routes'));
 app.use('/api/integrations',   require('./modules/integrations/integrations.routes'));
+app.use('/api/pix',            require('./modules/pix/pix.routes'));
+app.use('/api/promotions',     require('./modules/promotions/promotions.routes'));
+app.use('/api/ratings',        require('./modules/ratings/ratings.routes'));
+app.use('/api/reservations',   require('./modules/reservations/reservations.routes'));
+app.use('/api/locations',      locationsRoutes);
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

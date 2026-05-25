@@ -671,3 +671,123 @@ CREATE TABLE IF NOT EXISTS caixa_movements (
 );
 CREATE INDEX IF NOT EXISTS idx_caixa_movements_register ON caixa_movements(cash_register_id);
 CREATE INDEX IF NOT EXISTS idx_caixa_movements_tenant   ON caixa_movements(tenant_id);
+
+-- ── PIX / OPENPIX ─────────────────────────────────────────────
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pix_openpix_app_id VARCHAR(200) DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS pix_charge_id      VARCHAR(200) DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS pix_qr_code        TEXT         DEFAULT NULL;
+-- pix_qr_code: base64 PNG data URI or URL from OpenPix
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS pix_br_code        TEXT         DEFAULT NULL;
+-- pix_br_code: copy-paste PIX code (Pix Copia e Cola)
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS pix_link           TEXT         DEFAULT NULL;
+ALTER TABLE orders  ADD COLUMN IF NOT EXISTS pix_paid_at        TIMESTAMPTZ  DEFAULT NULL;
+-- pix_paid_at: set when OpenPix webhook confirms payment
+
+-- ── PROMOÇÕES AUTOMÁTICAS ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS promotions (
+  id             UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id      UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name           VARCHAR(200) NOT NULL,
+  type           VARCHAR(30)  NOT NULL,
+  -- type: 'happy_hour' | 'product_discount' | 'category_discount'
+  discount_type  VARCHAR(10)  NOT NULL DEFAULT 'percent',
+  -- discount_type: 'percent' | 'fixed'
+  discount_value NUMERIC(5,2) NOT NULL DEFAULT 10,
+  conditions     JSONB        NOT NULL DEFAULT '{}',
+  -- happy_hour: { days: [0-6], start_time: 'HH:MM', end_time: 'HH:MM' }
+  -- product_discount: { product_ids: [...] }
+  -- category_discount: { category_ids: [...] }
+  active         BOOLEAN      NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_promotions_tenant ON promotions(tenant_id, active);
+
+-- ── RESERVAS DE MESA ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS reservations (
+  id           UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id    UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_name VARCHAR(200) NOT NULL,
+  phone        VARCHAR(50),
+  reserved_at  TIMESTAMPTZ NOT NULL,
+  -- date + time of the reservation
+  party_size   SMALLINT    NOT NULL DEFAULT 2,
+  table_id     UUID        REFERENCES restaurant_tables(id) ON DELETE SET NULL,
+  notes        TEXT,
+  status       VARCHAR(20) NOT NULL DEFAULT 'pending',
+  -- status: 'pending' | 'confirmed' | 'seated' | 'cancelled' | 'no_show'
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_reservations_tenant ON reservations(tenant_id, reserved_at);
+CREATE INDEX IF NOT EXISTS idx_reservations_status ON reservations(tenant_id, status);
+
+-- ── AVALIAÇÕES PÓS-PEDIDO (token de acesso público) ──────────
+ALTER TABLE order_ratings ADD COLUMN IF NOT EXISTS token      VARCHAR(64)  UNIQUE;
+ALTER TABLE order_ratings ADD COLUMN IF NOT EXISTS rating_url TEXT;
+-- token: UUID gerado para o link público /avaliar/:token
+-- rating_url: link enviado ao cliente via WhatsApp
+
+-- ── MULTI-LOJA (filiais / pontos de venda) ────────────────────
+CREATE TABLE IF NOT EXISTS locations (
+  id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id    UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name         VARCHAR(200) NOT NULL,
+  address      TEXT,
+  phone        VARCHAR(50),
+  active       BOOLEAN      NOT NULL DEFAULT true,
+  is_default   BOOLEAN      NOT NULL DEFAULT false,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_locations_tenant ON locations(tenant_id);
+-- Garante apenas 1 default por tenant
+CREATE UNIQUE INDEX IF NOT EXISTS idx_locations_default
+  ON locations(tenant_id) WHERE is_default = true;
+
+-- Permite vincular pedido a uma filial (opcional)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS location_id UUID REFERENCES locations(id) ON DELETE SET NULL;
+
+-- ── PENDING RECEIPTS (notas fiscais aguardando confirmação humana) ──
+-- Pipeline: foto via WhatsApp/upload → IA extrai → grava aqui → usuário
+-- confirma no WA ou na UI → vira expense + stock_movements.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE TABLE IF NOT EXISTS pending_receipts (
+  id              UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id       UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  sender_phone    VARCHAR(50),                          -- número que enviou (NULL se upload web)
+  source          VARCHAR(20)  NOT NULL DEFAULT 'whatsapp',
+  -- source: 'whatsapp' | 'upload' | 'email'
+  image_url       TEXT,                                 -- URL da mídia no Evolution (se aplicável)
+  image_bytes     BYTEA,                                -- backup local da imagem
+  raw_extraction  JSONB        NOT NULL DEFAULT '{}',   -- saída crua da IA
+  -- raw_extraction shape:
+  -- { fornecedor, cnpj, data_emissao, total, itens: [{descricao, quantidade, unidade, valor_unit, valor_total}], confianca, categoria_sugerida }
+  matched_items   JSONB        NOT NULL DEFAULT '[]',   -- itens casados com insumos/products
+  -- matched_items shape:
+  -- [{raw, match_type: 'insumo'|'product'|'none', match_id, match_name, score, action: 'auto'|'ask'|'create_new'}]
+  status          VARCHAR(30)  NOT NULL DEFAULT 'awaiting_confirmation',
+  -- status: 'awaiting_confirmation' | 'confirmed' | 'rejected' | 'expired' | 'extraction_failed'
+  expense_id      UUID         REFERENCES expenses(id) ON DELETE SET NULL,
+  short_code      VARCHAR(6),                           -- código curto pro usuário responder no WA (ex: "47B")
+  expires_at      TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+  confirmed_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_receipts_tenant
+  ON pending_receipts(tenant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pending_receipts_phone
+  ON pending_receipts(tenant_id, sender_phone, created_at DESC)
+  WHERE sender_phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pending_receipts_shortcode
+  ON pending_receipts(tenant_id, short_code)
+  WHERE short_code IS NOT NULL AND status = 'awaiting_confirmation';
+
+-- Índices GIN trgm pra matcher fuzzy (similarity entre nome da nota e nome do insumo/produto)
+CREATE INDEX IF NOT EXISTS idx_insumos_name_trgm
+  ON insumos USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_name_trgm
+  ON products USING gin (name gin_trgm_ops);

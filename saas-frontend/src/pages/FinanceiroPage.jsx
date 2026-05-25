@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   getSummary, getExpenses, createExpense, updateExpense,
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
 import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory, postSangria, postSuprimento, getCaixaMovements } from '../api/caixa';
 import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBancoTransaction } from '../api/banco';
+import usePendingReceipts from '../hooks/usePendingReceipts';
+import ReceiptConfirmModal from '../components/ReceiptConfirmModal';
+import ReceiptUploadModal  from '../components/ReceiptUploadModal';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -16,7 +20,7 @@ const fmtNum = (n) =>
 
 const fmtDate = (d) => {
   if (!d) return '—';
-  const dt = new Date(d + 'T12:00:00');
+  const dt = new Date(d.toString().substring(0, 10) + 'T12:00:00');
   return dt.toLocaleDateString('pt-BR');
 };
 
@@ -1007,7 +1011,7 @@ function TabCaixa() {
 
       {/* ── CAIXA FECHADO → abrir ───────────────────────────── */}
       {!caixa && (
-        <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden">
+        <div className="sticky top-0 z-10 bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden shadow-2xl">
           <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-3">
             <span className="text-2xl">🔐</span>
             <div>
@@ -1053,8 +1057,13 @@ function TabCaixa() {
                   <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
                   <span className="text-sm font-bold text-green-400 uppercase tracking-wide">Caixa Aberto</span>
                 </div>
-                <p className="text-2xl font-black text-white">{fmtBRL(caixa.opening_balance)}</p>
-                <p className="text-xs text-gray-400 mt-1">Aberto em {fmtDt(caixa.opened_at)}</p>
+                <p className="text-2xl font-black text-white">{fmtBRL(parseFloat(caixa.opening_balance) + totalSuprimentos - totalSangrias)}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Abertura: {fmtBRL(caixa.opening_balance)}
+                  {totalSuprimentos > 0 && <span className="text-blue-400 ml-2">+{fmtBRL(totalSuprimentos)} sup.</span>}
+                  {totalSangrias > 0 && <span className="text-orange-400 ml-2">−{fmtBRL(totalSangrias)} sang.</span>}
+                </p>
+                <p className="text-xs text-gray-400">Aberto em {fmtDt(caixa.opened_at)}</p>
                 {caixa.opened_by_name && <p className="text-xs text-gray-500">por {caixa.opened_by_name}</p>}
                 {caixa.notes && <p className="text-xs text-gray-500 italic mt-1">"{caixa.notes}"</p>}
               </div>
@@ -1440,6 +1449,169 @@ function TabBanco() {
   );
 }
 
+// ── Tab Notas Fiscais (OCR IA) ────────────────────────────────
+
+const STATUS_RECEIPT = {
+  awaiting_confirmation: { label: 'Aguardando',  color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
+  confirmed:             { label: 'Confirmada',  color: 'text-green-400',  bg: 'bg-green-500/15  border-green-500/30'  },
+  rejected:              { label: 'Rejeitada',   color: 'text-red-400',    bg: 'bg-red-500/15    border-red-500/30'    },
+};
+
+function TabNotas() {
+  const { items, loading, error, refetch, removeLocal } = usePendingReceipts();
+  const [selected,    setSelected]    = useState(null);
+  const [showUpload,  setShowUpload]  = useState(false);
+
+  const fmtDt = (s) => {
+    if (!s) return '—';
+    try {
+      const d = new Date(s);
+      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return s; }
+  };
+
+  const handleDone = (id, action) => {
+    removeLocal(id);
+    if (action === 'confirmed' || action === 'rejected') refetch();
+  };
+
+  const handleUploaded = (pending) => {
+    refetch();
+    // Abre modal de confirmação automaticamente após upload
+    setSelected(pending);
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-48">
+      <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center justify-center h-48">
+      <p className="text-sm text-red-400">{error}</p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full overflow-auto p-5 space-y-4">
+
+      {/* Header + upload */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-bold text-white">Notas Fiscais via IA</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Envie fotos de notas pelo WhatsApp ou manualmente — a IA extrai e lança no estoque.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowUpload(true)}
+          className="btn-blue px-4 py-2 text-sm shrink-0"
+        >
+          📷 Enviar Nota
+        </button>
+      </div>
+
+      {/* Banner dica WhatsApp */}
+      <div className="flex gap-3 items-start bg-green-500/8 border border-green-500/20 rounded-xl px-4 py-3">
+        <span className="text-xl shrink-0">💬</span>
+        <div>
+          <p className="text-sm font-semibold text-green-300">Envie pelo WhatsApp</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Mande a foto da nota diretamente no WhatsApp do estabelecimento — a IA processa e envia um resumo para confirmar.
+          </p>
+        </div>
+      </div>
+
+      {/* Lista */}
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <span className="text-5xl mb-3">🧾</span>
+          <p className="text-sm font-semibold text-gray-300">Nenhuma nota pendente</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Envie uma foto de nota fiscal para começar
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((r) => {
+            const raw    = r.raw_extraction ?? {};
+            const conf   = Math.round((raw.confianca ?? 0) * 100);
+            const st     = STATUS_RECEIPT[r.status] ?? STATUS_RECEIPT.awaiting_confirmation;
+            const isPending = r.status === 'awaiting_confirmation';
+            return (
+              <button
+                key={r.id}
+                onClick={() => isPending && setSelected(r)}
+                className={`w-full text-left bg-gray-800 rounded-xl border border-white/8 p-4 transition-all ${
+                  isPending ? 'hover:border-orange-500/40 hover:bg-gray-700/60 cursor-pointer' : 'opacity-60 cursor-default'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-white truncate">
+                        {raw.fornecedor || 'Fornecedor desconhecido'}
+                      </span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${st.bg} ${st.color}`}>
+                        {st.label}
+                      </span>
+                      {conf > 0 && conf < 80 && (
+                        <span className="text-[10px] font-medium text-yellow-400">⚠️ {conf}% conf.</span>
+                      )}
+                    </div>
+                    <div className="flex gap-3 mt-1 flex-wrap">
+                      {r.sender_phone && (
+                        <span className="text-xs text-gray-500">📱 {r.sender_phone}</span>
+                      )}
+                      {r.short_code && (
+                        <span className="text-xs font-mono text-orange-400">#{r.short_code}</span>
+                      )}
+                      <span className="text-xs text-gray-500">{fmtDt(r.created_at)}</span>
+                      {(r.matched_items ?? []).length > 0 && (
+                        <span className="text-xs text-gray-500">
+                          {r.matched_items.length} {r.matched_items.length === 1 ? 'item' : 'itens'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {raw.total > 0 && (
+                      <p className="text-base font-black text-white tabular-nums">
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(raw.total)}
+                      </p>
+                    )}
+                    {isPending && (
+                      <p className="text-xs text-orange-400 mt-1 font-medium">Toque para revisar →</p>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modals */}
+      <AnimatePresence>
+        {selected && (
+          <ReceiptConfirmModal
+            receipt={selected}
+            onClose={() => setSelected(null)}
+            onDone={handleDone}
+          />
+        )}
+        {showUpload && (
+          <ReceiptUploadModal
+            onClose={() => setShowUpload(false)}
+            onUploaded={handleUploaded}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
 const TABS = [
@@ -1448,16 +1620,27 @@ const TABS = [
   { id: 'gastos',    label: '💸 Gastos'    },
   { id: 'resultado', label: '📊 Resultado' },
   { id: 'banco',     label: '🏦 Banco'     },
+  { id: 'notas',     label: '📋 Notas'     },
 ];
 
 export default function FinanceiroPage() {
   const [tab, setTab] = useState('caixa');
+  const { items: pendingReceipts } = usePendingReceipts();
+  const pendingCount = pendingReceipts.filter((r) => r.status === 'awaiting_confirmation').length;
 
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3.5 bg-gray-900/80 backdrop-blur border-b border-white/5 shrink-0">
         <h1 className="text-lg font-black text-white">💰 Financeiro</h1>
+        {pendingCount > 0 && (
+          <button
+            onClick={() => setTab('notas')}
+            className="flex items-center gap-1.5 bg-orange-500/15 border border-orange-500/30 rounded-full px-3 py-1 text-xs font-bold text-orange-400 hover:bg-orange-500/25 transition-colors"
+          >
+            🧾 {pendingCount} nota{pendingCount > 1 ? 's' : ''} pendente{pendingCount > 1 ? 's' : ''}
+          </button>
+        )}
       </div>
 
       {/* Tab bar */}
@@ -1466,13 +1649,18 @@ export default function FinanceiroPage() {
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`shrink-0 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
+            className={`relative shrink-0 px-4 py-2.5 text-sm font-semibold transition-all border-b-2 -mb-px ${
               tab === id
                 ? 'border-orange-500 text-white'
                 : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
             {label}
+            {id === 'notas' && pendingCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-orange-500 text-white text-[9px] font-black rounded-full flex items-center justify-center leading-none">
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1484,6 +1672,7 @@ export default function FinanceiroPage() {
         {tab === 'gastos'    && <TabGastos />}
         {tab === 'resultado' && <TabResultado />}
         {tab === 'banco'     && <TabBanco />}
+        {tab === 'notas'     && <TabNotas />}
       </div>
     </div>
   );

@@ -124,6 +124,38 @@ async function getOcrJob(tenantId, jobId) {
   return data.data;
 }
 
+/**
+ * OCR síncrono de nota fiscal via Ollama Vision (VPS2).
+ * Sobe multipart com a imagem e retorna o JSON estruturado.
+ *
+ * @param {string} tenantId
+ * @param {Buffer} imageBuffer
+ * @param {string} contentType  ex: 'image/jpeg'
+ * @param {string} filename     ex: 'nota.jpg'
+ * @returns {Promise<object>}   { fornecedor, cnpj, data_emissao, total, itens[], confianca, categoria_sugerida }
+ */
+async function interpretReceipt(tenantId, imageBuffer, contentType = 'image/jpeg', filename = 'receipt.jpg') {
+  const form = new FormData();
+  // Node 18+ tem Blob/FormData nativos
+  const blob = new Blob([imageBuffer], { type: contentType });
+  form.append('image', blob, filename);
+
+  const { data } = await retryWithBackoff(
+    () => aiEngine.post('/api/v1/financial/interpret-receipt', form, {
+      headers: {
+        ...headers(tenantId),
+        // Deixa o axios montar o boundary do multipart automaticamente
+        'Content-Type': undefined,
+      },
+      timeout: 90000, // OCR pode demorar — 90s
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    }),
+    { maxAttempts: 2, baseDelayMs: 2000 }
+  );
+  return data.data;
+}
+
 // ── Cardápio do Dia (WhatsApp) ────────────────────────────────────
 
 /** Retorna o cardápio do dia ativo no WhatsApp (imagem base64 + legenda) */
@@ -174,6 +206,7 @@ module.exports = {
   generateMarketing,
   submitOcrInvoice,
   getOcrJob,
+  interpretReceipt,
   getWhatsAppMenu,
   clearWhatsAppMenu,
   getAiUsageSummary,

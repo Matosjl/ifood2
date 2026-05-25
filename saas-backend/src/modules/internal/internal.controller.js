@@ -150,6 +150,19 @@ const createTransaction = asyncHandler(async (req, res) => {
 
 // ── Stock ─────────────────────────────────────────────────────────
 
+/** GET /api/internal/stock — lista insumos do tenant para o AI Engine */
+const getStock = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { rows } = await db.query(
+    `SELECT id, name, unit, current_stock AS qty, min_stock, cost_per_unit AS cost
+     FROM insumos
+     WHERE tenant_id = $1
+     ORDER BY name`,
+    [req.tenantId]
+  );
+  res.json({ success: true, data: rows });
+});
+
 /** POST /api/internal/stock/bulk-update */
 const bulkUpdateStock = asyncHandler(async (req, res) => {
   if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
@@ -362,11 +375,126 @@ const upsertLead = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows[0] });
 });
 
+// ── Receipts (OCR de notas fiscais via WhatsApp) ──────────────────
+
+const receiptsService = require('../financeiro/receipts.service');
+const ingestService   = require('../financeiro/ingest.service');
+const waNotify        = require('../../services/waNotify.service');
+
+/**
+ * POST /api/internal/receipts/ingest
+ * Chamado pela VPS2 quando detecta uma IMAGEM no webhook do Evolution.
+ *
+ * Body: { senderPhone, imageBase64, mimeType }
+ * Resposta: 201 { pending } — VPS2 deve então mandar `waNotify.sendReceiptPreview`.
+ */
+const ingestReceipt = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { senderPhone, imageBase64, mimeType = 'image/jpeg' } = req.body;
+
+  if (!senderPhone)  throw new AppError('senderPhone obrigatório', 400);
+  if (!imageBase64)  throw new AppError('imageBase64 obrigatório', 400);
+
+  const buf = Buffer.from(imageBase64, 'base64');
+  if (buf.length === 0) throw new AppError('imageBase64 inválido (zero bytes)', 400);
+  if (buf.length > 10 * 1024 * 1024) throw new AppError('imagem maior que 10MB', 413);
+
+  const pending = await ingestService.ingest({
+    tenantId:    req.tenantId,
+    imageBuffer: buf,
+    contentType: mimeType,
+    senderPhone: senderPhone.replace(/\D/g, ''),
+    source:      'whatsapp',
+  });
+
+  // Notifica o usuário no WA com o preview e botões SIM/NAO/EDITAR
+  try {
+    await waNotify.sendReceiptPreview(req.tenantId, senderPhone, pending);
+  } catch (err) {
+    // Falha de WA não derruba o ingest — usuário pode acessar via UI
+    console.warn('[internal.ingestReceipt] falha ao mandar preview WA:', err.message);
+  }
+
+  const { image_bytes, ...safe } = pending;
+  res.status(201).json({ success: true, data: safe });
+});
+
+/**
+ * POST /api/internal/receipts/handle-reply
+ * Chamado pela VPS2 quando o usuário responde texto no WhatsApp depois de ver o preview.
+ *
+ * Body: { senderPhone, text }  — text exemplo: "SIM", "NAO", "SIM 47B", "EDITAR 47B"
+ * Resposta: { handled: true|false, action, pending? }
+ */
+const handleReceiptReply = asyncHandler(async (req, res) => {
+  if (!req.tenantId) throw new AppError('X-Tenant-Id obrigatório', 400);
+  const { senderPhone, text } = req.body;
+  if (!senderPhone || !text)   throw new AppError('senderPhone e text obrigatórios', 400);
+
+  const phone = senderPhone.replace(/\D/g, '');
+  const normalized = String(text).trim().toUpperCase();
+
+  // Tenta extrair short_code (3 chars alfanum) do texto
+  const codeMatch = normalized.match(/\b([A-Z0-9]{3})\b/);
+  const shortCode = codeMatch ? codeMatch[1] : null;
+
+  // Identifica intenção
+  let action = null;
+  if (/^(SIM|S|OK|CONFIRMAR|CONFIRMA|YES)\b/.test(normalized))            action = 'confirm';
+  else if (/^(NAO|NÃO|N|CANCELA|CANCELAR|REJEITAR|NO)\b/.test(normalized)) action = 'reject';
+  else if (/^EDITAR\b/.test(normalized))                                   action = 'edit';
+
+  if (!action) {
+    return res.json({ success: true, data: { handled: false, reason: 'no_intent_detected' } });
+  }
+
+  // Resolve qual pending — short_code se informado, senão o mais recente do phone
+  let pending = shortCode
+    ? await receiptsService.getByShortCode(req.tenantId, shortCode)
+    : await receiptsService.getMostRecentByPhone(req.tenantId, phone);
+
+  if (!pending) {
+    try {
+      await waNotify.sendText(req.tenantId, senderPhone,
+        '🤔 Não encontrei nenhuma nota pendente pra confirmar. Manda a foto da nota fiscal novamente.');
+    } catch {}
+    return res.json({ success: true, data: { handled: false, reason: 'no_pending_found', action } });
+  }
+
+  if (action === 'confirm') {
+    const result = await receiptsService.confirm(req.tenantId, pending.id);
+    try {
+      await waNotify.sendReceiptConfirmed(req.tenantId, senderPhone, result);
+    } catch {}
+    const { image_bytes, ...safe } = result.pending;
+    return res.json({ success: true, data: { handled: true, action, pending: safe } });
+  }
+
+  if (action === 'reject') {
+    const updated = await receiptsService.reject(req.tenantId, pending.id, 'rejeitado_via_whatsapp');
+    try {
+      await waNotify.sendText(req.tenantId, senderPhone,
+        '👌 Beleza, nota cancelada. Se quiser registrar de novo, é só mandar outra foto.');
+    } catch {}
+    const { image_bytes, ...safe } = updated;
+    return res.json({ success: true, data: { handled: true, action, pending: safe } });
+  }
+
+  // action === 'edit'
+  try {
+    await waNotify.sendText(req.tenantId, senderPhone,
+      `✏️ Pra editar a nota *${pending.short_code}*, acesse o financeiro no app: ` +
+      `https://app.zapfome.com/financeiro (ou avise quais itens estão errados que eu te ajudo).`);
+  } catch {}
+  return res.json({ success: true, data: { handled: true, action, pending: { id: pending.id, short_code: pending.short_code } } });
+});
+
 module.exports = {
   getTenant, getAllTenants, getSuperStats,
   getProducts, getOrdersSummary,
   getFinancialSummary, createTransaction,
-  bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
+  getStock, bulkUpdateStock, sendWhatsApp, sendWhatsAppMedia,
   getOrdersByPhone, createOrderFromWhatsApp,
   upsertLead,
+  ingestReceipt, handleReceiptReply,
 };
