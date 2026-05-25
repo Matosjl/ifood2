@@ -905,6 +905,7 @@ const PM_LABELS = {
 };
 
 function TabCaixa() {
+  const containerRef = useRef(null);
   const [caixa,       setCaixa]       = useState(undefined);
   const [history,     setHistory]     = useState([]);
   const [detail,      setDetail]      = useState(null);
@@ -969,9 +970,13 @@ function TabCaixa() {
         cardCounted: cardCounted !== '' ? parseFloat(cardCounted) : 0,
         pixCounted:  pixCounted  !== '' ? parseFloat(pixCounted)  : 0,
       });
+      // Mostra o formulário de abertura IMEDIATAMENTE — não espera load()
+      setCaixa(null);
       setCloseNote(''); setCashCounted(''); setCardCounted(''); setPixCounted('');
       setConfirm(false);
-      await load();
+      // Volta ao topo pra que o formulário "Abrir Caixa" fique visível
+      containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      await load(); // atualiza histórico em background
     } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao fechar caixa.'); }
     finally { setSaving(false); }
   };
@@ -1005,7 +1010,7 @@ function TabCaixa() {
   );
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-5 space-y-5">
+    <div ref={containerRef} className="flex flex-col h-full overflow-auto p-5 space-y-5">
 
       {err && <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">{err}</p>}
 
