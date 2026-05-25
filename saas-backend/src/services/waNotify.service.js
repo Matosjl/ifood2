@@ -128,6 +128,86 @@ async function notifyCustomer(tenantId, order) {
   }
 }
 
+// ── Owner alerts ─────────────────────────────────────────────────
+
+/**
+ * Busca o número pessoal do empresário (owner_whatsapp).
+ */
+async function getOwnerPhone(tenantId) {
+  try {
+    const { rows } = await db.query(
+      `SELECT owner_whatsapp FROM tenants WHERE id = $1`,
+      [tenantId]
+    );
+    const raw = rows[0]?.owner_whatsapp;
+    if (!raw) return null;
+    const clean = raw.replace(/\D/g, '');
+    return clean.startsWith('55') ? clean : '55' + clean;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Alerta de estoque baixo — enviado ao empresário após criar pedido.
+ * @param {string} tenantId
+ * @param {Array<{name, stock_qty, alert_threshold, unit}>} products
+ */
+async function sendStockAlert(tenantId, products) {
+  try {
+    const ownerPhone = await getOwnerPhone(tenantId);
+    if (!ownerPhone) return;
+
+    const linhas = products.map((p) => {
+      const qty = Number(p.stock_qty ?? 0);
+      const min = Number(p.alert_threshold ?? 0);
+      const unit = p.sale_type === 'kg' ? 'kg' : 'un';
+      return `• *${p.name}*: ${qty} ${unit} restante${qty !== 1 ? 's' : ''} (mínimo: ${min})`;
+    }).join('\n');
+
+    const msg =
+      `⚠️ *Alerta de estoque baixo!*\n\n` +
+      `${linhas}\n\n` +
+      `Faça a reposição antes que acabe. 📦`;
+
+    await sendText(tenantId, ownerPhone, msg);
+  } catch (err) {
+    console.warn('[waNotify.sendStockAlert] falha', { tenantId, error: err.message });
+  }
+}
+
+/**
+ * Sugestão de cadastro de produto novo detectado na nota fiscal.
+ * Enviado ao empresário quando a IA não encontra match (action='create_new').
+ * @param {string} tenantId
+ * @param {Array<{raw: {descricao, quantidade, unidade}}>} newItems — itens sem match
+ * @param {string} shortCode — código da nota (ex: "47B")
+ */
+async function sendNewProductSuggestion(tenantId, newItems, shortCode) {
+  try {
+    const ownerPhone = await getOwnerPhone(tenantId);
+    if (!ownerPhone) return;
+    if (!newItems?.length) return;
+
+    const linhas = newItems.map((m) => {
+      const r = m.raw || {};
+      return `• *${r.descricao || 'Item sem nome'}* (${r.quantidade ?? '?'} ${r.unidade || 'un'})`;
+    }).join('\n');
+
+    const plural = newItems.length > 1 ? 'itens novos' : 'item novo';
+    const msg =
+      `🆕 *${newItems.length} ${plural} encontrado${newItems.length > 1 ? 's' : ''} na nota ${shortCode}*\n\n` +
+      `${linhas}\n\n` +
+      `Esses itens não estão cadastrados no seu sistema.\n\n` +
+      `Responda *ADICIONAR ${shortCode}* para criar automaticamente como insumo,\n` +
+      `ou ignore — eles já foram lançados na nota normalmente.`;
+
+    await sendText(tenantId, ownerPhone, msg);
+  } catch (err) {
+    console.warn('[waNotify.sendNewProductSuggestion] falha', { tenantId, error: err.message });
+  }
+}
+
 // ── Receipts (OCR de notas fiscais) ──────────────────────────────
 
 const fmtBRL = (v) =>
@@ -245,7 +325,10 @@ async function sendReceiptConfirmed(tenantId, senderPhone, { pending, expense, s
 module.exports = {
   notifyCustomer,
   sendText,
+  getOwnerPhone,
+  sendStockAlert,
+  sendNewProductSuggestion,
   sendReceiptPreview,
   sendReceiptConfirmed,
-  buildReceiptPreview, // exportado pra testes
+  buildReceiptPreview,
 };

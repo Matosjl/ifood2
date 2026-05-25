@@ -295,6 +295,26 @@ const createOrder = async (tenantId, {
       ).catch(() => {});
     }
 
+    // Alerta de estoque baixo — verifica produtos que caíram abaixo do threshold (fire-and-forget)
+    {
+      const productIds = resolvedItems.map((i) => i.product.id);
+      db.query(
+        `SELECT id, name, sale_type, stock_qty, alert_threshold
+         FROM products
+         WHERE id = ANY($1::uuid[])
+           AND tenant_id = $2
+           AND alert_threshold > 0
+           AND stock_qty <= alert_threshold
+           AND stock_qty >= 0`,
+        [productIds, tenantId]
+      ).then(({ rows: lowStock }) => {
+        if (lowStock.length > 0) {
+          const waNotify = require('../../services/waNotify.service');
+          waNotify.sendStockAlert(tenantId, lowStock).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
     return createdOrder;
 
   } catch (err) {

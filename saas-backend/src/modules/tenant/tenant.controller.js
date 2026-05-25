@@ -24,7 +24,7 @@ const updatePlan = asyncHandler(async (req, res) => {
  * Atualiza o nome do restaurante (owner only).
  */
 const updateProfile = asyncHandler(async (req, res) => {
-  const { name, whatsappNumber, address } = req.body;
+  const { name, whatsappNumber, address, ownerWhatsapp } = req.body;
   if (!name?.trim()) throw new AppError('Nome do restaurante é obrigatório.', 400);
 
   const { rows } = await db.query(
@@ -32,10 +32,12 @@ const updateProfile = asyncHandler(async (req, res) => {
      SET name             = $2,
          whatsapp_number  = COALESCE($3, whatsapp_number),
          address          = COALESCE($4, address),
+         owner_whatsapp   = COALESCE($5, owner_whatsapp),
          updated_at       = NOW()
      WHERE id = $1
-     RETURNING id, name, slug, whatsapp_number, address`,
-    [req.user.tenantId, name.trim(), whatsappNumber || null, address || null]
+     RETURNING id, name, slug, whatsapp_number, address, owner_whatsapp`,
+    [req.user.tenantId, name.trim(), whatsappNumber || null, address || null,
+     ownerWhatsapp ? ownerWhatsapp.replace(/\D/g, '') : null]
   );
   if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
 

@@ -1031,19 +1031,28 @@ function ChatbotTab({ onToast }) {
 // ─────────────────────────────────────────────────────────────
 
 function WhatsappTab({ onToast }) {
-  const [status,      setStatus]      = useState(null); // { connected, instance, qrcode, status }
-  const [loading,     setLoading]     = useState(true);
-  const [connecting,  setConnecting]  = useState(false);
+  const [status,        setStatus]        = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [connecting,    setConnecting]    = useState(false);
+  const [ownerPhone,    setOwnerPhone]    = useState('');
+  const [savingOwner,   setSavingOwner]   = useState(false);
   const pollRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
-      const { data } = await getWhatsappStatus();
-      setStatus(data.data);
-      // Para polling se conectou
-      if (data.data?.connected && pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+      const [waRes, tenantRes] = await Promise.allSettled([
+        getWhatsappStatus(),
+        api.get('/tenant/me'),
+      ]);
+      if (waRes.status === 'fulfilled') {
+        setStatus(waRes.value.data.data);
+        if (waRes.value.data.data?.connected && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      }
+      if (tenantRes.status === 'fulfilled') {
+        setOwnerPhone(tenantRes.value.data.data?.ownerWhatsapp ?? '');
       }
     } catch { /* non-fatal */ }
     finally { setLoading(false); }
@@ -1053,6 +1062,23 @@ function WhatsappTab({ onToast }) {
     load();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [load]);
+
+  const handleSaveOwner = async () => {
+    setSavingOwner(true);
+    try {
+      const tenantRes = await api.get('/tenant/me');
+      const current = tenantRes.data.data;
+      await api.put('/tenant/profile', {
+        name: current.name,
+        ownerWhatsapp: ownerPhone.trim() || null,
+      });
+      onToast('Número do empresário salvo! ✅', 'success');
+    } catch {
+      onToast('Erro ao salvar número.', 'error');
+    } finally {
+      setSavingOwner(false);
+    }
+  };
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -1170,6 +1196,50 @@ function WhatsappTab({ onToast }) {
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* ── Número do Empresário ── */}
+      <div className="bg-gray-800/60 border border-white/[0.06] rounded-2xl p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-black text-white">📲 Número do Empresário</h3>
+          <p className="text-xs text-gray-400 mt-1">
+            Seu número pessoal. Receberá alertas de estoque baixo, itens novos em notas fiscais
+            e poderá consultar relatórios diretamente pelo WhatsApp.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-gray-400">Número (com DDD)</label>
+          <input
+            value={ownerPhone}
+            onChange={(e) => setOwnerPhone(e.target.value)}
+            placeholder="Ex: 11987654321"
+            className="input w-full"
+          />
+          <p className="text-[11px] text-gray-600">Somente dígitos — sem espaços ou traços</p>
+        </div>
+
+        <div className="bg-blue-500/8 border border-blue-500/20 rounded-xl p-3 space-y-1">
+          <p className="text-xs font-bold text-blue-300">Este número recebe automaticamente:</p>
+          <ul className="text-xs text-blue-300/70 space-y-0.5">
+            <li>⚠️ Alerta quando produto cair abaixo do estoque mínimo</li>
+            <li>🆕 Sugestão quando nota fiscal tiver item não cadastrado</li>
+            <li>✅ Confirmação de notas fiscais (responda SIM/NÃO pelo WA)</li>
+          </ul>
+        </div>
+
+        <button
+          onClick={handleSaveOwner}
+          disabled={savingOwner}
+          className="btn-blue w-full py-2.5 text-sm disabled:opacity-50"
+        >
+          {savingOwner ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Salvando...
+            </span>
+          ) : 'Salvar número'}
+        </button>
       </div>
 
       <div className="bg-gray-800/40 rounded-xl p-4 space-y-1.5 border border-white/[0.05]">

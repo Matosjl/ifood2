@@ -33,6 +33,9 @@ const formatTenantResponse = (tenant, usage = {}) => {
       usersLimit:         plan.limits.usersMax,
       productsCount:      parseInt(usage.products_count) || 0,
     },
+    whatsappNumber: tenant.whatsapp_number ?? null,
+    ownerWhatsapp:  tenant.owner_whatsapp  ?? null,
+    address:        tenant.address         ?? null,
     createdAt: tenant.created_at,
   };
 };

@@ -93,9 +93,16 @@ async function ingest({ tenantId, imageBuffer, contentType = 'image/jpeg', sende
     logger.warn('falha ao emitir socket receipt:created', { error: err.message });
   }
 
+  // 5. Se há itens sem match, pergunta ao empresário se quer cadastrar (fire-and-forget)
+  const newItems = matchedItems.filter((m) => m.action === 'create_new' && m.raw?.descricao);
+  if (newItems.length > 0) {
+    const waNotify = require('../../services/waNotify.service');
+    waNotify.sendNewProductSuggestion(tenantId, newItems, shortCode).catch(() => {});
+  }
+
   logger.info('pending_receipt criado', {
     tenantId, id: pending.id, shortCode, itens: matchedItems.length,
-    confianca: extraction.confianca,
+    confianca: extraction.confianca, novosItens: newItems.length,
   });
 
   return pending;

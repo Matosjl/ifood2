@@ -791,3 +791,8 @@ CREATE INDEX IF NOT EXISTS idx_insumos_name_trgm
   ON insumos USING gin (name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_products_name_trgm
   ON products USING gin (name gin_trgm_ops);
+
+-- ── OWNER WHATSAPP — número pessoal do empresário ─────────────────
+-- Recebe: alertas de estoque baixo, sugestão de produto novo, pode consultar relatórios via WA.
+-- Separado do whatsapp_number (número do restaurante que atende clientes).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS owner_whatsapp VARCHAR(20);
