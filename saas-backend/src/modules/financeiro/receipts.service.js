@@ -217,22 +217,15 @@ async function confirm(tenantId, id, userId = null) {
           [qty, productId, tenantId]
         );
       } else {
-        // Sem match: cria insumo novo
-        const { rows: [novoInsumo] } = await client.query(
-          `INSERT INTO insumos
-             (tenant_id, name, unit, qty_in_stock, cost_per_unit)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, name`,
-          [
-            tenantId,
-            (r.descricao || 'Insumo sem nome').slice(0, 200),
-            (r.unidade || 'un').slice(0, 20),
-            qty,
-            parseFloat(r.valor_unit || 0),
-          ]
-        );
-        insumoId = novoInsumo.id;
-        productName = novoInsumo.name;
+        // Sem match (create_new) — o valor já está no total da nota (expense + banco_transaction).
+        // Não cria insumo automaticamente: o dono decide depois se quer cadastrar via WA ou UI.
+        // Apenas registra no log para auditoria.
+        logger.info('item sem match — só financeiro registrado', {
+          tenantId, pendingId: id,
+          descricao: (r.descricao || '').slice(0, 60),
+          valor: r.valor_total,
+        });
+        continue; // pula stock_movement (não há produto vinculado)
       }
 
       // Stock movement (apenas se houver product_id — schema atual exige product_id NOT NULL)
