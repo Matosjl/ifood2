@@ -145,7 +145,11 @@ async function confirm(tenantId, id, userId = null) {
 
   const raw     = pending.raw_extraction || {};
   const matched = pending.matched_items || [];
-  const total   = parseFloat(raw.total || 0);
+  // Suporta tanto número float quanto string pt-BR "1.234,56"
+  const rawTotal = String(raw.total ?? 0);
+  const total = parseFloat(
+    rawTotal.includes(',') ? rawTotal.replace(/\./g, '').replace(',', '.') : rawTotal
+  );
 
   if (total <= 0) {
     throw new AppError('Total da nota é zero ou inválido — edite antes de confirmar', 400);
@@ -156,7 +160,9 @@ async function confirm(tenantId, id, userId = null) {
     await client.query('BEGIN');
 
     // 1. Cria expense (gasto consolidado da nota)
-    const dueDate = raw.data_emissao || new Date().toISOString().slice(0, 10);
+    // Usa timezone BRT pra evitar que meia-noite UTC vire dia errado no Brasil
+    const dueDate = raw.data_emissao ||
+      new Date().toLocaleDateString('fr-CA', { timeZone: 'America/Sao_Paulo' });
     const supplier = raw.fornecedor || null;
     const category = raw.categoria_sugerida || 'food_supplier';
     const name = supplier ? `Nota fiscal — ${supplier}` : 'Nota fiscal';
@@ -219,7 +225,7 @@ async function confirm(tenantId, id, userId = null) {
            RETURNING id, name`,
           [
             tenantId,
-            r.descricao.slice(0, 200),
+            (r.descricao || 'Insumo sem nome').slice(0, 200),
             (r.unidade || 'un').slice(0, 20),
             qty,
             parseFloat(r.valor_unit || 0),

@@ -93,9 +93,22 @@ async function findMatch(tenantId, itemName) {
     searchProducts(tenantId, normalized),
   ]);
 
-  // Insumos têm prioridade — nota fiscal de fornecedor geralmente abastece estoque de insumos
-  const best = insumos[0] || products[0] || null;
-  const best_type = insumos[0] ? 'insumo' : products[0] ? 'product' : null;
+  // Escolhe o melhor score entre insumos e produtos.
+  // Se scores iguais, insumo tem prioridade (nota fiscal de fornecedor abastece insumos).
+  const insBest  = insumos[0]  || null;
+  const prodBest = products[0] || null;
+  let best, best_type;
+  if (!insBest && !prodBest) {
+    best = null; best_type = null;
+  } else if (!insBest) {
+    best = prodBest; best_type = 'product';
+  } else if (!prodBest) {
+    best = insBest; best_type = 'insumo';
+  } else if (insBest.score >= prodBest.score) {
+    best = insBest; best_type = 'insumo';
+  } else {
+    best = prodBest; best_type = 'product';
+  }
   const score = best?.score || 0;
 
   let action;

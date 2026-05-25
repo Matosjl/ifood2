@@ -530,11 +530,21 @@ const ingestProcessedReceipt = asyncHandler(async (req, res) => {
   const { matchAll } = require('../financeiro/matcher.service');
   const matchedItems = await matchAll(req.tenantId, rawExtraction.itens);
 
-  // Gera short_code único
-  const shortCode = Math.random().toString(36).slice(2, 5).toUpperCase();
+  // Gera short_code único (4 chars = 36^4 ≈ 1.68M combos; retry pra evitar colisão ativa)
+  const db = require('../../config/database');
+  let shortCode;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = Math.random().toString(36).slice(2, 6).toUpperCase();
+    const { rows: existing } = await db.query(
+      `SELECT 1 FROM pending_receipts
+       WHERE tenant_id = $1 AND short_code = $2 AND status = 'awaiting_confirmation' LIMIT 1`,
+      [req.tenantId, candidate]
+    );
+    if (!existing.length) { shortCode = candidate; break; }
+  }
+  if (!shortCode) shortCode = Date.now().toString(36).slice(-5).toUpperCase(); // fallback infálível
 
   // Insere pending_receipts
-  const db = require('../../config/database');
   const { rows } = await db.query(
     `INSERT INTO pending_receipts
        (tenant_id, sender_phone, source, raw_extraction, matched_items, status, short_code)
