@@ -77,10 +77,18 @@ const adicionarItem = async (tenantId, userId, loteId, {
     );
     if (!insumo) throw new AppError('Insumo não encontrado.', 404);
 
-    // Debita estoque bruto
+    // Valida estoque suficiente — bloqueia antes de debitar
+    if (parseFloat(insumo.qty_in_stock) < raw) {
+      throw new AppError(
+        `Estoque insuficiente de ${insumo.name}. Disponível: ${parseFloat(insumo.qty_in_stock)}${insumo.unit} — Solicitado: ${raw}${insumo.unit}.`,
+        422
+      );
+    }
+
+    // Debita estoque bruto (estoque validado acima — sem GREATEST)
     await client.query(
       `UPDATE insumos
-       SET qty_in_stock = GREATEST(0, qty_in_stock - $2), updated_at = NOW()
+       SET qty_in_stock = qty_in_stock - $2, updated_at = NOW()
        WHERE id = $1 AND tenant_id = $3`,
       [insumoId, raw, tenantId]
     );
@@ -162,32 +170,47 @@ const registrarPerda = async (tenantId, userId, loteId, { insumoId, qty, reason 
   const quantity = parseFloat(qty);
   if (!quantity || quantity <= 0) throw new AppError('Quantidade deve ser maior que zero.', 400);
 
-  const { rows: [insumo] } = await db.query(
-    `SELECT id, name, unit, cost_per_unit FROM insumos WHERE id = $1 AND tenant_id = $2`,
-    [insumoId, tenantId]
-  );
-  if (!insumo) throw new AppError('Insumo não encontrado.', 404);
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
 
-  const cost = parseFloat((quantity * parseFloat(insumo.cost_per_unit)).toFixed(2));
+    // M1: bloqueia perda em lote fechado
+    await assertLoteAberto(client, tenantId, loteId);
 
-  // Tenta debitar do batch deste lote primeiro
-  await db.query(
-    `UPDATE production_batches
-     SET remaining_qty = GREATEST(0, remaining_qty - $2)
-     WHERE lot_id = $1 AND insumo_id = $3 AND tenant_id = $4 AND remaining_qty > 0`,
-    [loteId, quantity, insumoId, tenantId]
-  );
+    const { rows: [insumo] } = await client.query(
+      `SELECT id, name, unit, cost_per_unit FROM insumos WHERE id = $1 AND tenant_id = $2`,
+      [insumoId, tenantId]
+    );
+    if (!insumo) throw new AppError('Insumo não encontrado.', 404);
 
-  // Grava no waste_log com referência ao lote
-  const { rows } = await db.query(
-    `INSERT INTO waste_logs
-       (tenant_id, insumo_id, insumo_name, unit, quantity, reason_type, notes, cost, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING *`,
-    [tenantId, insumoId, insumo.name, insumo.unit, quantity,
-     reason || 'operational', null, cost, userId || null]
-  );
-  return { ...rows[0], lot_id: loteId };
+    const cost = parseFloat((quantity * parseFloat(insumo.cost_per_unit)).toFixed(2));
+
+    // C2: debita remaining_qty do batch dentro da transação
+    await client.query(
+      `UPDATE production_batches
+       SET remaining_qty = GREATEST(0, remaining_qty - $2)
+       WHERE lot_id = $1 AND insumo_id = $3 AND tenant_id = $4 AND remaining_qty > 0`,
+      [loteId, quantity, insumoId, tenantId]
+    );
+
+    // C2: insere waste_log na mesma transação
+    const { rows } = await client.query(
+      `INSERT INTO waste_logs
+         (tenant_id, insumo_id, insumo_name, unit, quantity, reason_type, notes, cost, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [tenantId, insumoId, insumo.name, insumo.unit, quantity,
+       reason || 'operational', null, cost, userId || null]
+    );
+
+    await client.query('COMMIT');
+    return { ...rows[0], lot_id: loteId };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 // ── 5. Resumo do lote ─────────────────────────────────────────
