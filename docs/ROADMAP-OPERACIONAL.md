@@ -235,27 +235,50 @@ Jobs ativos (BullMQ):
 
 ## Próximos Passos (ordem de prioridade)
 
-### 1. Validação Operacional (antes de qualquer feature nova)
-- Geolocalização em uso real com cliente
-- Incident Engine: confirmar que os 3 detectores disparam corretamente
-- As 5 perguntas diárias respondem com dados corretos?
+> Detalhamento completo em `/docs/SPRINT-C.md`
 
-### 2. Módulo Produção
-O que falta para chegar aqui:
-- [ ] Definir o que "Produção" significa no contexto do restaurante (fichas técnicas usadas para pré-preparo?)
-- [ ] Integração entre `insumos` + `products` + `precificador`
-- [ ] UI de gestão de fichas técnicas (existe parcialmente no precificador)
+### Sprint C — 30 dias (agora)
 
-### 3. Módulo Precificador
-O que existe:
-- Backend completo: `precificador.service.js` com `calcIngredientCost`, `getOverhead`, `psychologicalPrice`
-- Tabela `pricing_overhead` no banco
-- Tabela `pricing_calculations` no banco
+```
+Semana 1  Validação operacional (zero código novo)
+Semana 2  Fechamento Operacional do Dia (página única, 5 blocos)
+Semana 3  Módulo Produção (lotes, baixa de estoque, CMV real)
+Semana 4  Integração + 7 dias sem divergência
+```
 
-O que falta:
-- [ ] UI completa (página de fichas técnicas, tabela de sugestões de preço)
-- [ ] Integração com `insumos` (custo real por insumo atualizado automaticamente)
-- [ ] Validação com dados reais de restaurante
+**Entregáveis:**
+- [ ] Página `/fechamento` — o dono entende o restaurante em 30 segundos
+- [ ] `GET /api/financeiro/fechamento` — agrega tudo em um JSON
+- [ ] Módulo Produção — lotes de produção que baixam estoque e geram CMV real
+- [ ] 30 dias de operação completa sem divergência na Degustti
+
+**Critério de parada para qualquer PR neste sprint:**
+> Só entra código de Fechamento, Produção ou correção de bug operacional.
+
+### Sprint D — depois (quando Sprint C estiver validado)
+
+- Precificador completo (ficha técnica com custo real dos lotes)
+- Previsão de demanda (60 dias de histórico de produção + vendas)
+- IA de decisão ("você está produzindo 18% mais arroz do que vende")
+- DRE automatizado
+
+### O que ainda não existe e é o coração do problema
+
+```
+Compra    ⏳ OCR parcial
+Estoque   ⏳ módulo existe, não validado
+Produção  ○  não existe — PRÓXIMO MÓDULO
+Venda     ✅
+Entrega   ✅
+Recebimento ✅
+Financeiro ✅ parcial
+Lucro real ○  depende de Produção + Compra fechados
+```
+
+Enquanto Compra → Estoque → Produção não estiver fechado:
+- CMV é estimado, não real
+- Desperdício é invisível
+- Lucro operacional é aproximação
 
 ---
 
