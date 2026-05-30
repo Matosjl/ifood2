@@ -224,6 +224,70 @@ GET    /api/producao/resumo?date=today  → resumo para o Fechamento
 
 ---
 
+## As 4 Verdades do Estoque
+
+> Todo insumo precisa responder 4 perguntas. Quando as 4 baterem com a realidade física da cozinha, o CMV deixa de ser estimativa.
+
+| Pergunta | Campo/Tabela |
+|----------|-------------|
+| Quanto comprei? | `expenses` + OCR de notas (`receipts`) |
+| Quanto produzi? | `production_lot_items` ← **novo** |
+| Quanto vendi? | `order_items` × ficha técnica (`product_insumos`) |
+| Quanto perdi? | `production_waste` ← **novo** |
+
+**Exemplo concreto — Arroz:**
+```
+Comprado:          50 kg   (nota fiscal lançada)
+Produzido:         45 kg   (lote fechado na cozinha)
+Vendido (consumo): 38 kg   (100 marmitas × 380g)
+Perdas registradas: 2 kg   (lote do almoço sobrou)
+                   ──────
+Saldo esperado:     5 kg   ← deve bater com o físico
+```
+
+Quando `saldo esperado = estoque físico`:
+- CMV é real, não estimado
+- Desperdício tem número
+- Reposição vira automática
+
+Quando diverge: o sistema sabe onde está o buraco.
+
+---
+
+## Divergência crítica identificada no código
+
+**Arquivo:** `saas-backend/src/modules/precificador/precificador.service.js` — linha 146
+
+```js
+// Fallback: se ficha técnica vazia, usa cost_price do produto
+if (custoInsumos === 0 && parseFloat(prod[0].cost_price || 0) > 0) {
+  custoInsumos = parseFloat(prod[0].cost_price);
+}
+```
+
+**Arquivo:** `saas-backend/src/database/schema.sql` — linha 880
+
+```sql
+SET unit_cost  = p.cost_price,   -- ← usa o campo manual, não o calculado
+    total_cost = p.cost_price * COALESCE(oi.quantity, 1)
+```
+
+**O problema:** hoje existem dois custos de produto no sistema:
+
+| Campo | Tipo | Confiável? |
+|-------|------|-----------|
+| `products.cost_price` | Manual (digitado pelo dono) | ⚠️ depende do dono atualizar |
+| `product_insumos × cost_per_unit` | Calculado (ficha técnica) | ✅ quando cadastrado |
+
+Se o produto não tem ficha técnica, o sistema usa `cost_price` manual como fallback.
+Resultado: CMV de produtos sem ficha técnica é o que o dono digitou — não o real.
+
+**Impacto:** M7 (CMV médio) e M10 (lucro operacional) são imprecisos para qualquer produto sem ficha técnica completa.
+
+Este bug não precisa ser corrigido agora — mas precisa ser resolvido no Sprint D.
+
+---
+
 ## Prioridade dos 30 dias
 
 ```
@@ -283,3 +347,76 @@ Quando isso estiver consistente por 30 dias:
 - Novos relatórios
 
 **Regra:** qualquer PR que não seja Fechamento, Produção ou correção de bug operacional é recusado neste sprint.
+
+---
+
+## Sprint D — visão (depois do Sprint C validado)
+
+### Objetivo
+Eliminar `products.cost_price` como fonte de CMV.
+Transformar o custo de todo produto em calculado, não digitado.
+
+### O fluxo que precisa existir
+
+```
+Insumo cadastrado com cost_per_unit real
+  ↓
+Ficha Técnica do produto (product_insumos)
+  ↓
+Custo calculado automaticamente
+  ↓
+Lote de Produção usa ficha técnica
+  ↓
+Venda consome ingredientes do lote
+  ↓
+CMV real por pedido
+  ↓
+Lucro real por dia
+```
+
+### O que mudar no código
+
+**1. Remover o fallback de `cost_price` no precificador:**
+```js
+// ANTES (precificador.service.js linha 146):
+if (custoInsumos === 0 && parseFloat(prod[0].cost_price || 0) > 0) {
+  custoInsumos = parseFloat(prod[0].cost_price);  // ← eliminar
+}
+
+// DEPOIS:
+// Se ficha técnica vazia → custo = 0 e alertar que o produto precisa de ficha
+```
+
+**2. Atualizar `pricing_calculations` para usar custo real:**
+```sql
+-- ANTES (schema.sql linha 880):
+SET unit_cost = p.cost_price   -- campo manual
+
+-- DEPOIS:
+SET unit_cost = (
+  SELECT COALESCE(SUM(pi.qty_per_unit * i.cost_per_unit), 0)
+  FROM product_insumos pi
+  JOIN insumos i ON i.id = pi.insumo_id
+  WHERE pi.product_id = oi.product_id
+)
+```
+
+**3. Criar alerta para produtos sem ficha técnica:**
+- Qualquer produto com `product_insumos` vazio aparece em `/fechamento` como "CMV não calculável"
+- Dono vê lista de produtos que precisam de ficha técnica
+
+### Critério de conclusão do Sprint D
+```
+✅ Zero produtos com cost_price como fallback ativo
+✅ 100% dos produtos com ficha técnica cadastrada (ou alertados)
+✅ CMV do Fechamento Operacional usa apenas custo calculado
+✅ Margem real por produto disponível no Precificador
+✅ "Quanto lucramos?" no fechamento tem resposta confiável
+```
+
+### Por que não fazer isso agora
+O Sprint D sem o Sprint C é construir em areia.
+Sem o Módulo Produção (Sprint C), a ficha técnica é teórica — não tem lote real para consumir.
+Sem 30 dias de operação validada, não se sabe quais produtos têm ficha técnica incompleta.
+
+Sprint C primeiro. Sprint D depois. Nessa ordem.
