@@ -796,3 +796,214 @@ CREATE INDEX IF NOT EXISTS idx_products_name_trgm
 -- Recebe: alertas de estoque baixo, sugestão de produto novo, pode consultar relatórios via WA.
 -- Separado do whatsapp_number (número do restaurante que atende clientes).
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS owner_whatsapp VARCHAR(20);
+
+-- ── AI CENTER CHAT — histórico de conversas do painel admin ───────
+CREATE TABLE IF NOT EXISTS ai_chat_messages (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role        VARCHAR(20)  NOT NULL DEFAULT 'user',   -- 'user' | 'assistant'
+  content     TEXT         NOT NULL,
+  intent      VARCHAR(50),                            -- 'manager' | 'marketing' | 'financial' | 'chat'
+  metadata    JSONB        NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_chat_tenant_date
+  ON ai_chat_messages(tenant_id, created_at DESC);
+
+
+-- ── AI TASKS (sistema de tarefas) ─────────────────────────────────
+-- Cada interação no AI Center cria uma task — rastreável, auditável.
+CREATE TABLE IF NOT EXISTS ai_tasks (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  intent      VARCHAR(50) NOT NULL,
+  input       JSONB       NOT NULL DEFAULT '{}',
+  status      VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending|running|done|failed
+  priority    SMALLINT    NOT NULL DEFAULT 5,           -- 1=urgent 3=high 5=normal 8=low
+  agent       VARCHAR(50),
+  result      JSONB,
+  error       TEXT,
+  started_at  TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_tasks_tenant ON ai_tasks(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_tasks_status  ON ai_tasks(status);
+
+-- ── AI LOGS (observabilidade) ─────────────────────────────────────
+-- Log completo de cada execução: intent detectada, agente, duração, erro.
+CREATE TABLE IF NOT EXISTS ai_logs (
+  id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id     UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  task_id       UUID        REFERENCES ai_tasks(id) ON DELETE SET NULL,
+  intent        VARCHAR(50),
+  agent         VARCHAR(50),
+  input_preview TEXT,
+  status        VARCHAR(20), -- success|error|timeout|fallback
+  duration_ms   INTEGER,
+  n8n_called    BOOLEAN     NOT NULL DEFAULT false,
+  error         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_logs_tenant ON ai_logs(tenant_id, created_at DESC);
+
+-- ── AI AGENTS (registro de agentes) ───────────────────────────────
+CREATE TABLE IF NOT EXISTS ai_agents (
+  id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  slug         VARCHAR(50)  NOT NULL UNIQUE,
+  name         VARCHAR(100) NOT NULL,
+  description  TEXT,
+  endpoint     VARCHAR(200),
+  capabilities TEXT[],
+  priority     SMALLINT     DEFAULT 5,
+  active       BOOLEAN      NOT NULL DEFAULT true,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- Seed: 5 agentes base (idempotente)
+INSERT INTO ai_agents (slug, name, description, endpoint, capabilities, priority) VALUES
+  ('marketing', 'Agente Marketing',   'Gera copy, posts e campanhas WhatsApp/Instagram', '/api/v1/marketing/generate',  ARRAY['copy','instagram','whatsapp','campaign'], 5),
+  ('recovery',  'Agente Recuperação', 'Identifica e reativa clientes inativos via WA',   '/api/v1/recovery',            ARRAY['inactive_customers','reactivation'],     6),
+  ('manager',   'Agente Gerencial',   'Analisa KPIs, vendas e performance',              '/api/v1/manager/analyze',     ARRAY['kpis','sales','performance','report'],   4),
+  ('financial', 'Agente Financeiro',  'Interpreta lançamentos, despesas e caixa',        '/api/v1/financial/interpret', ARRAY['expenses','revenue','cashflow'],          3),
+  ('chat',      'Agente Chat',        'Resposta livre para perguntas do dono',           '/api/v1/chat/message',        ARRAY['general','faq','help'],                  8)
+ON CONFLICT (slug) DO NOTHING;
+
+-- ── CMV (Custo de Mercadoria Vendida) ─────────────────────────────
+-- Snapshot do custo no momento da venda — permite cálculo histórico preciso
+-- mesmo que cost_price do produto mude depois.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost  DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+-- Backfill: atualiza itens existentes com o custo atual do produto
+UPDATE order_items oi
+SET unit_cost  = p.cost_price,
+    total_cost = p.cost_price * COALESCE(oi.quantity, 1)
+FROM products p
+WHERE oi.product_id = p.id
+  AND oi.unit_cost = 0
+  AND p.cost_price > 0;
+
+-- ── FINANCE LOGS (auditoria financeira) ───────────────────────────
+-- Rastreia quem alterou o quê, quando, de onde.
+CREATE TABLE IF NOT EXISTS finance_logs (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id     UUID         REFERENCES users(id) ON DELETE SET NULL,
+  action      VARCHAR(50)  NOT NULL,
+  -- 'expense_created' | 'expense_paid' | 'expense_deleted' | 'expense_updated'
+  -- 'caixa_opened' | 'caixa_closed' | 'banco_debit' | 'banco_credit'
+  table_name  VARCHAR(50)  NOT NULL,
+  record_id   UUID,
+  before_data JSONB,
+  after_data  JSONB,
+  amount      DECIMAL(10,2),
+  ip          VARCHAR(45),
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_finance_logs_tenant ON finance_logs(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_finance_logs_user   ON finance_logs(user_id);
+
+-- ── GEOCOORDENADAS DE ENTREGA ──────────────────────────────────
+-- Salva lat/lng exato do pin do mapa no momento do pedido
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lat DECIMAL(10,7);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lng DECIMAL(10,7);
+
+-- ── PRODUÇÃO DIÁRIA (insumos) ──────────────────────────────────
+-- Fator de perda operacional por insumo (ex: 5 = 5% de descarte)
+ALTER TABLE insumos ADD COLUMN IF NOT EXISTS waste_factor DECIMAL(5,2) NOT NULL DEFAULT 0;
+
+-- Lote de produção: cozinheiro registra quanto preparou por turno
+CREATE TABLE IF NOT EXISTS production_batches (
+  id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id       UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  insumo_id       UUID          NOT NULL REFERENCES insumos(id) ON DELETE RESTRICT,
+  raw_quantity    DECIMAL(12,3) NOT NULL,    -- quantidade de insumo bruto consumida
+  cooked_quantity DECIMAL(12,3) NOT NULL,    -- quanto rendeu preparado (ex: 10kg cru → 25kg cozido)
+  remaining_qty   DECIMAL(12,3) NOT NULL,    -- saldo disponível (decrementado pelas vendas)
+  produced_at     DATE          NOT NULL DEFAULT CURRENT_DATE,
+  notes           TEXT,
+  created_by      UUID,
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_prod_batches_tenant_date ON production_batches(tenant_id, produced_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prod_batches_insumo      ON production_batches(insumo_id);
+
+-- Validade do lote preparado (ex: molho = 3 dias, arroz cozido = 24h)
+ALTER TABLE production_batches ADD COLUMN IF NOT EXISTS expires_at DATE;
+
+-- ── PERDAS OPERACIONAIS ────────────────────────────────────────
+-- Registro manual de descarte: queimado, vencido, quebrado, operacional
+CREATE TABLE IF NOT EXISTS waste_logs (
+  id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  insumo_id   UUID          REFERENCES insumos(id) ON DELETE SET NULL,
+  insumo_name VARCHAR(200)  NOT NULL,       -- snapshot do nome
+  unit        VARCHAR(20)   NOT NULL,
+  quantity    DECIMAL(12,3) NOT NULL,
+  reason_type VARCHAR(30)   NOT NULL DEFAULT 'operational',
+  -- reason_type: 'burned' | 'expired' | 'broken' | 'operational' | 'other'
+  notes       TEXT,
+  cost        DECIMAL(10,2) NOT NULL DEFAULT 0,  -- custo calculado no momento
+  created_by  UUID,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_waste_logs_tenant ON waste_logs(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_waste_logs_insumo ON waste_logs(insumo_id);
+
+-- ── MÓDULO PRODUÇÃO — LOTES MULTI-INSUMO ─────────────────────
+-- Agrupa múltiplos production_batches em uma sessão de produção do dia.
+-- Um lote = "a produção da manhã" (arroz + feijão + frango juntos).
+
+CREATE TABLE IF NOT EXISTS production_lots (
+  id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  date        DATE          NOT NULL DEFAULT CURRENT_DATE,
+  status      VARCHAR(20)   NOT NULL DEFAULT 'open', -- open | closed
+  notes       TEXT,
+  total_cost  NUMERIC(10,2) NOT NULL DEFAULT 0,
+  created_by  UUID,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  closed_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_production_lots_tenant_date ON production_lots(tenant_id, date DESC);
+
+-- Vincula cada batch ao lote que o originou
+ALTER TABLE production_batches ADD COLUMN IF NOT EXISTS lot_id UUID REFERENCES production_lots(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_prod_batches_lot ON production_batches(lot_id);
+
+-- ── PRECIFICADOR ──────────────────────────────────────────────
+-- Overhead operacional padrão por tenant (usados como defaults no precificador)
+CREATE TABLE IF NOT EXISTS pricing_overhead (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
+  embalagem        DECIMAL(10,4) NOT NULL DEFAULT 0,    -- R$ por unidade
+  gas              DECIMAL(10,4) NOT NULL DEFAULT 0,    -- R$ por unidade
+  energia          DECIMAL(10,4) NOT NULL DEFAULT 0,    -- R$ por unidade
+  taxa_app         DECIMAL(5,2)  NOT NULL DEFAULT 0,    -- % sobre preço de venda
+  taxa_pagamento   DECIMAL(5,2)  NOT NULL DEFAULT 0,    -- % sobre preço de venda
+  mao_obra         DECIMAL(10,4) NOT NULL DEFAULT 0,    -- R$ por unidade
+  margem_minima    DECIMAL(5,2)  NOT NULL DEFAULT 30,   -- % mínima de lucro
+  margem_desejada  DECIMAL(5,2)  NOT NULL DEFAULT 40,   -- % ideal de lucro
+  updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Histórico de cálculos de precificação (auditoria)
+CREATE TABLE IF NOT EXISTS pricing_calculations (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id       UUID          REFERENCES products(id) ON DELETE SET NULL,
+  product_name     VARCHAR(200)  NOT NULL,
+  custo_insumos    DECIMAL(10,4) NOT NULL DEFAULT 0,
+  custo_overhead   DECIMAL(10,4) NOT NULL DEFAULT 0,
+  custo_total      DECIMAL(10,4) NOT NULL DEFAULT 0,
+  preco_minimo     DECIMAL(10,2) NOT NULL DEFAULT 0,
+  preco_ideal      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  preco_sugerido   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  margem_real      DECIMAL(5,2),     -- se o produto já tem preço de venda
+  overhead_snapshot JSONB,           -- snapshot dos overheads usados
+  created_by       UUID,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pricing_calc_tenant ON pricing_calculations(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pricing_calc_product ON pricing_calculations(product_id);

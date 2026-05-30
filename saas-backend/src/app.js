@@ -34,6 +34,7 @@ const internalRoutes = require('./modules/internal/internal.routes');
 const aiRoutes       = require('./modules/ai/ai.routes');
 const addonsRoutes   = require('./modules/addons/addons.routes');
 const insumosRoutes    = require('./modules/insumos/insumos.routes');
+const producaoRoutes   = require('./modules/producao/producao.routes');
 const locationsRoutes  = require('./modules/locations/locations.routes');
 const couponsRoutes    = require('./modules/coupons/coupons.routes');
 const tablesRoutes     = require('./modules/tables/tables.routes');
@@ -127,6 +128,7 @@ app.use('/api/internal',   internalRoutes); // Chamado pelo AI Engine (VPS2) —
 app.use('/api/ai',         aiRoutes);       // Agentes IA (VPS2) — auth via JWT
 app.use('/api/addons',     addonsRoutes);   // Complementos / Adicionais
 app.use('/api/insumos',    insumosRoutes);  // Controle de insumos / ingredientes
+app.use('/api/producao',   producaoRoutes); // Lotes de produção (Módulo Produção)
 app.use('/api/coupons',    couponsRoutes);
 app.use('/api/tables',     tablesRoutes);
 app.use('/api/campaigns',  campaignsRoutes);
@@ -137,6 +139,7 @@ app.use('/api/promotions',     require('./modules/promotions/promotions.routes')
 app.use('/api/ratings',        require('./modules/ratings/ratings.routes'));
 app.use('/api/reservations',   require('./modules/reservations/reservations.routes'));
 app.use('/api/locations',      locationsRoutes);
+app.use('/api/incidents',      require('./modules/incidents/incidents.routes'));
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {
