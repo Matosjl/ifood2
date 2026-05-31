@@ -122,15 +122,22 @@ async function generatePixCharge(tenantId, orderId) {
  * OpenPix sends HMAC-SHA1 in the `x-webhook-signature` header.
  */
 async function handleWebhook(rawBody, signature, webhookSecret) {
-  // Verify signature (optional but recommended)
-  if (webhookSecret && signature) {
+  // Verificação de assinatura OBRIGATÓRIA quando webhookSecret está configurado
+  // Se webhookSecret não está configurado, loga aviso mas não bloqueia (retrocompatibilidade)
+  if (webhookSecret) {
+    if (!signature) {
+      throw new AppError('Webhook PIX rejeitado: assinatura ausente. Configure o webhookSecret na OpenPix.', 401);
+    }
     const expected = crypto
       .createHmac('sha1', webhookSecret)
       .update(rawBody)
       .digest('hex');
     if (expected !== signature) {
-      throw new AppError('Assinatura do webhook inválida', 401);
+      throw new AppError('Assinatura do webhook PIX inválida', 401);
     }
+  } else {
+    // Aviso: sem webhookSecret qualquer POST é aceito — configure na OpenPix
+    console.warn('[PIX webhook] ATENÇÃO: webhookSecret não configurado. Configure em Configurações → PIX para segurança máxima.');
   }
 
   let event;

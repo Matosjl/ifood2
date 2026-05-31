@@ -41,6 +41,18 @@ module.exports = {
   EVOLUTION_API_URL: process.env.EVOLUTION_API_URL || 'http://localhost:8080',
   EVOLUTION_API_KEY: process.env.EVOLUTION_API_KEY || '',
 
+  // n8n Automation Engine
+  N8N_URL:           process.env.N8N_URL           || 'http://172.19.0.1:5678',
+  N8N_API_KEY:       process.env.N8N_API_KEY       || '',
+
+  // Web Push (VAPID)
+  VAPID_PUBLIC_KEY:  process.env.VAPID_PUBLIC_KEY  || '',
+  VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
+  VAPID_SUBJECT:     process.env.VAPID_SUBJECT     || 'mailto:admin@zapfome.com.br',
+
+  // Frontend URL (used in push notification click actions)
+  FRONTEND_URL: process.env.FRONTEND_URL || 'https://zapfome.ddns.net',
+
   isDev:  () => process.env.NODE_ENV !== 'production',
   isProd: () => process.env.NODE_ENV === 'production',
 };

@@ -33,7 +33,8 @@ async function upsertLoyaltyCustomer(tenantId, phone, name) {
 const getMenu = asyncHandler(async (req, res) => {
   // Colunas de cashback são opcionais (migração pode não ter rodado ainda)
   const { rows: tenants } = await db.query(
-    `SELECT id, name, slug, whatsapp_number, address, cover_url, description
+    `SELECT id, name, slug, whatsapp_number, address, cover_url, description,
+            restaurant_lat, restaurant_lng, delivery_zones, delivery_zone_type
      FROM tenants WHERE slug = $1 AND active = true`,
     [req.params.slug]
   );
@@ -176,6 +177,7 @@ const createOrder = asyncHandler(async (req, res) => {
     customerName, customerPhone, customerAddress,
     deliveryType, notes, items, paymentMethod,
     useCashback, tableNumber,
+    deliveryLat, deliveryLng,
   } = req.body;
 
   if (!items?.length) throw new AppError('Adicione pelo menos 1 item.', 400);
@@ -221,6 +223,8 @@ const createOrder = asyncHandler(async (req, res) => {
         loyaltyCustomerId: loyaltyCustomer?.id ?? null,
         cashbackUsed,
         tableNumber: tableNumber || null,
+        deliveryLat:  deliveryLat  ? parseFloat(deliveryLat)  : null,
+        deliveryLng:  deliveryLng  ? parseFloat(deliveryLng)  : null,
       },
       idempotencyKey,
       isOnline: true,

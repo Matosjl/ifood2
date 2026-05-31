@@ -14,6 +14,7 @@ const getCurrent = asyncHandler(async (req, res) => {
      LIMIT  1`,
     [req.user.tenantId]
   );
+  res.set('Cache-Control', 'no-store');
   res.json({ success: true, data: rows[0] ?? null });
 });
 
@@ -65,21 +66,40 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const caixa = caixas[0];
   if (!caixa) throw new AppError('Nenhum caixa aberto encontrado.', 404);
 
-  // Summarize orders since caixa opened
+  // Summarize orders since caixa opened.
+  // JOIN com deliveries para calcular o valor real esperado no caixa físico:
+  // para entregas pagas em dinheiro, o motoboy ficou com driver_fee —
+  // o caixa não deve esperar o total completo nesses casos.
   const { rows: summary } = await db.query(
     `SELECT
        COUNT(*)::int                                                              AS total_orders,
-       COALESCE(SUM(total), 0)::float                                            AS total_revenue,
-       COALESCE(SUM(CASE WHEN payment_method='cash'    THEN total ELSE 0 END),0)::float AS cash,
-       COALESCE(SUM(CASE WHEN payment_method='pix'     THEN total ELSE 0 END),0)::float AS pix,
-       COALESCE(SUM(CASE WHEN payment_method='credit'  THEN total ELSE 0 END),0)::float AS credit,
-       COALESCE(SUM(CASE WHEN payment_method='debit'   THEN total ELSE 0 END),0)::float AS debit,
-       COALESCE(SUM(CASE WHEN payment_method='voucher' THEN total ELSE 0 END),0)::float AS voucher,
-       COALESCE(SUM(CASE WHEN payment_method='other'   THEN total ELSE 0 END),0)::float AS other
-     FROM orders
-     WHERE tenant_id = $1
-       AND status IN ('ready', 'delivered')
-       AND created_at >= $2`,
+       -- Receita contábil total (inclui delivery_fee — para banco_transactions)
+       COALESCE(SUM(o.total), 0)::float                                          AS total_revenue,
+       -- Valor esperado fisicamente no caixa:
+       --   entrega + dinheiro + entregue → desconta driver_fee (ficou com o motoboy)
+       --   PIX/cartão → motoboy recebe repasse separado, valor digital chega integral
+       --   retirada/mesa → comportamento normal
+       COALESCE(SUM(
+         CASE
+           WHEN o.payment_method = 'cash' AND o.delivery_type = 'delivery'
+           THEN o.total - COALESCE(d.driver_fee, 0)
+           ELSE o.total
+         END
+       ), 0)::float                                                               AS expected_cash_in_register,
+       -- Total de repasses ao motoboy no período (para transparência no fechamento)
+       COALESCE(SUM(COALESCE(d.driver_fee, 0))
+         FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                  AS total_driver_fees,
+       COALESCE(SUM(CASE WHEN o.payment_method='cash'    THEN o.total ELSE 0 END),0)::float AS cash,
+       COALESCE(SUM(CASE WHEN o.payment_method='pix'     THEN o.total ELSE 0 END),0)::float AS pix,
+       COALESCE(SUM(CASE WHEN o.payment_method='credit'  THEN o.total ELSE 0 END),0)::float AS credit,
+       COALESCE(SUM(CASE WHEN o.payment_method='debit'   THEN o.total ELSE 0 END),0)::float AS debit,
+       COALESCE(SUM(CASE WHEN o.payment_method='voucher' THEN o.total ELSE 0 END),0)::float AS voucher,
+       COALESCE(SUM(CASE WHEN o.payment_method='other'   THEN o.total ELSE 0 END),0)::float AS other
+     FROM orders o
+     LEFT JOIN deliveries d ON d.order_id = o.id AND d.status = 'delivered'
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready', 'delivered')
+       AND o.created_at >= $2`,
     [tenantId, caixa.opened_at]
   );
 
@@ -95,57 +115,86 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const totalCounted = cashC + cardC + pixC;
 
   // Diferença: positivo = sobra, negativo = falta
-  const discrepancy = parseFloat((totalCounted - s.total_revenue).toFixed(2));
+  // Usa expected_cash_in_register (não total_revenue) para não gerar
+  // cash_difference falso por driver_fee retido pelo motoboy em entregas em dinheiro
+  const discrepancy = parseFloat((totalCounted - s.expected_cash_in_register).toFixed(2));
 
   const paymentSummary = {
     cash: s.cash, pix: s.pix, credit: s.credit,
     debit: s.debit, voucher: s.voucher, other: s.other,
     // Valores contados pelo operador
-    cash_counted: cashC,
-    card_counted: cardC,
-    pix_counted:  pixC,
-    card_system:  cardSystem,
+    cash_counted:              cashC,
+    card_counted:              cardC,
+    pix_counted:               pixC,
+    card_system:               cardSystem,
+    // Logística: para transparência no fechamento
+    total_driver_fees:         s.total_driver_fees,
+    expected_cash_in_register: s.expected_cash_in_register,
   };
 
   const closingBalance = parseFloat(caixa.opening_balance) + cashC;
 
-  const { rows } = await db.query(
-    `UPDATE cash_registers
-     SET status          = 'closed',
-         closed_by       = $2,
-         closed_at       = NOW(),
-         total_revenue   = $3,
-         total_orders    = $4,
-         payment_summary = $5,
-         closing_balance = $6,
-         notes           = COALESCE($7, notes),
-         cash_counted    = $8,
-         card_counted    = $9,
-         pix_counted     = $10,
-         discrepancy     = $11
-     WHERE id = $1
-     RETURNING *`,
-    [caixa.id, req.user.userId, s.total_revenue, s.total_orders,
-     JSON.stringify(paymentSummary), closingBalance, notes ?? null,
-     cashC, cardC, pixC, discrepancy]
-  );
+  // ── TRANSAÇÃO ATÔMICA — caixa + banco_transactions fecham juntos ──
+  const dbClient = await db.getClient();
+  let closedCaixa;
+  try {
+    await dbClient.query('BEGIN');
 
-  // ── Registra no Banco virtual ─────────────────────────────────
-  // Entrada = total de receita do dia (o que o sistema registrou)
-  if (s.total_revenue > 0) {
-    await db.query(
-      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
-       VALUES ($1, 'credit', $2, $3, 'caixa', $4)`,
-      [
-        tenantId,
-        s.total_revenue,
-        `Fechamento de caixa — ${s.total_orders} pedido(s)`,
-        caixa.id,
-      ]
-    ).catch(() => {}); // non-blocking
+    const { rows } = await dbClient.query(
+      `UPDATE cash_registers
+       SET status          = 'closed',
+           closed_by       = $2,
+           closed_at       = NOW(),
+           total_revenue   = $3,
+           total_orders    = $4,
+           payment_summary = $5,
+           closing_balance = $6,
+           notes           = COALESCE($7, notes),
+           cash_counted    = $8,
+           card_counted    = $9,
+           pix_counted     = $10,
+           discrepancy     = $11
+       WHERE id = $1
+       RETURNING *`,
+      [caixa.id, req.user.userId, s.total_revenue, s.total_orders,
+       JSON.stringify(paymentSummary), closingBalance, notes ?? null,
+       cashC, cardC, pixC, discrepancy]
+    );
+    closedCaixa = rows[0];
+
+    // Registra no Banco virtual dentro da mesma transação
+    if (s.total_revenue > 0) {
+      await dbClient.query(
+        `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
+         VALUES ($1, 'credit', $2, $3, 'caixa', $4)`,
+        [tenantId, s.total_revenue,
+         `Fechamento de caixa — ${s.total_orders} pedido(s)`,
+         caixa.id]
+      );
+    }
+
+    await dbClient.query('COMMIT');
+  } catch (err) {
+    await dbClient.query('ROLLBACK');
+    throw err;
+  } finally {
+    dbClient.release();
   }
 
-  res.json({ success: true, data: rows[0] });
+  // ── Auto-incidente: diferença no fechamento ──────────────────
+  // Fora da transação — falha aqui não desfaz o fechamento do caixa
+  if (closedCaixa && discrepancy !== 0) {
+    const incidentSvc = require('../incidents/incidents.service');
+    incidentSvc.createIncident(tenantId, {
+      type:        'cash_difference',
+      orderId:     null,
+      cost:        Math.abs(discrepancy),
+      description: `Fechamento de caixa: esperado no caixa R$ ${s.expected_cash_in_register.toFixed(2)}${s.total_driver_fees > 0 ? ` (vendas R$ ${s.total_revenue.toFixed(2)} - repasse motoboys R$ ${s.total_driver_fees.toFixed(2)})` : ''}, contado R$ ${totalCounted.toFixed(2)}, diferença R$ ${discrepancy > 0 ? '+' : ''}${discrepancy.toFixed(2)}`,
+      source:      'auto',
+    }).catch(() => {}); // fire-and-forget — nunca bloqueia resposta
+  }
+
+  res.json({ success: true, data: closedCaixa });
 });
 
 // ── GET /api/caixa/history ────────────────────────────────────
@@ -228,7 +277,6 @@ const suprimento = asyncHandler(async (req, res) => {
 const getMovements = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
 
-  // Se não informar id, usa o caixa atualmente aberto
   let registerId = req.query.cash_register_id;
   if (!registerId) {
     const { rows } = await db.query(

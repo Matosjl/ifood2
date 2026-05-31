@@ -34,6 +34,8 @@ const normOrder = (o) => ({
   items:           o.items ?? [],
   neighborhood:    o.neighborhood    ?? null,
   payment_method:  o.payment_method  ?? o.paymentMethod,
+  deliveryLat:     o.deliveryLat     ?? o.delivery_lat     ?? null,
+  deliveryLng:     o.deliveryLng     ?? o.delivery_lng     ?? null,
 });
 
 // Status label map
@@ -455,10 +457,18 @@ export default function EntregasPage() {
 
   // ── Geocode delivery addresses ────────────────────────────
   useEffect(() => {
-    const pending = orders.filter(
-      (o) => o.customerAddress && !coords[o.id]
-    );
+    const pending = orders.filter((o) => o.customerAddress && !coords[o.id]);
     pending.forEach(async (o) => {
+      // Prioridade 1: coordenadas GPS já salvas no pedido
+      const lat = parseFloat(o.deliveryLat);
+      const lng = parseFloat(o.deliveryLng);
+      const validBR = (v) => !isNaN(v);
+      const inBrazil = (lt, ln) => lt >= -34 && lt <= 6 && ln >= -75 && ln <= -28;
+      if (validBR(lat) && validBR(lng) && inBrazil(lat, lng)) {
+        setCoords((prev) => ({ ...prev, [o.id]: [lng, lat] }));
+        return;
+      }
+      // Prioridade 2: geocodificar o endereço de texto
       const c = await geocodeAddress(o.customerAddress, o.neighborhood);
       if (c) setCoords((prev) => ({ ...prev, [o.id]: c }));
     });

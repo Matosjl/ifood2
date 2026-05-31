@@ -28,4 +28,12 @@ router.delete('/menu',                ctrl.clearWhatsAppMenu);
 // Uso
 router.get('/usage',                  ctrl.getUsage);
 
+// AI Center (chat admin)
+router.post('/center/chat',           ctrl.centerChat);
+router.get('/center/history',         ctrl.getChatHistory);
+router.delete('/center/history',      ctrl.clearChatHistory);
+router.get('/center/status',          ctrl.getCenterStatus);
+router.get('/center/logs',            ctrl.getLogs);
+router.get('/center/agents',          ctrl.getAgents);
+
 module.exports = router;

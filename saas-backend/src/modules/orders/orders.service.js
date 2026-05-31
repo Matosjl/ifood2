@@ -5,6 +5,10 @@ const Tenant       = require('../../models/Tenant');
 const AppError     = require('../../utils/AppError');
 const eventService = require('../../socket/eventService');
 const orderCache   = require('../../cache/orderCache');
+const { createLogger }   = require('../../utils/logger');
+const { createIncident } = require('../incidents/incidents.service');
+
+const logger = createLogger('orders.deductForOrder');
 
 // ── Cashback helpers (compartilhados com public.controller) ───
 
@@ -152,6 +156,8 @@ const createOrder = async (tenantId, {
   channel = 'manual', notes, items, deliveryType = 'pickup', paymentMethod = 'cash',
   deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey,
   loyaltyCustomerId = null, cashbackUsed = 0, tableNumber = null,
+  deliveryLat = null, deliveryLng = null,
+  cashChangeFor = null,
 }) => {
   if (!items?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
 
@@ -171,7 +177,7 @@ const createOrder = async (tenantId, {
     // Pre-carrega todos os produtos solicitados
     const productIds = [...new Set(items.map(i => i.productId))];
     const { rows: products } = await client.query(
-      `SELECT id, name, sale_type, sale_price, stock_qty, active
+      `SELECT id, name, sale_type, sale_price, stock_qty, active, cost_price, is_combo
        FROM products
        WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
       [productIds, tenantId]
@@ -211,9 +217,41 @@ const createOrder = async (tenantId, {
       resolvedItems.push({ ...item, product, qty, lineTotal });
     }
 
+    // Pré-carrega filhos de todos os combos presentes no pedido.
+    // Feito fora da transação de estoque para falhar cedo com erro claro.
+    const comboIds = [...new Set(
+      resolvedItems.filter(i => i.product.is_combo).map(i => i.product.id)
+    )];
+    const comboItemsMap = {};
+    if (comboIds.length > 0) {
+      const { getComboItems } = require('../combos/combos.service');
+      for (const cid of comboIds) {
+        const children = await getComboItems(tenantId, cid);
+        if (children.length === 0) {
+          const comboName = productMap[cid]?.name ?? cid;
+          throw new AppError(
+            `Combo "${comboName}" não tem itens cadastrados. Adicione itens ao combo antes de vender.`,
+            400
+          );
+        }
+        comboItemsMap[cid] = children;
+      }
+    }
+
     // Desconto atomico de estoque — UPDATE ... WHERE stock_qty >= qty
+    // Produtos normais: comportamento atual.
+    // Combos: baixar estoque de cada filho × quantidade do combo pedido.
     for (const item of resolvedItems) {
-      await Product.deductStock(item.product.id, tenantId, item.qty, client);
+      if (!item.product.is_combo) {
+        await Product.deductStock(item.product.id, tenantId, item.qty, client);
+      } else {
+        const children = comboItemsMap[item.product.id];
+        for (const child of children) {
+          const childQty = parseFloat((parseFloat(child.qty) * item.qty).toFixed(3));
+          await Product.deductStock(child.child_product_id, tenantId, childQty, client);
+        }
+        // Não desconta estoque do combo em si
+      }
     }
 
     const orderNumber = await Order.nextOrderNumber(tenantId, client);
@@ -228,9 +266,27 @@ const createOrder = async (tenantId, {
       loyaltyCustomerId: loyaltyCustomerId || null,
       cashbackUsed: parseFloat(cashbackUsed) || 0,
       tableNumber: tableNumber || null,
+      deliveryLat: deliveryLat || null,
+      deliveryLng: deliveryLng || null,
+      cashChangeFor: cashChangeFor ? parseFloat(cashChangeFor) : null,
     }, client);
 
     for (const item of resolvedItems) {
+      // Custo unitário:
+      //   Produto normal → cost_price do produto (snapshot no momento da venda)
+      //   Combo → soma dos custos dos filhos × quantidade de cada filho
+      let unitCost;
+      if (!item.product.is_combo) {
+        unitCost = parseFloat(item.product.cost_price) || 0;
+      } else {
+        const children = comboItemsMap[item.product.id];
+        unitCost = children.reduce((s, c) => {
+          return s + (parseFloat(c.cost_price) || 0) * parseFloat(c.qty);
+        }, 0);
+        unitCost = parseFloat(unitCost.toFixed(4));
+      }
+
+      const soldQty   = item.product.sale_type === 'kg' ? (item.weightKg || 0) : (item.quantity || 1);
       const orderItem = await Order.createItem({
         orderId:     order.id,
         productId:   item.product.id,
@@ -240,6 +296,8 @@ const createOrder = async (tenantId, {
         unitPrice:   parseFloat(item.product.sale_price),
         total:       parseFloat(item.lineTotal.toFixed(2)),
         notes:       item.notes,
+        unitCost,
+        totalCost:   parseFloat((unitCost * soldQty).toFixed(2)),
       }, client);
 
       // Salva complementos selecionados para este item
@@ -281,7 +339,21 @@ const createOrder = async (tenantId, {
     // Deduz insumos se pedido já nasce confirmado (pedido manual)
     if (initialStatus === 'confirmed') {
       const insumosSvc = require('../insumos/insumos.service');
-      insumosSvc.deductForOrder(tenantId, createdOrder.id).catch(() => {});
+      insumosSvc.deductForOrder(tenantId, createdOrder.id).catch((err) => {
+        logger.error('Falha ao deduzir insumos na criação do pedido', {
+          err: err.message,
+          tenantId,
+          orderId: createdOrder.id,
+          scope: 'createOrder',
+        });
+        createIncident(tenantId, {
+          type:        'inventory_deduction_failed',
+          orderId:     createdOrder.id,
+          cost:        0,
+          description: `Dedução de insumos falhou na criação do pedido: ${err.message}`,
+          source:      'auto',
+        }).catch(() => {}); // incidente é melhor-esforço, não pode quebrar o fluxo
+      });
     }
 
     // Aplica cashback para pedidos manuais (fire-and-forget)
@@ -412,10 +484,29 @@ const updateStatus = async (id, tenantId, status) => {
   // para que reconexão do socket não ressuscite pedidos já concluídos.
   orderCache.upsertOrder(tenantId, updatedOrder).catch(() => {});
 
+  // ── WhatsApp ao CLIENTE em cada mudança de status ─────────────
+  // confirmed / preparing / ready / delivering → mensagem automática
+  const waNotify = require('../../services/waNotify.service');
+  waNotify.notifyCustomer(tenantId, updatedOrder).catch(() => {});
+
   // Deduz insumos quando pedido é confirmado
   if (status === 'confirmed') {
     const insumosSvc = require('../insumos/insumos.service');
-    insumosSvc.deductForOrder(tenantId, id).catch(() => {});
+    insumosSvc.deductForOrder(tenantId, id).catch((err) => {
+      logger.error('Falha ao deduzir insumos na atualização de status', {
+        err: err.message,
+        tenantId,
+        orderId: id,
+        scope: 'updateOrderStatus',
+      });
+      createIncident(tenantId, {
+        type:        'inventory_deduction_failed',
+        orderId:     id,
+        cost:        0,
+        description: `Dedução de insumos falhou ao confirmar pedido: ${err.message}`,
+        source:      'auto',
+      }).catch(() => {}); // incidente é melhor-esforço, não pode quebrar o fluxo
+    });
   }
 
   // When an order is ready for delivery, notify connected drivers

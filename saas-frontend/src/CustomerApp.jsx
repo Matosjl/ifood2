@@ -3,6 +3,7 @@ import {
   getPublicMenu, createPublicOrder, trackPublicOrder,
   getPublicCustomer, submitPublicRating, getPublicOrderHistory,
 } from './api/public';
+import DeliveryMapPicker from './components/DeliveryMapPicker';
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -527,6 +528,21 @@ function TrackingPage({ order, tenant, onNewOrder, onBackToMenu, onRefresh, slug
 
   const [showRating, setShowRating] = useState(false);
   const ratingOpened = useRef(false);
+
+  // Live elapsed timer
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    if (!order?.created_at || delivered || cancelled) return;
+    const update = () => {
+      const ms = Date.now() - new Date(order.created_at).getTime();
+      const m  = Math.floor(ms / 60_000);
+      const s  = Math.floor((ms % 60_000) / 1000);
+      setElapsed(m > 0 ? `${m}m ${s}s` : `${s}s`);
+    };
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [order?.created_at, delivered, cancelled]);
   useEffect(() => {
     if (delivered && !order?.has_rating && !ratingOpened.current) {
       ratingOpened.current = true;
@@ -597,10 +613,21 @@ function TrackingPage({ order, tenant, onNewOrder, onBackToMenu, onRefresh, slug
               </div>
             </div>
             {!delivered && !cancelled && (
-              <div className="px-5 pb-4 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
-                <p className="text-[11px] text-gray-400">Atualizado automaticamente a cada 15 segundos</p>
-                <button onClick={onRefresh} className="ml-auto text-[11px] text-orange-400 font-bold">Atualizar</button>
+              <div className="px-5 pb-4 space-y-2">
+                {elapsed && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">⏱️</span>
+                      <span className="text-xs text-gray-500">Tempo aguardando</span>
+                    </div>
+                    <span className="text-sm font-black text-orange-500 tabular-nums">{elapsed}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+                  <p className="text-[11px] text-gray-400">Atualizado automaticamente a cada 15 segundos</p>
+                  <button onClick={onRefresh} className="ml-auto text-[11px] text-orange-400 font-bold">Atualizar</button>
+                </div>
               </div>
             )}
           </div>
@@ -732,6 +759,30 @@ export default function CustomerApp({ slug }) {
   const [submitting,      setSubmitting]      = useState(false);
   const [checkoutError,   setCheckoutError]   = useState(null);
 
+  // CEP Autocomplete
+  const [cep,             setCep]             = useState('');
+  const [cepStreet,       setCepStreet]       = useState('');
+  const [cepNeighborhood, setCepNeighborhood] = useState('');
+  const [cepCity,         setCepCity]         = useState('');
+  const [addressNumber,   setAddressNumber]   = useState('');
+  const [addressComplement, setAddressComplement] = useState('');
+  const [cepLoading,      setCepLoading]      = useState(false);
+  const [cepFound,        setCepFound]        = useState(false);
+  const cepRef = useRef(null);
+
+  // GPS auto-location
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsError,   setGpsError]   = useState(null);
+
+  // Map picker
+  const [showMap,          setShowMap]          = useState(false);
+  const [deliveryLat,      setDeliveryLat]      = useState(null);
+  const [deliveryLng,      setDeliveryLng]      = useState(null);
+  const [deliveryFeeMap,   setDeliveryFeeMap]   = useState(null); // null = use tenant default
+  const [deliveryEtaMap,   setDeliveryEtaMap]   = useState(null);
+  const [outsideZone,      setOutsideZone]      = useState(false);
+  const [mapConfirmed,     setMapConfirmed]     = useState(false); // address set via map
+
   // Fidelidade / cashback
   const [loyaltyData,    setLoyaltyData]    = useState(null);
   const [loyaltyMeta,    setLoyaltyMeta]    = useState(null);
@@ -768,6 +819,110 @@ export default function CustomerApp({ slug }) {
     setCustomerPhone(val);
     setUseCashback(false);
     fetchLoyalty(val);
+  };
+
+  // ── CEP Autocomplete ──────────────────────────────────────
+  const handleCepChange = async (raw) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+    // Format as 00000-000
+    const formatted = digits.length > 5 ? `${digits.slice(0,5)}-${digits.slice(5)}` : digits;
+    setCep(formatted);
+    setCepFound(false);
+    if (digits.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const d = await res.json();
+      if (d.erro) { setCepLoading(false); return; }
+      setCepStreet(d.logradouro || '');
+      setCepNeighborhood(d.bairro || '');
+      setCepCity(`${d.localidade}/${d.uf}`);
+      setCepFound(true);
+      // Build full address for submission
+      const full = [d.logradouro, d.bairro, `${d.localidade}/${d.uf}`, `CEP: ${formatted}`].filter(Boolean).join(', ');
+      setCustomerAddress(full);
+      // Focus number field
+      setTimeout(() => cepRef.current?.focus(), 80);
+    } catch { /* viacep offline — user can type manually */ }
+    finally { setCepLoading(false); }
+  };
+
+  const buildFullAddress = (number, complement) => {
+    const parts = [
+      cepStreet && `${cepStreet}${number ? `, ${number}` : ''}`,
+      complement,
+      cepNeighborhood,
+      cepCity,
+      cep && `CEP: ${cep}`,
+    ].filter(Boolean);
+    return parts.join(', ');
+  };
+
+  // ── GPS Auto-location ─────────────────────────────────────
+
+  const handleGpsLocate = () => {
+    if (!navigator.geolocation) {
+      setGpsError('GPS não suportado neste dispositivo.');
+      return;
+    }
+    setGpsLoading(true);
+    setGpsError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        try {
+          // Nominatim (OpenStreetMap) — free, no API key, works in Brazil
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`,
+            { headers: { 'Accept-Language': 'pt-BR' } }
+          );
+          const d = await res.json();
+          const a = d.address ?? {};
+          const street      = [a.road ?? a.street ?? '', a.house_number ?? ''].filter(Boolean).join(', ');
+          const neighborhood = a.suburb ?? a.neighbourhood ?? a.quarter ?? a.district ?? '';
+          const city         = `${a.city ?? a.town ?? a.municipality ?? a.county ?? ''}${a.state ? `/${a.state}` : ''}`;
+          const postcode     = a.postcode ?? '';
+
+          setCepStreet(street);
+          setCepNeighborhood(neighborhood);
+          setCepCity(city);
+          if (postcode) setCep(postcode.replace('-', '').slice(0, 5) + (postcode.replace('-', '').slice(5, 8) ? `-${postcode.replace('-', '').slice(5, 8)}` : ''));
+          setCepFound(true);
+
+          const full = [street, neighborhood, city, postcode && `CEP: ${postcode}`].filter(Boolean).join(', ');
+          setCustomerAddress(full);
+          // Focus number field
+          setTimeout(() => cepRef.current?.focus(), 80);
+        } catch {
+          setGpsError('Não foi possível identificar seu endereço. Digite manualmente.');
+        } finally {
+          setGpsLoading(false);
+        }
+      },
+      (err) => {
+        setGpsLoading(false);
+        if (err.code === 1) setGpsError('Permissão de localização negada. Digite seu CEP.');
+        else setGpsError('Localização indisponível. Use o CEP.');
+      },
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  };
+
+  // ── Map picker confirm ────────────────────────────────────
+  const handleMapConfirm = ({ lat, lng, address, neighborhood, city, cep: mapCep, fee, eta, outsideZone: oz }) => {
+    setDeliveryLat(lat);
+    setDeliveryLng(lng);
+    setDeliveryFeeMap(fee);
+    setDeliveryEtaMap(eta);
+    setOutsideZone(oz);
+    setCustomerAddress(address);
+    setCepStreet('');
+    setCepNeighborhood(neighborhood);
+    setCepCity(city);
+    if (mapCep) setCep(mapCep);
+    setCepFound(true);
+    setMapConfirmed(true);
+    setShowMap(false);
   };
 
   // ── Load menu ─────────────────────────────────────────────
@@ -883,6 +1038,8 @@ export default function CustomerApp({ slug }) {
         items,
         useCashback: useCashback && !!loyaltyData,
         tableNumber: tableParam || undefined,
+        deliveryLat:  deliveryLat  || undefined,
+        deliveryLng:  deliveryLng  || undefined,
       });
       const created = data.data ?? data;
       saveOrder(slug, created);
@@ -953,6 +1110,23 @@ export default function CustomerApp({ slug }) {
         onBackToMenu={() => setPage('menu')}
         onNewOrder={() => { setPage('menu'); setOrder(null); }}
         onRefresh={refreshOrder}
+      />
+    );
+  }
+
+  // ── Map picker overlay (renders above checkout/menu) ─────
+  if (showMap) {
+    const t = menuData?.tenant ?? {};
+    return (
+      <DeliveryMapPicker
+        initialLat={deliveryLat || t.restaurant_lat || -15.7942}
+        initialLng={deliveryLng || t.restaurant_lng || -47.8822}
+        deliveryZones={t.delivery_zones ?? []}
+        deliveryZoneType={t.delivery_zone_type ?? 'named'}
+        restaurantLat={t.restaurant_lat}
+        restaurantLng={t.restaurant_lng}
+        onConfirm={handleMapConfirm}
+        onClose={() => setShowMap(false)}
       />
     );
   }
@@ -1101,9 +1275,111 @@ export default function CustomerApp({ slug }) {
                   ))}
                 </div>
                 {deliveryType === 'delivery' && (
-                  <input type="text" placeholder="Endereço completo de entrega *"
-                    value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
+                  <div className="space-y-2">
+
+                    {/* ── Confirmed via map ── */}
+                    {mapConfirmed ? (
+                      <div className="space-y-2">
+                        <div className={`rounded-2xl px-4 py-3 border ${outsideZone ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+                          <div className="flex items-start gap-2">
+                            <span className="text-lg mt-0.5">📍</span>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-bold uppercase tracking-wide mb-0.5 ${outsideZone ? 'text-red-500' : 'text-green-600'}`}>
+                                {outsideZone ? 'Fora da área de entrega' : 'Endereço confirmado no mapa'}
+                              </p>
+                              <p className="text-sm font-semibold text-gray-800 leading-snug">{customerAddress}</p>
+                              {deliveryFeeMap !== null && !outsideZone && (
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span className="text-xs font-bold text-orange-600">
+                                    {deliveryFeeMap === 0 ? '🚀 Frete grátis' : `🚗 Taxa: ${fmtBRL(deliveryFeeMap)}`}
+                                  </span>
+                                  {deliveryEtaMap && <span className="text-xs text-gray-500">⏱️ {deliveryEtaMap}</span>}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setMapConfirmed(false); setShowMap(true); }}
+                          className="w-full text-xs font-bold text-blue-600 py-1.5 hover:underline"
+                        >
+                          🗺️ Ajustar no mapa
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* PRIMARY: GPS + Map */}
+                        <button
+                          type="button"
+                          onClick={() => setShowMap(true)}
+                          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-orange-500 text-white font-black text-sm shadow-md shadow-orange-200 hover:bg-orange-600 active:scale-95 transition-all"
+                        >
+                          🗺️ Escolher no mapa
+                        </button>
+
+                        {/* SECONDARY: GPS quick-fill */}
+                        <button
+                          type="button"
+                          onClick={handleGpsLocate}
+                          disabled={gpsLoading}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-50 border-2 border-blue-200 text-blue-700 font-bold text-sm hover:bg-blue-100 active:scale-95 transition-all disabled:opacity-60"
+                        >
+                          {gpsLoading
+                            ? <><div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /> Localizando…</>
+                            : <>📍 Usar minha localização</>}
+                        </button>
+                        {gpsError && <p className="text-xs text-red-500 px-1">{gpsError}</p>}
+
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-px bg-gray-200" />
+                          <span className="text-xs text-gray-400 font-medium">ou pelo CEP</span>
+                          <div className="flex-1 h-px bg-gray-200" />
+                        </div>
+
+                        {/* FALLBACK: CEP */}
+                        <div className="relative">
+                          <input
+                            type="text" inputMode="numeric" placeholder="CEP (00000-000)"
+                            value={cep} onChange={(e) => handleCepChange(e.target.value)}
+                            maxLength={9}
+                            className={`w-full border rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 bg-white pr-10 ${cepFound ? 'border-green-400 focus:ring-green-300' : 'border-gray-200 focus:ring-blue-400'}`}
+                          />
+                          {cepLoading && <div className="absolute right-3 top-3.5 w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+                          {cepFound && !cepLoading && <span className="absolute right-3 top-3 text-green-500 text-lg">✓</span>}
+                        </div>
+
+                        {cepFound ? (
+                          <>
+                            <div className="bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
+                              <p className="text-xs font-semibold text-green-700">
+                                {cepStreet && `${cepStreet}, `}{cepNeighborhood && `${cepNeighborhood}, `}{cepCity}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                ref={cepRef}
+                                type="text" inputMode="numeric" placeholder="Número *"
+                                value={addressNumber}
+                                onChange={(e) => { setAddressNumber(e.target.value); setCustomerAddress(buildFullAddress(e.target.value, addressComplement)); }}
+                                className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                              />
+                              <input
+                                type="text" placeholder="Complemento"
+                                value={addressComplement}
+                                onChange={(e) => { setAddressComplement(e.target.value); setCustomerAddress(buildFullAddress(addressNumber, e.target.value)); }}
+                                className="border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <input type="text" placeholder="Ou digite o endereço completo"
+                            value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -1191,7 +1467,7 @@ export default function CustomerApp({ slug }) {
   const STATUS_LABEL_SHORT = { pending: 'Aguardando confirmação', confirmed: 'Confirmado', preparing: 'Em preparo 👨‍🍳', ready: 'Pronto! ✅', delivering: 'Saiu para entrega 🛵' };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-zinc-950">
 
       {/* Banner de pedido ativo — sticky no topo */}
       {hasActiveOrder && (
@@ -1216,12 +1492,13 @@ export default function CustomerApp({ slug }) {
       )}
 
       {/* Hero header */}
-      <div className="relative overflow-hidden" style={{ minHeight: 180 }}>
+      <div className="relative overflow-hidden" style={{ minHeight: 220 }}>
         {tenant.cover_url
           ? <img src={tenant.cover_url} alt={tenant.name} className="absolute inset-0 w-full h-full object-cover" />
-          : <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500" />
+          : <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900" />
         }
-        <div className="absolute inset-0 bg-black/40" />
+        {/* Premium dark vignette */}
+        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-black/50 to-black/20" />
 
         <div className="relative px-4 pt-8 pb-5 text-white">
           <div className="flex items-start justify-between gap-3">
@@ -1285,18 +1562,22 @@ export default function CustomerApp({ slug }) {
             </svg>
             <input ref={searchRef} type="search" placeholder="Buscar no cardápio..."
               value={search} onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-white rounded-2xl pl-10 pr-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-300 shadow-lg" />
+              className="w-full bg-zinc-900/90 backdrop-blur border border-white/10 rounded-2xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-400/50 shadow-lg" />
           </div>
         </div>
       </div>
 
-      {/* Category tabs */}
+      {/* Category tabs — dark premium */}
       {!search && categories.length > 1 && (
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 shadow-sm">
-          <div className="flex gap-1 overflow-x-auto px-3 py-2.5 scrollbar-none">
+        <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur border-b border-white/[0.06]">
+          <div className="flex gap-1.5 overflow-x-auto px-3 py-3 scrollbar-none">
             {categories.map((cat) => (
               <button key={cat.name} onClick={() => setActiveCategory(cat.name)}
-                className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-all ${activeCategory === cat.name ? 'bg-orange-500 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-all ${
+                  activeCategory === cat.name
+                    ? 'bg-amber-400 text-zinc-900 shadow-sm shadow-amber-400/20'
+                    : 'bg-white/[0.07] text-zinc-400 hover:text-white hover:bg-white/10'
+                }`}>
                 {cat.name}
               </button>
             ))}
@@ -1307,14 +1588,14 @@ export default function CustomerApp({ slug }) {
       {/* Destaques */}
       {featured.length > 0 && !search && (
         <div className="px-4 pt-4 pb-2">
-          <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider mb-3">⭐ Destaques</h2>
+          <h2 className="text-sm font-black text-amber-400 uppercase tracking-wider mb-3">⭐ Destaques</h2>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4">
             {featured.map(product => {
               const inCart = cart[product.id];
               const grad   = getCategoryGradient(product.category_name ?? product.name);
               return (
                 <div key={product.id}
-                  className="shrink-0 w-40 bg-white rounded-2xl shadow-md overflow-hidden border border-gray-100 flex flex-col cursor-pointer active:scale-95 transition-transform"
+                  className="shrink-0 w-40 bg-zinc-900 rounded-2xl overflow-hidden border border-white/[0.08] flex flex-col cursor-pointer active:scale-95 transition-transform hover:border-amber-400/30"
                   onClick={() => !inCart && handleAdd(product)}>
                   <div className={`h-28 relative ${!product.image_url ? `bg-gradient-to-br ${grad}` : ''}`}>
                     {product.image_url
@@ -1324,10 +1605,10 @@ export default function CustomerApp({ slug }) {
                     {inCart && <div className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow">{inCart.qty}</div>}
                   </div>
                   <div className="p-2.5 flex-1 flex flex-col justify-between">
-                    <p className="text-xs font-bold text-gray-800 leading-tight line-clamp-2">{product.name}</p>
+                    <p className="text-xs font-bold text-zinc-100 leading-tight line-clamp-2">{product.name}</p>
                     <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-orange-600 font-black text-sm">{fmtBRL(product.sale_price)}</span>
-                      {!inCart ? <span className="text-orange-500 text-lg font-black">+</span> : <span className="text-green-500 text-xs font-bold">✓</span>}
+                      <span className="text-amber-400 font-black text-sm">{fmtBRL(product.sale_price)}</span>
+                      {!inCart ? <span className="text-amber-400 text-lg font-black">+</span> : <span className="text-green-400 text-xs font-bold">✓</span>}
                     </div>
                   </div>
                 </div>
@@ -1340,18 +1621,18 @@ export default function CustomerApp({ slug }) {
       {/* Products */}
       <div className="max-w-3xl mx-auto px-4 pt-4 pb-32">
         {search && filteredCategories.length === 0 && (
-          <div className="text-center py-16 text-gray-400"><div className="text-5xl mb-3">🔍</div><p className="font-semibold">Nenhum produto encontrado</p><p className="text-sm mt-1">Tente buscar por outro nome</p></div>
+          <div className="text-center py-16 text-zinc-500"><div className="text-5xl mb-3">🔍</div><p className="font-semibold text-zinc-300">Nenhum produto encontrado</p><p className="text-sm mt-1">Tente buscar por outro nome</p></div>
         )}
         {!search && categories.length === 0 && (
-          <div className="text-center py-20 text-gray-400"><div className="text-5xl mb-3">🍽️</div><p className="font-semibold">Cardápio em breve!</p></div>
+          <div className="text-center py-20 text-zinc-500"><div className="text-5xl mb-3">🍽️</div><p className="font-semibold text-zinc-300">Cardápio em breve!</p></div>
         )}
 
         {displayCats.map((cat) => (
-          <div key={cat.name} className="mb-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex-1 h-px bg-gray-200" />
-              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest px-2">{cat.name}</h2>
-              <div className="flex-1 h-px bg-gray-200" />
+          <div key={cat.name} className="mb-8">
+            {/* Category divider — premium style */}
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-xs font-black text-amber-400/80 uppercase tracking-widest">{cat.name}</h2>
+              <div className="flex-1 h-px bg-white/[0.06]" />
             </div>
             <div className="space-y-3">
               {(cat.items ?? []).map((product) => {
@@ -1360,22 +1641,28 @@ export default function CustomerApp({ slug }) {
                 const hasAddons  = (product.addon_groups ?? []).length > 0;
                 return (
                   <div key={product.id}
-                    className={`bg-white rounded-2xl shadow-sm border overflow-hidden transition-all ${outOfStock ? 'opacity-50' : 'hover:shadow-md'} ${inCart ? 'border-orange-300 ring-2 ring-orange-200' : 'border-gray-100'}`}>
-                    <div className="flex gap-3 p-3">
+                    className={`rounded-2xl border overflow-hidden transition-all ${
+                      outOfStock ? 'opacity-40' : ''
+                    } ${
+                      inCart
+                        ? 'bg-zinc-800/80 border-amber-400/30 ring-1 ring-amber-400/20'
+                        : 'bg-zinc-900 border-white/[0.07] hover:border-white/[0.14]'
+                    }`}>
+                    <div className="flex gap-3 p-3.5">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start gap-1 flex-wrap mb-0.5">
-                          {product.featured && <span className="text-[10px] bg-yellow-100 text-yellow-700 font-bold px-1.5 py-0.5 rounded-full">⭐ Destaque</span>}
-                          {outOfStock && <span className="text-[10px] bg-red-100 text-red-500 font-bold px-2 py-0.5 rounded-full">Esgotado</span>}
-                          {hasAddons && <span className="text-[10px] bg-orange-100 text-orange-600 font-bold px-1.5 py-0.5 rounded-full">🍟 Personalizável</span>}
+                        <div className="flex items-start gap-1 flex-wrap mb-1">
+                          {product.featured && <span className="text-[10px] bg-amber-400/20 text-amber-300 font-bold px-1.5 py-0.5 rounded-full">⭐ Destaque</span>}
+                          {outOfStock && <span className="text-[10px] bg-red-500/15 text-red-400 font-bold px-2 py-0.5 rounded-full">Esgotado</span>}
+                          {hasAddons && <span className="text-[10px] bg-orange-500/15 text-orange-300 font-bold px-1.5 py-0.5 rounded-full">🍟 Personalizável</span>}
                         </div>
-                        <p className="font-bold text-gray-900 text-sm leading-tight">{product.name}</p>
-                        {product.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{product.description}</p>}
+                        <p className="font-bold text-zinc-100 text-sm leading-tight">{product.name}</p>
+                        {product.description && <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">{product.description}</p>}
                         {inCart?.addons?.length > 0 && (
-                          <p className="text-xs text-orange-500 mt-1">+ {inCart.addons.map(a => `${a.addon_name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(', ')}</p>
+                          <p className="text-xs text-amber-400/80 mt-1">+ {inCart.addons.map(a => `${a.addon_name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(', ')}</p>
                         )}
-                        <div className="flex items-center justify-between mt-2 gap-2">
-                          <span className="text-orange-600 font-black text-base">
-                            {fmtBRL(product.sale_price)}{product.sale_type === 'kg' && <span className="text-xs font-semibold text-gray-400">/kg</span>}
+                        <div className="flex items-center justify-between mt-2.5 gap-2">
+                          <span className="text-amber-400 font-black text-base tabular-nums">
+                            {fmtBRL(product.sale_price)}{product.sale_type === 'kg' && <span className="text-xs font-semibold text-zinc-500">/kg</span>}
                           </span>
                           {!outOfStock && (
                             product.sale_type === 'kg' ? (
@@ -1383,28 +1670,28 @@ export default function CustomerApp({ slug }) {
                                 value={inCart?.weightKg ?? ''}
                                 onChange={(e) => { if (!inCart) setCart((c) => addToCart(c, product)); setWeight(product.id, e.target.value); }}
                                 onFocus={() => { if (!inCart) setCart((c) => addToCart(c, product)); }}
-                                className="w-24 border border-gray-200 rounded-xl px-2 py-1.5 text-sm text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                                className="w-24 bg-zinc-800 border border-white/10 rounded-xl px-2 py-1.5 text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-amber-400" />
                             ) : inCart ? (
                               <div className="flex items-center gap-2">
                                 {hasAddons && (
-                                  <button onClick={() => handleAdd(product)} className="text-[10px] font-bold text-orange-500 hover:text-orange-700 border border-orange-300 px-1.5 py-1 rounded-lg transition-colors">editar</button>
+                                  <button onClick={() => handleAdd(product)} className="text-[10px] font-bold text-amber-400 hover:text-amber-300 border border-amber-400/30 px-1.5 py-1 rounded-lg transition-colors">editar</button>
                                 )}
                                 <button onClick={() => { if (inCart.qty <= 1) setCart((c) => removeFromCart(c, product.id)); else setQty(product.id, inCart.qty - 1); }}
-                                  className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 font-black text-lg flex items-center justify-center hover:bg-orange-200">−</button>
-                                <span className="w-6 text-center font-black text-gray-900 text-sm tabular-nums">{inCart.qty}</span>
+                                  className="w-8 h-8 rounded-xl bg-zinc-700 text-white font-black text-lg flex items-center justify-center hover:bg-zinc-600">−</button>
+                                <span className="w-6 text-center font-black text-white text-sm tabular-nums">{inCart.qty}</span>
                                 <button onClick={() => setQty(product.id, inCart.qty + 1)}
-                                  className="w-8 h-8 rounded-xl bg-orange-500 text-white font-black text-lg flex items-center justify-center hover:bg-orange-600">+</button>
+                                  className="w-8 h-8 rounded-xl bg-amber-400 text-zinc-900 font-black text-lg flex items-center justify-center hover:bg-amber-300">+</button>
                               </div>
                             ) : (
                               <button onClick={() => handleAdd(product)}
-                                className="flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-3 py-1.5 rounded-xl transition-colors shadow-sm active:scale-95">
+                                className="flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-zinc-900 font-black text-sm px-3.5 py-2 rounded-xl transition-colors active:scale-95">
                                 <span className="text-base leading-none">+</span>Adicionar
                               </button>
                             )
                           )}
                         </div>
                       </div>
-                      <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 shrink-0 self-start">
+                      <div className="w-24 h-24 rounded-xl overflow-hidden bg-zinc-800 shrink-0 self-start">
                         {product.image_url
                           ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
                           : <div className={`w-full h-full bg-gradient-to-br ${getCategoryGradient(product.category_name ?? product.name)} flex items-center justify-center text-4xl`}>{getProductEmoji(product.name)}</div>

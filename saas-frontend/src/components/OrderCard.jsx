@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { printOrder, printKitchen } from '../utils/print';
 import { PAY_ICONS, PAY_LABELS } from '../constants/orders';
 import PixQrModal from './PixQrModal';
+import api from '../api/axios';
 
 // ── Status config ─────────────────────────────────────────────
 
@@ -70,6 +71,9 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
   const [payLoading,      setPayLoading]       = useState(false);
   const [showDriverPick,  setShowDriverPick]   = useState(false);  // picker de motoboy
   const [assigning,       setAssigning]        = useState(false);
+  const [changeConfirmed, setChangeConfirmed]  = useState(
+    order.cashChangeConfirmed !== undefined ? order.cashChangeConfirmed : null
+  ); // null = pendente, true = entregue, false = não entregue
   const cfg = STATUS[order.status] ?? STATUS.pending;
 
   // Pagamento pendente: criado com 'A cobrar' e ainda não recebido
@@ -282,7 +286,7 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">🏪 Retirada</span>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {isPendingPayment ? (
               <span className="text-xs font-semibold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded whitespace-nowrap">
                 ⏳ A cobrar
@@ -292,12 +296,74 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
                 ✓ Pago · {PAY_ICONS[order.paymentMethod] ?? '💵'} {PAY_LABELS[order.paymentMethod] ?? order.paymentMethod}
               </span>
             ) : (
-              <span className="text-xs text-gray-400 whitespace-nowrap">
-                {PAY_ICONS[order.paymentMethod] ?? '💵'} {PAY_LABELS[order.paymentMethod] ?? order.paymentMethod}
-              </span>
+              <>
+                <span className="text-xs text-gray-400 whitespace-nowrap">
+                  {PAY_ICONS[order.paymentMethod] ?? '💵'} {PAY_LABELS[order.paymentMethod] ?? order.paymentMethod}
+                </span>
+                {/* Botão de confirmação de pagamento para pedidos sem paid_at */}
+                {!['cancelled'].includes(order.status) && (
+                  <button
+                    onClick={() => setShowPayPick(true)}
+                    className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded transition-colors whitespace-nowrap"
+                  >
+                    ✓ Confirmar pag.
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
+        {/* ⚠️ ALERTA DE TROCO — com confirmação pós-entrega */}
+        {order.cashChangeRequired > 0 && (
+          <div className={`flex items-start gap-2 rounded-lg px-2.5 py-1.5 mt-1 border ${
+            changeConfirmed === true  ? 'bg-green-500/10 border-green-500/30' :
+            changeConfirmed === false ? 'bg-red-500/10   border-red-500/30'   :
+                                        'bg-yellow-500/20 border-yellow-500/50'
+          }`}>
+            <span className="text-base shrink-0 mt-0.5">
+              {changeConfirmed === true ? '✅' : changeConfirmed === false ? '❌' : '💵'}
+            </span>
+            <div className="min-w-0 flex-1">
+              {changeConfirmed === true ? (
+                <p className="text-xs font-semibold text-green-400 leading-none">Troco R$ {order.cashChangeRequired.toFixed(2).replace('.', ',')} entregue</p>
+              ) : changeConfirmed === false ? (
+                <p className="text-xs font-semibold text-red-400 leading-none">Troco não entregue — incidente criado</p>
+              ) : (
+                <>
+                  <p className="text-xs font-black text-yellow-300 leading-none">
+                    LEVAR R$ {order.cashChangeRequired.toFixed(2).replace('.', ',')} DE TROCO
+                  </p>
+                  <p className="text-[10px] text-yellow-500 mt-0.5">
+                    Cliente paga R$ {order.cashChangeFor.toFixed(2).replace('.', ',')}
+                  </p>
+                  {/* Botões de confirmação — aparecem após o pedido ser entregue */}
+                  {['delivering','delivered'].includes(order.status) && (
+                    <div className="flex gap-1.5 mt-1.5">
+                      <button
+                        onClick={async () => {
+                          await api.patch(`/incidents/confirm-change/${order.id}`, { delivered: true }).catch(() => {});
+                          setChangeConfirmed(true);
+                        }}
+                        className="flex-1 text-[10px] font-bold py-1 rounded-lg bg-green-600/30 hover:bg-green-600/50 text-green-300 border border-green-500/30 transition-colors"
+                      >
+                        ✓ Entregue
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await api.patch(`/incidents/confirm-change/${order.id}`, { delivered: false }).catch(() => {});
+                          setChangeConfirmed(false);
+                        }}
+                        className="flex-1 text-[10px] font-bold py-1 rounded-lg bg-red-600/30 hover:bg-red-600/50 text-red-300 border border-red-500/30 transition-colors"
+                      >
+                        ✗ Não entregue
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {order.notes && (
           <span className="text-xs text-amber-400/80 italic truncate block" title={order.notes}>
             💬 {order.notes}
@@ -308,14 +374,18 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       {/* Picker inline de forma de pagamento */}
       {showPayPick && (
         <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-2">
-          <p className="text-xs text-gray-400 font-semibold">Selecione a forma de pagamento:</p>
+          <p className="text-xs text-gray-400 font-semibold">✓ Confirmar pagamento recebido:</p>
           <div className="grid grid-cols-3 gap-1">
-            {PAY_OPTIONS.map(({ value, label }) => (
+            {PAY_OPTIONS.filter(o => !['pending','fiado'].includes(o.value)).map(({ value, label }) => (
               <button
                 key={value}
                 disabled={payLoading}
                 onClick={() => handleReceivePay(value)}
-                className="py-1.5 px-1 rounded-lg text-xs font-semibold bg-gray-700/80 hover:bg-green-600/30 hover:text-green-300 text-gray-300 transition-colors disabled:opacity-50"
+                className={`py-1.5 px-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+                  order.paymentMethod === value
+                    ? 'bg-green-600/40 text-green-200 border border-green-500/50'
+                    : 'bg-gray-700/80 hover:bg-green-600/30 hover:text-green-300 text-gray-300'
+                }`}
               >
                 {label}
               </button>

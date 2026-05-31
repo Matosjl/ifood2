@@ -135,6 +135,68 @@ const getUsage = asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 });
 
+// ── AI Center (chat admin) ─────────────────────────────────────────
+
+/** POST /api/ai/center/chat */
+const centerChat = asyncHandler(async (req, res) => {
+  const { message } = req.body;
+  if (!message || !message.trim()) throw new AppError('message obrigatório', 400);
+  const result = await aiService.centerChat(req.user.tenantId, message.trim());
+  res.json({ success: true, data: result });
+});
+
+/** GET /api/ai/center/history */
+const getChatHistory = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const result = await aiService.getChatHistory(req.user.tenantId, limit);
+  res.json({ success: true, data: result });
+});
+
+/** DELETE /api/ai/center/history */
+const clearChatHistory = asyncHandler(async (req, res) => {
+  await aiService.clearChatHistory(req.user.tenantId);
+  res.json({ success: true, message: 'Histórico apagado com sucesso.' });
+});
+
+/** GET /api/ai/center/status — status dos webhooks n8n + AI Engine */
+const getCenterStatus = asyncHandler(async (req, res) => {
+  const n8nSvc = require('../../services/n8n.service');
+
+  const [n8nOk, campaignOk, recoveryOk, reportOk, vps2Ok] = await Promise.all([
+    n8nSvc.isHealthy(),
+    n8nSvc.isWebhookActive('zapfome/campaign'),
+    n8nSvc.isWebhookActive('zapfome/recovery'),
+    n8nSvc.isWebhookActive('zapfome/report'),
+    aiService.isHealthy(),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      n8n:     { healthy: n8nOk },
+      vps2:    { healthy: vps2Ok },
+      webhooks: {
+        campaign: campaignOk,
+        recovery: recoveryOk,
+        report:   reportOk,
+      },
+    },
+  });
+});
+
+/** GET /api/ai/center/logs — observabilidade */
+const getLogs = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const result = await aiService.getLogs(req.user.tenantId, limit);
+  res.json({ success: true, data: result });
+});
+
+/** GET /api/ai/center/agents — registro de agentes */
+const getAgents = asyncHandler(async (req, res) => {
+  const result = await aiService.getAgents();
+  res.json({ success: true, data: result });
+});
+
 module.exports = {
   interpretFinancial,
   managerAnalyze,
@@ -146,4 +208,10 @@ module.exports = {
   getWhatsAppMenu,
   clearWhatsAppMenu,
   getUsage,
+  centerChat,
+  getChatHistory,
+  clearChatHistory,
+  getCenterStatus,
+  getLogs,
+  getAgents,
 };

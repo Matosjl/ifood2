@@ -2,7 +2,7 @@
   "name": "ZapFome — Gestão de Restaurante",
   "short_name": "ZapFome",
   "description": "Sistema completo de gestão para restaurantes: pedidos, cozinha, entregas e muito mais.",
-  "start_url": "/",
+  "start_url": "/entrar",
   "scope": "/",
   "display": "standalone",
   "background_color": "#030712",

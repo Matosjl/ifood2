@@ -1,6 +1,6 @@
 import api from './axios';
 
-export const getCurrentCaixa  = ()            => api.get('/caixa/current');
+export const getCurrentCaixa  = ()            => api.get('/caixa/current', { params: { _t: Date.now() } });
 export const openCaixa        = (body)        => api.post('/caixa/open', body);
 export const closeCaixa       = (body = {})   => api.post('/caixa/close', body);
 export const getCaixaHistory  = (params = {}) => api.get('/caixa/history', { params });

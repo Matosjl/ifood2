@@ -51,4 +51,31 @@ async function sendAlert(type, message) {
   }
 }
 
-module.exports = { sendAlert };
+/**
+ * Envia alerta para um telefone específico (usado pelo automation worker).
+ * Cooldown independente por (type + phone).
+ */
+async function sendAlertToPhone(type, phone, message) {
+  if (!phone || !env.EVOLUTION_API_URL || !env.EVOLUTION_API_KEY) {
+    logger.warn('sendAlertToPhone: telefone ou Evolution não configurado', { type });
+    return;
+  }
+
+  const key = `${type}:${phone}`;
+  const now  = Date.now();
+  if (lastSentAt[key] && now - lastSentAt[key] < COOLDOWN_MS) return;
+  lastSentAt[key] = now;
+
+  try {
+    await axios.post(
+      `${env.EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`,
+      { number: phone, text: message },
+      { headers: { apikey: env.EVOLUTION_API_KEY }, timeout: 8_000 }
+    );
+    logger.info('Alerta enviado', { type, phone });
+  } catch (err) {
+    logger.error('Falha ao enviar alerta', { type, error: err.message });
+  }
+}
+
+module.exports = { sendAlert, sendAlertToPhone };

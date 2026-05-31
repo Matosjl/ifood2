@@ -139,15 +139,17 @@ class Order {
     { tenantId, orderNumber, customerName, customerPhone, customerAddress,
       channel, total, notes, deliveryType = 'pickup', paymentMethod = 'cash',
       deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey = null,
-      loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0, tableNumber = null },
+      loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0, tableNumber = null,
+      deliveryLat = null, deliveryLng = null, cashChangeFor = null },
     dbClient = db
   ) {
     const { rows } = await dbClient.query(
       `INSERT INTO orders
          (tenant_id, order_number, customer_name, customer_phone, customer_address,
           channel, total, notes, delivery_type, payment_method, delivery_fee, neighborhood, status, idempotency_key,
-          loyalty_customer_id, cashback_earned, cashback_used, table_number)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          loyalty_customer_id, cashback_earned, cashback_used, table_number,
+          delivery_lat, delivery_lng, cash_change_for)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING *`,
       [tenantId, orderNumber, customerName || null, customerPhone || null,
        customerAddress || null, channel || 'manual', total, notes || null,
@@ -156,19 +158,23 @@ class Order {
        loyaltyCustomerId || null,
        parseFloat(cashbackEarned) || 0,
        parseFloat(cashbackUsed)   || 0,
-       tableNumber || null]
+       tableNumber || null,
+       deliveryLat  ? parseFloat(deliveryLat)  : null,
+       deliveryLng  ? parseFloat(deliveryLng)  : null,
+       cashChangeFor ? parseFloat(cashChangeFor) : null]
     );
     return rows[0];
   }
 
   /** Insere um item no pedido. Chamar dentro de transaction. */
-  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes }, dbClient = db) {
+  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes, unitCost = 0, totalCost = 0 }, dbClient = db) {
     const { rows } = await dbClient.query(
       `INSERT INTO order_items
-         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes, unit_cost, total_cost)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
-      [orderId, productId || null, productName, quantity, weightKg || null, unitPrice, total, notes || null]
+      [orderId, productId || null, productName, quantity, weightKg || null, unitPrice, total, notes || null,
+       parseFloat(unitCost) || 0, parseFloat(totalCost) || 0]
     );
     return rows[0];
   }

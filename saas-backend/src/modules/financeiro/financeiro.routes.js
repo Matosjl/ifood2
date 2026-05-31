@@ -11,6 +11,9 @@ router.get('/summary',  ctrl.summary);
 // ── Monthly result (revenue vs expenses) ─────────────────────
 router.get('/result',   ctrl.getResult);
 
+// ── CMV por produto ───────────────────────────────────────────
+router.get('/cmv',      ctrl.getCmvByProduct);
+
 // ── Expenses ──────────────────────────────────────────────────
 router.get('/expenses/reminders', ctrl.getReminders);
 router.get('/expenses',           ctrl.listExpenses);

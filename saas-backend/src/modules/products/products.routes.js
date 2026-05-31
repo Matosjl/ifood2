@@ -22,6 +22,8 @@ const productRules = [
     .withMessage('Preço de venda inválido.'),
   body('stock_qty').optional().isFloat({ min: 0 })
     .withMessage('Estoque inválido.'),
+  body('isCombo').optional().isBoolean()
+    .withMessage('isCombo deve ser true ou false.'),
 ];
 
 const replenishRules = [

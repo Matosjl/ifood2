@@ -12,6 +12,7 @@ import RelatoriosPage    from './pages/RelatoriosPage';
 import EntregasPage      from './pages/EntregasPage';
 import PlansPage         from './pages/PlansPage';
 import AIInsightsPage    from './pages/AIInsightsPage';
+import AICenterPage      from './pages/AICenterPage';
 import ClientesPage      from './pages/ClientesPage';
 import AddonsPage        from './pages/AddonsPage';
 import FidelidadePage    from './pages/FidelidadePage';
@@ -29,6 +30,7 @@ import AvaliacoesPage    from './pages/AvaliacoesPage';
 import ReservasPage      from './pages/ReservasPage';
 import MesasPage         from './pages/MesasPage';
 import OfflineBanner     from './components/OfflineBanner';
+import TimelinePanel    from './components/TimelinePanel';
 
 // ── Routing helper ────────────────────────────────────────────
 const getRoute = () => window.location.pathname;
@@ -165,12 +167,12 @@ export default function App() {
           onShowPlans={handleShowPlans}
         />
 
-        <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+        <div className="flex-1 min-w-0 overflow-hidden flex flex-col pb-16 md:pb-0">
           {showPlansPage ? (
             <PlansPage />
           ) : (
             <>
-              {page === 'orders'     && <DashboardPage />}
+              {page === 'orders'     && <DashboardPage onNavigate={setPage} />}
               {page === 'kds'        && <KdsPage />}
               {page === 'mesas'      && <MesasPage />}
               {page === 'garcom'     && <GarcomPage />}
@@ -183,7 +185,7 @@ export default function App() {
               {page === 'relatorios' && <RelatoriosPage />}
               {page === 'fiado'      && <FiadoPage />}
               {page === 'entregas'   && <EntregasPage />}
-              {page === 'ai'         && <AIInsightsPage />}
+              {page === 'ai'         && <AICenterPage />}
               {page === 'clientes'   && <ClientesPage />}
               {page === 'fidelidade' && <FidelidadePage />}
               {page === 'addons'     && <AddonsPage />}
@@ -192,6 +194,9 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Timeline flutuante — acessível de qualquer página */}
+      <TimelinePanel />
 
       {/* Plan wall — sobrepõe tudo quando conta está bloqueada */}
       {showPlanWall && (

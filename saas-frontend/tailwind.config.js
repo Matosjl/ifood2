@@ -14,6 +14,19 @@ export default {
           600: '#ea580c',
           700: '#c2410c',
         },
+        // WhatsApp green
+        wa: {
+          400: '#4ade80',
+          500: '#22c55e',
+          600: '#16a34a',
+        },
+        // Dark surface scale (landing dark sections)
+        ink: {
+          800: '#1f2937',
+          850: '#161819',
+          900: '#111827',
+          950: '#030712',
+        },
         status: {
           pending:    '#f59e0b',
           confirmed:  '#3b82f6',

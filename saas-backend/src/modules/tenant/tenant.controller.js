@@ -3,6 +3,18 @@ const service      = require('./tenant.service');
 const asyncHandler = require('../../utils/asyncHandler');
 const AppError     = require('../../utils/AppError');
 const env          = require('../../config/env');
+const axios        = require('axios');
+const logger       = require('../../utils/logger');
+
+// Cliente para chamar VPS2 (AI Engine) — sync de estado do chatbot
+const aiEngine = axios.create({
+  baseURL: env.VPS2_URL,
+  headers: {
+    'Content-Type':    'application/json',
+    'X-AI-Engine-Key': env.AI_ENGINE_KEY,
+  },
+  timeout: 5000,
+});
 
 /** GET /api/tenant/me */
 const getMe = asyncHandler(async (req, res) => {
@@ -59,6 +71,12 @@ const setChatbot = asyncHandler(async (req, res) => {
     [req.user.tenantId, enabled]
   );
   if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
+
+  // Sincroniza com VPS2 (AI Engine) — fire-and-forget, não bloqueia resposta
+  aiEngine
+    .patch('/api/internal/config/chatbot', { tenantId: req.user.tenantId, enabled })
+    .then(() => logger.info('[tenant] chatbot sync VPS2 ok', { tenantId: req.user.tenantId, enabled }))
+    .catch((err) => logger.warn('[tenant] chatbot sync VPS2 falhou (nao critico)', { error: err.message }));
 
   res.json({ success: true, data: rows[0] });
 });

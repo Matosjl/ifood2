@@ -169,6 +169,33 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method  VARCHAR(30)  NOT NUL
 ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS featured  BOOLEAN NOT NULL DEFAULT false;
 
+-- Rastreabilidade da origem do cost_price
+-- manual:       dono digitou diretamente
+-- precificador: calculado via ficha técnica + overhead (SET pelo /precificador/apply)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price_source VARCHAR(30) NOT NULL DEFAULT 'manual';
+
+-- ── COMBOS ─────────────────────────────────────────────────────
+-- Produto do tipo combo agrupa produtos filhos e os vende como um item único.
+-- O estoque e o CMV são calculados pelos filhos, não pelo combo em si.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_combo BOOLEAN NOT NULL DEFAULT false;
+
+-- Itens que compõem cada combo
+CREATE TABLE IF NOT EXISTS product_combos (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  combo_product_id UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  child_product_id UUID          NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  qty              DECIMAL(10,3) NOT NULL DEFAULT 1
+    CONSTRAINT product_combos_qty_positive CHECK (qty > 0),
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  -- Um produto filho só pode aparecer uma vez por combo
+  UNIQUE(combo_product_id, child_product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_combos_combo ON product_combos(combo_product_id);
+CREATE INDEX IF NOT EXISTS idx_product_combos_child ON product_combos(child_product_id);
+CREATE INDEX IF NOT EXISTS idx_product_combos_tenant ON product_combos(tenant_id);
+
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_number   VARCHAR(30);
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_instance VARCHAR(100);
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address           TEXT;
@@ -909,6 +936,12 @@ CREATE INDEX IF NOT EXISTS idx_finance_logs_user   ON finance_logs(user_id);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lat DECIMAL(10,7);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lng DECIMAL(10,7);
 
+-- ── IDEMPOTÊNCIA DE DEDUÇÃO DE INSUMOS ────────────────────────
+-- Garante que deductForOrder nunca execute duas vezes no mesmo pedido.
+-- insumos_deducted = true → dedução já realizada, ignorar nova chamada.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS insumos_deducted    BOOLEAN     NOT NULL DEFAULT false;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS insumos_deducted_at TIMESTAMPTZ;
+
 -- ── PRODUÇÃO DIÁRIA (insumos) ──────────────────────────────────
 -- Fator de perda operacional por insumo (ex: 5 = 5% de descarte)
 ALTER TABLE insumos ADD COLUMN IF NOT EXISTS waste_factor DECIMAL(5,2) NOT NULL DEFAULT 0;
@@ -1007,3 +1040,25 @@ CREATE TABLE IF NOT EXISTS pricing_calculations (
 );
 CREATE INDEX IF NOT EXISTS idx_pricing_calc_tenant ON pricing_calculations(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pricing_calc_product ON pricing_calculations(product_id);
+
+-- ── MOVIMENTAÇÕES DE INSUMOS ────────────────────────────────────
+-- Audit trail de toda entrada e saída de estoque bruto.
+-- Substitui o UPDATE silencioso: todo ajuste agora tem origem rastreável.
+CREATE TABLE IF NOT EXISTS insumo_movements (
+  id             UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id      UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  insumo_id      UUID          NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
+  type           VARCHAR(30)   NOT NULL,
+  -- type: 'adjustment' | 'purchase' | 'production' | 'sale' | 'waste' | 'inventory_count' | 'initial'
+  qty            DECIMAL(12,3) NOT NULL,   -- delta real (positivo = entrada, negativo = saída)
+  qty_before     DECIMAL(12,3) NOT NULL,   -- estoque antes da operação
+  qty_after      DECIMAL(12,3) NOT NULL,   -- estoque depois (para reconciliação)
+  reason         VARCHAR(300),             -- motivo do ajuste
+  reference_id   UUID,                     -- order_id | batch_id | waste_log_id | null
+  reference_type VARCHAR(50),              -- 'order' | 'batch' | 'waste_log' | 'manual'
+  created_by     UUID,                     -- user_id do responsável
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_insumo_mvt_tenant ON insumo_movements(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_insumo_mvt_insumo ON insumo_movements(insumo_id, created_at DESC);

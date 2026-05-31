@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import Header        from '../components/Header';
-import OrdersBoard   from '../components/OrdersBoard';
-import NewOrderModal from '../components/NewOrderModal';
-import Toast         from '../components/Toast';
-import useOrders     from '../hooks/useOrders';
-import api           from '../api/axios';
+import Header           from '../components/Header';
+import OrdersBoard      from '../components/OrdersBoard';
+import NewOrderModal    from '../components/NewOrderModal';
+import Toast            from '../components/Toast';
+import SetupChecklist   from '../components/SetupChecklist';
+import HealthWidget     from '../components/HealthWidget';
+import IncidentsBanner  from '../components/IncidentsBanner';
+import useOrders        from '../hooks/useOrders';
+import api              from '../api/axios';
 
 const VIEW_MODES = [
   { id: 'default', label: 'Padrão',    icon: '⊞' },
@@ -46,7 +49,7 @@ function useTitleBadge(pendingCount) {
   }, [pendingCount]);
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ onNavigate }) {
   const [showModal, setShowModal] = useState(false);
   const [viewMode,  setViewMode]  = useState('default');
 
@@ -100,6 +103,35 @@ export default function DashboardPage() {
     if (order) addOrder(order);
   };
 
+  // ── KPI bar: live today stats ─────────────────────────────
+  const [caixaOpen, setCaixaOpen] = useState(null); // null=loading, true/false
+
+  useEffect(() => {
+    api.get('/caixa/current').then(({ data }) => {
+      setCaixaOpen(!!(data.data?.id));
+    }).catch(() => setCaixaOpen(false));
+  }, []);
+
+  const todayOrders = orders.filter((o) => {
+    const d = new Date(o.createdAt ?? o.created_at);
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() &&
+           d.getMonth()    === now.getMonth()    &&
+           d.getDate()     === now.getDate();
+  });
+  const todayRevenue = todayOrders
+    .filter((o) => ['ready','delivering','delivered'].includes(o.status))
+    .reduce((sum, o) => sum + parseFloat(o.total ?? 0), 0);
+  const todayCount   = todayOrders.length;
+  const fmtBRL = (n) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n ?? 0);
+
+  // Forgotten orders: pending/confirmed older than 10 min
+  const forgottenOrders = orders.filter((o) => {
+    if (!['pending', 'confirmed'].includes(o.status)) return false;
+    const mins = (Date.now() - new Date(o.createdAt ?? o.created_at).getTime()) / 60_000;
+    return mins >= 10;
+  });
+
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
 
@@ -130,6 +162,53 @@ export default function DashboardPage() {
         viewModes={VIEW_MODES}
         pendingCount={pendingCount}
       />
+
+      {/* ── KPI Bar ───────────────────────────────────────────── */}
+      <div className="flex items-center gap-4 px-4 py-1.5 bg-gray-900/60 border-b border-white/[0.04] shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-sm">💰</span>
+          <span className="text-xs font-bold text-white tabular-nums">{fmtBRL(todayRevenue)}</span>
+          <span className="text-[10px] text-gray-600">hoje</span>
+        </div>
+        <div className="w-px h-4 bg-white/10" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-sm">🧾</span>
+          <span className="text-xs font-bold text-white tabular-nums">{todayCount}</span>
+          <span className="text-[10px] text-gray-600">pedido{todayCount !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="w-px h-4 bg-white/10" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className={`w-2 h-2 rounded-full ${caixaOpen ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className={`text-xs font-bold ${caixaOpen ? 'text-green-400' : 'text-red-400'}`}>
+            Caixa {caixaOpen === null ? '…' : caixaOpen ? 'aberto' : 'fechado'}
+          </span>
+        </div>
+        {pendingCount > 0 && (
+          <>
+            <div className="w-px h-4 bg-white/10" />
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+              <span className="text-xs font-bold text-yellow-400">{pendingCount} aguardando</span>
+            </div>
+          </>
+        )}
+        {forgottenOrders.length > 0 && (
+          <>
+            <div className="w-px h-4 bg-white/10" />
+            <div className="flex items-center gap-1.5 shrink-0 bg-red-500/15 px-2 py-0.5 rounded-lg border border-red-500/30">
+              <span className="text-sm animate-pulse">🚨</span>
+              <span className="text-xs font-black text-red-400">
+                {forgottenOrders.length} pedido{forgottenOrders.length > 1 ? 's' : ''} esquecido{forgottenOrders.length > 1 ? 's' : ''}!
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="shrink-0"><HealthWidget /></div>
+      <div className="shrink-0"><IncidentsBanner /></div>
+
+      {onNavigate && <SetupChecklist onNavigate={onNavigate} />}
 
       <OrdersBoard
         loading={loading}

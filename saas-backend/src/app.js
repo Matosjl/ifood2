@@ -128,6 +128,7 @@ app.use('/api/internal',   internalRoutes); // Chamado pelo AI Engine (VPS2) —
 app.use('/api/ai',         aiRoutes);       // Agentes IA (VPS2) — auth via JWT
 app.use('/api/addons',     addonsRoutes);   // Complementos / Adicionais
 app.use('/api/insumos',    insumosRoutes);  // Controle de insumos / ingredientes
+app.use('/api/combos',     require('./modules/combos/combos.routes')); // Combos (produtos agrupados)
 app.use('/api/producao',   producaoRoutes); // Lotes de produção (Módulo Produção)
 app.use('/api/coupons',    couponsRoutes);
 app.use('/api/tables',     tablesRoutes);

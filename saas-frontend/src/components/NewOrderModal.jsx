@@ -25,7 +25,7 @@ function pointInPolygon([px, py], polygon) {
   return inside;
 }
 
-// Reverse-geocode [lng, lat] → { road, number, suburb, allSuburbs[] } via Nominatim
+// Reverse-geocode [lng, lat] → { road, number, suburb, allSuburbs[], isGeneric } via Nominatim
 async function reverseGeocode(lng, lat) {
   try {
     const res  = await fetch(
@@ -42,19 +42,53 @@ async function reverseGeocode(lng, lat) {
       addr.county, addr.town, addr.village,
       addr.municipality, addr.state_district,
     ].filter(Boolean);
+    const road = addr.road ?? addr.pedestrian ?? addr.path ?? addr.footway ?? addr.street ?? '';
+    // Detecta endereço genérico: sem rua identificada ou apenas estrada/rodovia rural
+    const isGeneric = !road || /^(estrada|rodovia|rod\.|rs-|br-|sc-|sp-|mg-|pr-)/i.test(road.trim());
     return {
-      road:       addr.road ?? addr.pedestrian ?? addr.path ?? addr.footway ?? addr.street ?? '',
-      number:     addr.house_number ?? '',
-      suburb:     allSuburbs[0] ?? '',
+      road,
+      number:      addr.house_number ?? '',
+      suburb:      allSuburbs[0] ?? '',
       allSuburbs,
       displayName: data.display_name ?? '',
+      isGeneric,
     };
-  } catch { return { road: '', number: '', suburb: '', allSuburbs: [], displayName: '' }; }
+  } catch { return { road: '', number: '', suburb: '', allSuburbs: [], displayName: '', isGeneric: true }; }
 }
 
-// Forward-geocode: busca endereço por texto → [{ display, lat, lng, road, number, suburb, allSuburbs }]
+// Forward-geocode via Photon (komoot) — primário, sem limite de requisições
+async function forwardGeocodePhoton(query) {
+  try {
+    const res = await fetch(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lang=pt`,
+    );
+    const data = await res.json();
+    return (data.features || []).map((f) => {
+      const p   = f.properties || {};
+      const [lng, lat] = f.geometry?.coordinates ?? [0, 0];
+      const allSuburbs = [p.suburb, p.district, p.county, p.city].filter(Boolean);
+      // Monta label legível: nome + rua + número + cidade
+      const parts = [p.street || p.name, p.housenumber, p.city || p.county].filter(Boolean);
+      return {
+        display:     parts.join(', '),
+        lat,
+        lng,
+        road:        p.street || p.name || '',
+        number:      p.housenumber || '',
+        suburb:      allSuburbs[0] || '',
+        allSuburbs,
+      };
+    });
+  } catch { return null; } // null → cai no Nominatim
+}
+
+// Forward-geocode: Photon primeiro, Nominatim como fallback
 async function forwardGeocode(query) {
   if (!query || query.length < 4) return [];
+  // Tenta Photon primeiro (mais rápido e sem rate limit agressivo)
+  const photon = await forwardGeocodePhoton(query);
+  if (photon && photon.length > 0) return photon.slice(0, 4);
+  // Fallback Nominatim
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&accept-language=pt-BR&addressdetails=1`,
@@ -83,21 +117,41 @@ async function forwardGeocode(query) {
 
 // ── Map address picker (overlay dentro do modal) ──────────────
 
-const CITY_CENTER = [-49.7802, -29.3965]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
+// Fallback seguro: Porto Alegre — usado apenas se o restaurante não configurou sua localização
+// e o navegador negou geolocalização. Nunca deve ser um endereço pessoal.
+const MAP_FALLBACK_CENTER = [-51.2177, -30.0346]; // Porto Alegre, RS
 
 function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter }) {
-  const mapCenter = restaurantCenter ?? CITY_CENTER;
-  const [markerPos,    setMarkerPos]    = useState(mapCenter);
+  const initialCenter = restaurantCenter ?? MAP_FALLBACK_CENTER;
+  const [mapCenter,    setMapCenter]    = useState(initialCenter);
+  const [markerPos,    setMarkerPos]    = useState(initialCenter);
   const [loading,      setLoading]      = useState(false);
   const [previewRoad,  setPreviewRoad]  = useState(initialStreet || '');
   const [previewNum,   setPreviewNum]   = useState('');
   const [previewSub,   setPreviewSub]   = useState('');
   const [allSuburbs,   setAllSuburbs]   = useState([]);
+  const [isGeneric,    setIsGeneric]    = useState(false);
   const [searchText,   setSearchText]   = useState('');
   const [suggestions,  setSuggestions]  = useState([]);
   const [searching,    setSearching]    = useState(false);
+  // Campos de edição manual do endereço
+  const [editRoad,     setEditRoad]     = useState('');
+  const [editNum,      setEditNum]      = useState('');
   const mapRef     = useRef(null);
   const searchTimer = useRef(null);
+
+  // Se não há centro do restaurante, tenta geolocalização do navegador
+  useEffect(() => {
+    if (restaurantCenter) return;
+    navigator.geolocation?.getCurrentPosition(
+      ({ coords: geo }) => {
+        const pos = [geo.longitude, geo.latitude];
+        setMapCenter(pos);
+        setMarkerPos(pos);
+      },
+      () => {} // fallback mantém Porto Alegre
+    );
+  }, [restaurantCenter]);
 
   const doGeocode = useCallback(async (lng, lat) => {
     setLoading(true);
@@ -106,6 +160,9 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
     setPreviewNum(result.number);
     setPreviewSub(result.suburb);
     setAllSuburbs(result.allSuburbs || []);
+    setIsGeneric(result.isGeneric || false);
+    setEditRoad('');
+    setEditNum('');
     setLoading(false);
     return result;
   }, []);
@@ -131,6 +188,9 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
     setPreviewNum(s.number);
     setPreviewSub(s.suburb);
     setAllSuburbs(s.allSuburbs || []);
+    setIsGeneric(!s.road);
+    setEditRoad('');
+    setEditNum('');
     setSearchText(s.road + (s.number ? ', ' + s.number : ''));
     setSuggestions([]);
     // Centraliza o mapa na seleção
@@ -146,19 +206,18 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
     await doGeocode(lngLat.lng, lngLat.lat);
   }, [doGeocode]);
 
-  const handleConfirm = async () => {
-    setLoading(true);
-    const fresh = await reverseGeocode(markerPos[0], markerPos[1]);
+  // Confirmar: usa preview cacheado (sem nova chamada à API) + aplica edição manual se houver
+  const handleConfirm = () => {
+    const finalRoad   = editRoad.trim()  || previewRoad;
+    const finalNum    = editNum.trim()   || previewNum;
     onConfirm({
-      street:       fresh.road   || previewRoad,
-      streetNumber: fresh.number || previewNum,
-      suburb:       fresh.suburb || previewSub,
-      allSuburbs:   fresh.allSuburbs?.length ? fresh.allSuburbs : allSuburbs,
+      street:       finalRoad,
+      streetNumber: finalNum,
+      suburb:       previewSub,
+      allSuburbs,
       coords:       markerPos,
     });
   };
-
-  const fullPreview = [previewRoad, previewNum].filter(Boolean).join(', ');
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-gray-950 rounded-2xl overflow-hidden">
@@ -202,7 +261,10 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
       <div className="flex-1 relative min-h-0">
         <Map ref={mapRef} center={mapCenter} zoom={14} theme="dark" className="h-full w-full">
           <MapControls position="top-right" showZoom showLocate
-            onLocate={({ longitude, latitude }) => setMarkerPos([longitude, latitude])} />
+            onLocate={({ longitude, latitude }) => {
+              setMarkerPos([longitude, latitude]);
+              doGeocode(longitude, latitude);
+            }} />
           <MapMarker longitude={markerPos[0]} latitude={markerPos[1]} draggable
             onDragEnd={handleDragEnd}>
             <MarkerContent>
@@ -218,24 +280,64 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-3 bg-gray-900 border-t border-white/10 shrink-0 flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-400 mb-0.5">Endereço identificado:</p>
-          {loading ? (
-            <p className="text-sm text-gray-500 animate-pulse">Identificando...</p>
-          ) : fullPreview ? (
-            <div className="space-y-0.5">
-              <p className="text-sm font-semibold text-white truncate">{fullPreview}</p>
-              {previewSub && <p className="text-xs text-gray-400 truncate">📌 {previewSub}</p>}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500 italic">— arraste o alfinete —</p>
-          )}
+      <div className="px-4 py-3 bg-gray-900 border-t border-white/10 shrink-0 space-y-2">
+        {/* Aviso endereço genérico */}
+        {isGeneric && !loading && (previewRoad || editRoad) === '' && (
+          <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-1.5">
+            <span className="text-yellow-400 text-xs">⚠️</span>
+            <p className="text-xs text-yellow-300">Endereço não identificado — corrija manualmente abaixo ou mova o pin</p>
+          </div>
+        )}
+        {isGeneric && !loading && previewRoad && (
+          <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-1.5">
+            <span className="text-yellow-400 text-xs">⚠️</span>
+            <p className="text-xs text-yellow-300">Endereço genérico: <span className="font-semibold">{previewRoad}</span> — confirme ou corrija</p>
+          </div>
+        )}
+
+        <div className="flex items-end gap-3">
+          <div className="flex-1 min-w-0 space-y-1.5">
+            {loading ? (
+              <p className="text-sm text-gray-500 animate-pulse">Identificando...</p>
+            ) : (
+              <>
+                {/* Exibe endereço detectado ou campo de edição manual */}
+                <div className="flex gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-gray-500 mb-0.5">Rua / Logradouro</p>
+                    <input
+                      type="text"
+                      placeholder={previewRoad || 'Ex: Av. Independência'}
+                      value={editRoad}
+                      onChange={(e) => setEditRoad(e.target.value)}
+                      className="w-full bg-gray-800 text-white text-xs rounded-lg px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-orange-500/50 placeholder-gray-600"
+                    />
+                  </div>
+                  <div className="w-20 shrink-0">
+                    <p className="text-[10px] text-gray-500 mb-0.5">Número</p>
+                    <input
+                      type="text"
+                      placeholder={previewNum || 'Nº'}
+                      value={editNum}
+                      onChange={(e) => setEditNum(e.target.value)}
+                      className="w-full bg-gray-800 text-white text-xs rounded-lg px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-orange-500/50 placeholder-gray-600"
+                    />
+                  </div>
+                </div>
+                {previewSub && (
+                  <p className="text-xs text-gray-400 truncate">📌 {previewSub}</p>
+                )}
+                {!previewRoad && !editRoad && (
+                  <p className="text-xs text-gray-600 italic">— arraste o alfinete ou busque acima —</p>
+                )}
+              </>
+            )}
+          </div>
+          <button onClick={handleConfirm} disabled={loading}
+            className="shrink-0 px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-50">
+            Confirmar
+          </button>
         </div>
-        <button onClick={handleConfirm} disabled={loading}
-          className="shrink-0 px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-50">
-          Confirmar
-        </button>
       </div>
     </div>
   );
@@ -1408,6 +1510,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [notes,            setNotes]            = useState('');
   const [scheduledFor,     setScheduledFor]     = useState('');
   const [showMapPicker,    setShowMapPicker]    = useState(false);
+  const [deliveryCoords,   setDeliveryCoords]   = useState(null);  // [lng, lat] do pin do mapa
   const [fiadoClientes,    setFiadoClientes]    = useState([]);
   const [fiadoClienteId,   setFiadoClienteId]   = useState('');
   const [fiadoClienteSearch, setFiadoClienteSearch] = useState('');
@@ -1739,6 +1842,13 @@ export default function NewOrderModal({ onClose, onCreated }) {
         cashbackUsed:    cbUsed > 0 ? cbUsed : undefined,
         couponCode:      couponResult?.code || undefined,
         couponDiscount:  couponDiscount > 0 ? couponDiscount : undefined,
+        // Coordenadas do pin do mapa (salvas para uso em rota de entrega)
+        deliveryLat:     deliveryCoords ? deliveryCoords[1] : undefined,
+        deliveryLng:     deliveryCoords ? deliveryCoords[0] : undefined,
+        // Troco: salva o valor que o cliente vai pagar (ex: R$50 para um pedido de R$40)
+        cashChangeFor:   (needsChange && changeFor && parseFloat(changeFor) > 0)
+                           ? parseFloat(changeFor)
+                           : undefined,
       });
       if (paymentMethod === 'fiado' && data.data?.id) {
         const subtotal = cartTotal(cart);
@@ -1788,19 +1898,22 @@ export default function NewOrderModal({ onClose, onCreated }) {
             initialStreet={street}
             restaurantCenter={restaurantCenter}
             onClose={() => setShowMapPicker(false)}
-            onConfirm={({ street: s, streetNumber: sn, suburb, allSuburbs = [] }) => {
+            onConfirm={({ street: s, streetNumber: sn, suburb, allSuburbs = [], coords: mapCoords }) => {
+              // Salva coordenadas do pin para persistir no pedido
+              if (mapCoords) setDeliveryCoords(mapCoords);
+
               // Aplica rua do mapa
               if (s) setStreet(s);
-              // Se o Nominatim devolveu número (forward geocoding com número exato), aplica
+              // Se o geocoder devolveu número (forward geocoding com número exato), aplica
               if (sn) setStreetNumber(sn);
               else setStreetNumber(''); // senão limpa — usuário digita
 
               let matchedZone = null;
 
               // ── Prioridade 1: polígono desenhado + coordenadas ──────
-              if (tenantZoneType === 'polygon' && coords && tenantZones?.length > 0) {
+              if (tenantZoneType === 'polygon' && mapCoords && tenantZones?.length > 0) {
                 const hit = tenantZones.find((z) =>
-                  z.polygon?.length >= 3 && pointInPolygon(coords, z.polygon)
+                  z.polygon?.length >= 3 && pointInPolygon(mapCoords, z.polygon)
                 );
                 if (hit) matchedZone = { bairro: hit.name, taxa: hit.fee };
               }
@@ -1813,12 +1926,16 @@ export default function NewOrderModal({ onClose, onCreated }) {
                   ? tenantZones.map((z) => ({ bairro: z.name, taxa: z.fee }))
                   : NEIGHBORHOODS;
 
+                // Exact match — sempre tenta independente do tipo de zona
                 for (const candidate of candidates) {
                   const c = normed(candidate);
                   const exact = zonesNamed.find((nb) => normed(nb.bairro) === c);
                   if (exact) { matchedZone = exact; break; }
                 }
-                if (!matchedZone) {
+
+                // Partial / word match — SOMENTE para zonas nomeadas (não polígono)
+                // Para polígono, esses matches são muito imprecisos e causam "Torres" R$20
+                if (!matchedZone && tenantZoneType !== 'polygon') {
                   for (const candidate of candidates) {
                     const c = normed(candidate);
                     const partial = zonesNamed.find(
@@ -1826,14 +1943,14 @@ export default function NewOrderModal({ onClose, onCreated }) {
                     );
                     if (partial) { matchedZone = partial; break; }
                   }
-                }
-                if (!matchedZone) {
-                  for (const candidate of candidates) {
-                    const words = normed(candidate).split(/\s+/).filter((w) => w.length > 3);
-                    const wordMatch = zonesNamed.find(
-                      (nb) => words.some((w) => normed(nb.bairro).includes(w))
-                    );
-                    if (wordMatch) { matchedZone = wordMatch; break; }
+                  if (!matchedZone) {
+                    for (const candidate of candidates) {
+                      const words = normed(candidate).split(/\s+/).filter((w) => w.length > 3);
+                      const wordMatch = zonesNamed.find(
+                        (nb) => words.some((w) => normed(nb.bairro).includes(w))
+                      );
+                      if (wordMatch) { matchedZone = wordMatch; break; }
+                    }
                   }
                 }
               }

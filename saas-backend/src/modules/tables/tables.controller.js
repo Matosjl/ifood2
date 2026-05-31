@@ -5,7 +5,7 @@ const AppError     = require('../../utils/AppError');
 
 const list = asyncHandler(async (req, res) => {
   const { rows } = await db.query(
-    `SELECT * FROM restaurant_tables WHERE tenant_id = $1 AND active = true ORDER BY number ASC`,
+    `SELECT * FROM restaurant_tables WHERE tenant_id = $1 AND active = true ORDER BY table_number ASC`,
     [req.user.tenantId]
   );
   res.json({ success: true, data: rows });
@@ -15,9 +15,9 @@ const create = asyncHandler(async (req, res) => {
   const { number, name } = req.body;
   if (!number?.trim()) throw new AppError('Número da mesa é obrigatório.', 400);
   const { rows } = await db.query(
-    `INSERT INTO restaurant_tables (tenant_id, number, name)
+    `INSERT INTO restaurant_tables (tenant_id, table_number, description)
      VALUES ($1, $2, $3)
-     ON CONFLICT (tenant_id, number) DO UPDATE SET active = true, name = EXCLUDED.name
+     ON CONFLICT (tenant_id, table_number) DO UPDATE SET active = true, description = EXCLUDED.description
      RETURNING *`,
     [req.user.tenantId, number.trim(), name?.trim() || null]
   );
@@ -28,7 +28,7 @@ const update = asyncHandler(async (req, res) => {
   const { name, active } = req.body;
   const { rows } = await db.query(
     `UPDATE restaurant_tables
-     SET name = COALESCE($3, name), active = COALESCE($4, active)
+     SET description = COALESCE($3, description), active = COALESCE($4, active)
      WHERE id = $1 AND tenant_id = $2
      RETURNING *`,
     [req.params.id, req.user.tenantId, name ?? null, active ?? null]

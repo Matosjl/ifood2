@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSummary } from '../api/financeiro';
 import { getOrders, getHourlyStats } from '../api/orders';
+import api from '../api/axios';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'products', label: 'Produtos', icon: '🥇' },
   { id: 'history',  label: 'Histórico', icon: '📋' },
   { id: 'horarios', label: 'Horários', icon: '🕐' },
+  { id: 'timeline', label: 'Timeline', icon: '⏱️' },
 ];
 
 const STATUS_META = {
@@ -180,7 +182,7 @@ function HBarChart({ data = [], maxValue }) {
 
 // ── KPI Card ──────────────────────────────────────────────────
 
-function KpiCard({ icon, label, value, sub, color = 'blue' }) {
+function KpiCard({ icon, label, value, sub, color = 'blue', onExplain }) {
   const colors = {
     blue:   'bg-blue-500/10   border-blue-500/20   text-blue-400',
     green:  'bg-green-500/10  border-green-500/20  text-green-400',
@@ -190,12 +192,22 @@ function KpiCard({ icon, label, value, sub, color = 'blue' }) {
   return (
     <div className={`rounded-2xl border p-4 ${colors[color]}`}>
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold opacity-70 uppercase tracking-wide">{label}</p>
           <p className="text-2xl font-black text-white mt-1 leading-tight tabular-nums">{value}</p>
           {sub && <p className="text-xs mt-1 opacity-60">{sub}</p>}
         </div>
-        <span className="text-2xl">{icon}</span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="text-2xl">{icon}</span>
+          {onExplain && (
+            <button
+              onClick={onExplain}
+              className="text-[10px] font-bold text-current opacity-50 hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded-md bg-current/10 hover:bg-current/20"
+            >
+              Por quê?
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -341,6 +353,24 @@ export default function RelatoriosPage() {
   const [loadingHeat,  setLoadingHeat]  = useState(false);
   const [expanded,     setExpanded]     = useState(null);
 
+  // Timeline tab
+  const [timelineEvents,   setTimelineEvents]   = useState([]);
+  const [timelineHours,    setTimelineHours]    = useState(24);
+  const [loadingTimeline,  setLoadingTimeline]  = useState(false);
+
+  // "Por quê?" AI explanation
+  const [explainPanel,    setExplainPanel]    = useState(null); // { label, question, answer, loading }
+  const explainKpi = useCallback(async (label, question) => {
+    setExplainPanel({ label, question, answer: null, loading: true });
+    try {
+      const { data } = await api.post('/ai/center/chat', { message: question });
+      const answer = data.data?.response ?? data.response ?? 'Sem resposta.';
+      setExplainPanel((prev) => prev ? { ...prev, answer, loading: false } : null);
+    } catch {
+      setExplainPanel((prev) => prev ? { ...prev, answer: 'Não foi possível consultar a IA agora.', loading: false } : null);
+    }
+  }, []);
+
   // ── Fetch summary (charts + KPIs) ────────────────────────────
   const fetchSummary = useCallback(async () => {
     setLoadingSum(true);
@@ -392,6 +422,21 @@ export default function RelatoriosPage() {
     fetchOrders();
     fetchHourly();
   }, [fetchSummary, fetchOrders, fetchHourly]);
+
+  // ── Fetch timeline ────────────────────────────────────────────
+  const fetchTimeline = useCallback(async (hours = timelineHours) => {
+    setLoadingTimeline(true);
+    try {
+      const { data } = await api.get('/timeline', { params: { hours, limit: 200 } });
+      setTimelineEvents(data.data ?? []);
+    } catch { /* non-fatal */ }
+    finally { setLoadingTimeline(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'timeline') fetchTimeline(timelineHours);
+  }, [activeTab, timelineHours, fetchTimeline]);
 
   // ── Derived data ──────────────────────────────────────────────
 
@@ -496,23 +541,55 @@ export default function RelatoriosPage() {
               icon="💰" color="green" label="Total em Vendas"
               value={loadingSum ? '…' : fmtBRL(revenue)}
               sub={`${orderCount} pedido${orderCount !== 1 ? 's' : ''} faturado${orderCount !== 1 ? 's' : ''}`}
+              onExplain={() => explainKpi('Total em Vendas', `Por que meu faturamento foi ${fmtBRL(revenue)} no período ${period === 'today' ? 'de hoje' : period === 'week' ? 'dos últimos 7 dias' : 'deste mês'}? Analise tendência, horários de pico e produtos mais vendidos.`)}
             />
             <KpiCard
               icon="🧾" color="blue" label="Ticket Médio"
               value={loadingSum ? '…' : fmtBRL(avgTicket)}
               sub={orderCount > 0 ? `Maior: ${fmtBRL(Math.max(...orders.filter(o=>['ready','delivered'].includes(o.status)).map(o=>parseFloat(o.total??0)),0))}` : '—'}
+              onExplain={() => explainKpi('Ticket Médio', `Por que meu ticket médio é ${fmtBRL(avgTicket)}? O que posso fazer para aumentá-lo? Quais combos ou produtos adicionais poderiam elevar o ticket?`)}
             />
             <KpiCard
               icon="📦" color="orange" label="Pedidos Ativos"
               value={loadingHist ? '…' : pendingCount}
               sub={cancelledCount > 0 ? `${cancelledCount} cancelado${cancelledCount>1?'s':''}` : 'Nenhum cancelado'}
+              onExplain={() => explainKpi('Pedidos Ativos', `Tenho ${pendingCount} pedido(s) ativo(s) e ${cancelledCount} cancelado(s). Isso está normal para o meu negócio? O que pode estar causando os cancelamentos?`)}
             />
             <KpiCard
               icon="🏆" color="purple" label="Mais Vendido"
               value={loadingSum ? '…' : (topProduct.length > 14 ? topProduct.slice(0, 13) + '…' : topProduct)}
               sub={topProducts[0] ? `${topProducts[0].qty} un · ${fmtBRL(topProducts[0].revenue)}` : '—'}
+              onExplain={() => explainKpi('Produto Mais Vendido', `O produto mais vendido é "${topProduct}" com ${topProducts[0]?.qty ?? 0} unidades. Por que ele lidera as vendas? Quais outros produtos têm potencial similar?`)}
             />
           </div>
+
+          {/* ── AI Explanation Panel ─────────────────────────── */}
+          {explainPanel && (
+            <div className="bg-gray-900/80 border border-orange-500/30 rounded-2xl p-4 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🤖</span>
+                  <p className="text-sm font-black text-white">IA explica: {explainPanel.label}</p>
+                </div>
+                <button
+                  onClick={() => setExplainPanel(null)}
+                  className="p-1 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {explainPanel.loading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-gray-400">Consultando IA…</span>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{explainPanel.answer}</p>
+              )}
+            </div>
+          )}
 
           {/* ── Sub-tabs ──────────────────────────────────── */}
           <div className="flex gap-1 border-b border-white/[0.06] pb-0">
@@ -932,7 +1009,121 @@ export default function RelatoriosPage() {
             </div>
           )}
 
+          {/* ════════════════════════════════════════════════ */}
+          {/* TAB: TIMELINE                                    */}
+          {/* ════════════════════════════════════════════════ */}
+          {activeTab === 'timeline' && (
+            <div className="space-y-4">
+              {/* Period selector */}
+              <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-black text-white">⏱️ Timeline Operacional</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Tudo que aconteceu no seu restaurante, em ordem cronológica</p>
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { h: 6,  label: '6h' },
+                      { h: 24, label: '24h' },
+                      { h: 72, label: '3 dias' },
+                    ].map(({ h, label }) => (
+                      <button
+                        key={h}
+                        onClick={() => setTimelineHours(h)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                          timelineHours === h
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-gray-800 text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => fetchTimeline(timelineHours)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                    >
+                      🔄
+                    </button>
+                  </div>
+                </div>
+
+                {loadingTimeline ? (
+                  <div className="flex justify-center py-12">
+                    <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : timelineEvents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-600">
+                    <span className="text-4xl">⏳</span>
+                    <p className="text-sm">Nenhum evento nas últimas {timelineHours}h</p>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    {/* Vertical line */}
+                    <div className="absolute left-5 top-0 bottom-0 w-px bg-white/[0.06]" />
+                    <div className="space-y-0">
+                      {timelineEvents.map((ev, i) => (
+                        <TimelineEvent key={`${ev.id}-${i}`} event={ev} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Timeline Event Component ──────────────────────────────────
+
+const COLOR_MAP = {
+  blue:   { dot: 'bg-blue-500',   text: 'text-blue-400',   bg: 'bg-blue-500/10'   },
+  green:  { dot: 'bg-green-500',  text: 'text-green-400',  bg: 'bg-green-500/10'  },
+  orange: { dot: 'bg-orange-500', text: 'text-orange-400', bg: 'bg-orange-500/10' },
+  red:    { dot: 'bg-red-500',    text: 'text-red-400',    bg: 'bg-red-500/10'    },
+  purple: { dot: 'bg-purple-500', text: 'text-purple-400', bg: 'bg-purple-500/10' },
+  gray:   { dot: 'bg-gray-500',   text: 'text-gray-400',   bg: 'bg-gray-500/10'   },
+};
+
+function TimelineEvent({ event }) {
+  const c = COLOR_MAP[event.color] ?? COLOR_MAP.gray;
+  const fmtTime = (s) => {
+    const d = new Date(s);
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+  const fmtDay = (s) => {
+    const d = new Date(s);
+    const today = new Date();
+    const diff = Math.floor((today - d) / 86_400_000);
+    if (diff === 0) return 'Hoje';
+    if (diff === 1) return 'Ontem';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  };
+
+  return (
+    <div className="flex gap-4 pl-2 pb-4 group">
+      {/* Dot */}
+      <div className="flex flex-col items-center shrink-0 pt-1">
+        <div className={`w-7 h-7 rounded-full ${c.bg} border-2 border-current ${c.text} flex items-center justify-center text-base z-10 relative`}>
+          {event.icon}
+        </div>
+      </div>
+      {/* Content */}
+      <div className="flex-1 min-w-0 pt-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm font-semibold text-white leading-tight">{event.title}</p>
+          <div className="shrink-0 text-right">
+            <p className="text-xs font-mono text-gray-500">{fmtTime(event.occurredAt)}</p>
+            <p className="text-[10px] text-gray-700">{fmtDay(event.occurredAt)}</p>
+          </div>
+        </div>
+        {event.subtitle && (
+          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{event.subtitle}</p>
+        )}
       </div>
     </div>
   );

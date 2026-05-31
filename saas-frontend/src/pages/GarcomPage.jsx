@@ -50,17 +50,27 @@ function cartCount(cart) {
 // ── Product Card ──────────────────────────────────────────────
 
 function ProductCard({ product, qty, onAdd, onRemove }) {
-  const hasImage = Boolean(product.imageUrl || product.image_url);
-  const imgSrc   = product.imageUrl || product.image_url;
+  const hasImage    = Boolean(product.imageUrl || product.image_url);
+  const imgSrc      = product.imageUrl || product.image_url;
+  const price       = Number(product.price ?? product.sale_price ?? 0);
+  const isIncomplete = !hasImage || price <= 0 || !product.description;
 
   return (
-    <div className="bg-gray-800 rounded-2xl overflow-hidden flex flex-col border border-white/[0.06] active:scale-[0.98] transition-transform">
+    <div className={`bg-gray-800 rounded-2xl overflow-hidden flex flex-col border active:scale-[0.98] transition-transform ${
+      isIncomplete ? 'border-yellow-500/40' : 'border-white/[0.06]'
+    }`}>
       {/* Image / placeholder */}
       <div className="relative w-full aspect-square bg-gray-700 flex items-center justify-center overflow-hidden shrink-0">
         {hasImage ? (
           <img src={imgSrc} alt={product.name} className="w-full h-full object-cover" />
         ) : (
           <span className="text-4xl select-none">🍽️</span>
+        )}
+        {/* Badge produto incompleto */}
+        {isIncomplete && (
+          <div className="absolute bottom-1 left-1 bg-yellow-500/90 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full leading-tight">
+            ⚠ incompleto
+          </div>
         )}
         {qty > 0 && (
           <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-black flex items-center justify-center shadow-lg">

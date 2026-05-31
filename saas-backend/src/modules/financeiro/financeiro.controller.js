@@ -1,150 +1,193 @@
-const db           = require('../../config/database');
+'use strict';
+const db        = require('../../config/database');
 const asyncHandler = require('../../utils/asyncHandler');
+const AppError  = require('../../utils/AppError');
+const { TZ, getPeriodDates, getPrevPeriodDates, getMonthDates } = require('../../utils/financeDate');
+const financeLog = require('../../utils/financeLog');
 
-// ── Period helpers ────────────────────────────────────────────
+// ── Macro SQL helper ──────────────────────────────────────────────────
+// Todas as queries de pedidos usam (created_at AT TIME ZONE TZ)::date
+// para garantir que "hoje" sempre significa hoje em Brasília, independente
+// do fuso do servidor PostgreSQL.
+// ─────────────────────────────────────────────────────────────────────
 
-/**
- * Returns UTC date bounds for the requested period.
- * All timestamps stored in the DB are UTC.
- */
-const getPeriodBounds = (period) => {
-  const now = new Date();
-
-  if (period === 'today') {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-    const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-    return { start, end };
-  }
-
-  if (period === 'week') {
-    const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-    const start = new Date(end.getTime() - 6 * 24 * 60 * 60 * 1000);
-    start.setUTCHours(0, 0, 0, 0);
-    return { start, end };
-  }
-
-  if (period === 'month') {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
-    const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-    return { start, end };
-  }
-
-  // fallback — today
-  return getPeriodBounds('today');
-};
-
-// ── Summary endpoint ──────────────────────────────────────────
+// ── Summary ────────────────────────────────────────────────────────────
 
 /**
  * GET /api/financeiro/summary?period=today|week|month
  *
- * Returns:
- *   revenue, order_count, avg_ticket,
- *   byChannel[], timeSeries[], topProducts[]
+ * Retorna métricas do período + comparativo com período anterior.
  */
 const summary = asyncHandler(async (req, res) => {
-  const period    = ['today', 'week', 'month'].includes(req.query.period)
-    ? req.query.period
-    : 'today';
-  const tenantId  = req.user.tenantId;
-  const { start, end } = getPeriodBounds(period);
+  const period   = ['today', 'week', 'month'].includes(req.query.period)
+    ? req.query.period : 'today';
+  const tenantId = req.user.tenantId;
+  const { startDate, endDate } = getPeriodDates(period);
+  const { startDate: pStart, endDate: pEnd } = getPrevPeriodDates(period);
 
-  // ── 1. Overall metrics ──────────────────────────────────────
+  // ── 1. Métricas do período atual ────────────────────────────────
   const { rows: [metrics] } = await db.query(
     `SELECT
-       COALESCE(SUM(total), 0)::float    AS revenue,
-       COUNT(*)::int                     AS order_count,
-       COALESCE(AVG(total), 0)::float    AS avg_ticket
-     FROM orders
-     WHERE tenant_id = $1
-       AND status IN ('ready', 'delivered')
-       AND created_at BETWEEN $2 AND $3`,
-    [tenantId, start, end]
+       COALESCE(SUM(o.total), 0)::float                                                           AS revenue,
+       -- Receita apenas de produtos (exclui taxa de entrega)
+       COALESCE(SUM(o.total - COALESCE(o.delivery_fee, 0)), 0)::float                             AS products_revenue,
+       -- Total de taxas de entrega cobradas dos clientes
+       COALESCE(SUM(CASE WHEN o.delivery_type = 'delivery'
+                         THEN COALESCE(o.delivery_fee, 0) ELSE 0 END), 0)::float                  AS delivery_fees_charged,
+       -- Repasse total ao motoboy no período (subquery para evitar fan-out extra)
+       (SELECT COALESCE(SUM(d.driver_fee), 0)::float
+        FROM deliveries d
+        JOIN orders od ON od.id = d.order_id
+        WHERE d.tenant_id = $1
+          AND d.status = 'delivered'
+          AND (od.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
+       )                                                                                           AS total_driver_fees,
+       COUNT(o.id)::int                                                                            AS order_count,
+       COALESCE(AVG(o.total), 0)::float                                                            AS avg_ticket,
+       COALESCE(SUM(oi.total_cost), 0)::float                                                      AS total_cmv
+     FROM orders o
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready','delivered')
+       AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
+    [tenantId, startDate, endDate, TZ]
   );
 
-  // ── 2. By channel ───────────────────────────────────────────
+  // ── 2. Métricas do período anterior (comparativo) ───────────────
+  const { rows: [prev] } = await db.query(
+    `SELECT
+       COALESCE(SUM(o.total), 0)::float   AS revenue,
+       COUNT(o.id)::int                    AS order_count,
+       COALESCE(AVG(o.total), 0)::float    AS avg_ticket,
+       COALESCE(SUM(oi.total_cost), 0)::float AS total_cmv
+     FROM orders o
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready','delivered')
+       AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
+    [tenantId, pStart, pEnd, TZ]
+  );
+
+  // ── 3. Por canal ────────────────────────────────────────────────
   const { rows: byChannel } = await db.query(
     `SELECT channel,
-            COUNT(*)::int                    AS count,
-            COALESCE(SUM(total), 0)::float   AS revenue
+            COUNT(*)::int                  AS count,
+            COALESCE(SUM(total),0)::float  AS revenue
      FROM orders
      WHERE tenant_id = $1
-       AND status IN ('ready', 'delivered')
-       AND created_at BETWEEN $2 AND $3
+       AND status IN ('ready','delivered')
+       AND (created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
      GROUP BY channel
      ORDER BY revenue DESC`,
-    [tenantId, start, end]
+    [tenantId, startDate, endDate, TZ]
   );
 
-  // ── 3. Time series ──────────────────────────────────────────
+  // ── 4. Série temporal ──────────────────────────────────────────
   let timeSeries;
   if (period === 'today') {
-    // By hour (0–23)
+    // Por hora em Brasília
     const { rows } = await db.query(
-      `SELECT EXTRACT(HOUR FROM created_at)::int   AS hour,
-              COUNT(*)::int                         AS count,
-              COALESCE(SUM(total), 0)::float        AS revenue
+      `SELECT
+         EXTRACT(HOUR FROM (created_at AT TIME ZONE $4))::int AS hour,
+         COUNT(*)::int                                         AS count,
+         COALESCE(SUM(total),0)::float                         AS revenue
        FROM orders
        WHERE tenant_id = $1
-         AND status IN ('ready', 'delivered')
-         AND created_at BETWEEN $2 AND $3
+         AND status IN ('ready','delivered')
+         AND (created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
        GROUP BY hour
        ORDER BY hour`,
-      [tenantId, start, end]
+      [tenantId, startDate, endDate, TZ]
     );
-    // Fill all 24 hours so the chart always has a full x-axis
     timeSeries = Array.from({ length: 24 }, (_, h) => {
-      const found = rows.find((r) => r.hour === h);
-      return { hour: h, count: found?.count ?? 0, revenue: found?.revenue ?? 0 };
+      const f = rows.find((r) => r.hour === h);
+      return { hour: h, count: f?.count ?? 0, revenue: f?.revenue ?? 0 };
     });
   } else {
-    // By day
+    // Por dia em Brasília
     const { rows } = await db.query(
-      `SELECT DATE(created_at)                      AS date,
-              COUNT(*)::int                         AS count,
-              COALESCE(SUM(total), 0)::float        AS revenue
+      `SELECT
+         (created_at AT TIME ZONE $4)::date  AS date,
+         COUNT(*)::int                        AS count,
+         COALESCE(SUM(total),0)::float        AS revenue
        FROM orders
        WHERE tenant_id = $1
-         AND status IN ('ready', 'delivered')
-         AND created_at BETWEEN $2 AND $3
+         AND status IN ('ready','delivered')
+         AND (created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
        GROUP BY date
        ORDER BY date`,
-      [tenantId, start, end]
+      [tenantId, startDate, endDate, TZ]
     );
 
-    // Fill every day in the range
-    const days = Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
-    timeSeries = Array.from({ length: days }, (_, i) => {
-      const d    = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
-      const iso  = d.toISOString().slice(0, 10);
-      const found = rows.find((r) => String(r.date).slice(0, 10) === iso);
-      return { date: iso, count: found?.count ?? 0, revenue: found?.revenue ?? 0 };
+    // Preenche todos os dias do intervalo
+    const start = new Date(startDate + 'T12:00:00Z');
+    const end   = new Date(endDate   + 'T12:00:00Z');
+    const days  = Math.round((end - start) / 86400000) + 1;
+    timeSeries  = Array.from({ length: days }, (_, i) => {
+      const d   = new Date(start.getTime() + i * 86400000);
+      const iso = d.toISOString().slice(0, 10);
+      const f   = rows.find((r) => String(r.date).slice(0, 10) === iso);
+      return { date: iso, count: f?.count ?? 0, revenue: f?.revenue ?? 0 };
     });
   }
 
-  // ── 4. Top products ─────────────────────────────────────────
+  // ── 5. Top produtos ─────────────────────────────────────────────
   const { rows: topProducts } = await db.query(
     `SELECT oi.product_name,
-            COALESCE(SUM(oi.quantity), 0)::float   AS total_qty,
-            COALESCE(SUM(oi.total), 0)::float       AS revenue
+            COALESCE(SUM(oi.quantity),0)::float AS total_qty,
+            COALESCE(SUM(oi.total),0)::float    AS revenue
      FROM order_items oi
      JOIN orders o ON o.id = oi.order_id
      WHERE o.tenant_id = $1
-       AND o.status IN ('ready', 'delivered')
-       AND o.created_at BETWEEN $2 AND $3
+       AND o.status IN ('ready','delivered')
+       AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
      GROUP BY oi.product_name
      ORDER BY revenue DESC
      LIMIT 10`,
-    [tenantId, start, end]
+    [tenantId, startDate, endDate, TZ]
+  );
+
+  // ── Calcula variação % ──────────────────────────────────────────
+  const pctChange = (curr, prevVal) =>
+    prevVal > 0 ? Math.round(((curr - prevVal) / prevVal) * 100) : null;
+
+  const grossProfit     = metrics.revenue - metrics.total_cmv;
+  const grossMarginPct  = metrics.revenue > 0
+    ? Math.round((grossProfit / metrics.revenue) * 100)
+    : null;
+
+  const logisticsResult = parseFloat(
+    (parseFloat(metrics.delivery_fees_charged || 0) - parseFloat(metrics.total_driver_fees || 0)).toFixed(2)
   );
 
   res.json({
     success: true,
     data: {
       period,
-      revenue:      metrics.revenue,
-      order_count:  metrics.order_count,
-      avg_ticket:   metrics.avg_ticket,
+      revenue:          metrics.revenue,       // mantido — compatibilidade com frontend
+      order_count:      metrics.order_count,
+      avg_ticket:       metrics.avg_ticket,
+      total_cmv:        metrics.total_cmv,
+      gross_profit:     grossProfit,
+      gross_margin_pct: grossMarginPct,
+      // Breakdown de logística (campos novos — não alteram campos existentes)
+      products_revenue:       parseFloat((metrics.products_revenue    || 0).toFixed(2)),
+      delivery_fees_charged:  parseFloat((metrics.delivery_fees_charged || 0).toFixed(2)),
+      total_driver_fees:      parseFloat((metrics.total_driver_fees   || 0).toFixed(2)),
+      logistics_result:       logisticsResult,
+      // Comparativo com período anterior
+      prev: {
+        revenue:     prev.revenue,
+        order_count: prev.order_count,
+        avg_ticket:  prev.avg_ticket,
+        total_cmv:   prev.total_cmv,
+      },
+      change: {
+        revenue:     pctChange(metrics.revenue,     prev.revenue),
+        order_count: pctChange(metrics.order_count, prev.order_count),
+        avg_ticket:  pctChange(metrics.avg_ticket,  prev.avg_ticket),
+        total_cmv:   pctChange(metrics.total_cmv,   prev.total_cmv),
+      },
       byChannel,
       timeSeries,
       topProducts,
@@ -152,20 +195,14 @@ const summary = asyncHandler(async (req, res) => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// EXPENSES (gastos mensais)
-// ═══════════════════════════════════════════════════════════════
-
-const AppError = require('../../utils/AppError');
+// ── Expenses ────────────────────────────────────────────────────────────
 
 /**
  * GET /api/financeiro/expenses?month=2026-05
- * Lista todos os gastos do mês (ou mês corrente se não informado).
  */
 const listExpenses = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
-  const month    = req.query.month ?? new Date().toISOString().slice(0, 7); // "YYYY-MM"
-  const [year, mon] = month.split('-').map(Number);
+  const { year, month } = getMonthDates(req.query.month);
 
   const { rows } = await db.query(
     `SELECT id, name, supplier, category, amount, payment_method,
@@ -177,21 +214,17 @@ const listExpenses = asyncHandler(async (req, res) => {
        AND  EXTRACT(YEAR  FROM due_date) = $2
        AND  EXTRACT(MONTH FROM due_date) = $3
      ORDER  BY due_date ASC, created_at ASC`,
-    [tenantId, year, mon]
+    [tenantId, year, month]
   );
   res.json({ success: true, data: rows });
 });
 
 /**
  * GET /api/financeiro/expenses/reminders
- * Gastos com vencimento amanhã ou já vencidos e ainda não pagos.
  */
 const getReminders = asyncHandler(async (req, res) => {
-  const tenantId = req.user.tenantId;
-  const today    = new Date();
-  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
-  const todayStr    = today.toISOString().slice(0, 10);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  const tenantId    = req.user.tenantId;
+  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
   const { rows } = await db.query(
     `SELECT id, name, supplier, amount, due_date, status
@@ -208,38 +241,35 @@ const getReminders = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/financeiro/expenses
- * Cria um gasto. Se parcelado, cria todas as parcelas automaticamente.
+ * Cria gasto. Se parcelado, cria todas as parcelas automaticamente.
  */
 const createExpense = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
   const {
     name, supplier, category, amount, paymentMethod,
-    isInstallment, installmentTotal, dueDate,
-    notes, recurrence,
+    isInstallment, installmentTotal, dueDate, notes, recurrence,
   } = req.body;
 
-  if (!name?.trim())  throw new AppError('Nome do gasto é obrigatório.', 400);
+  if (!name?.trim())            throw new AppError('Nome do gasto é obrigatório.', 400);
   if (!amount || isNaN(amount)) throw new AppError('Valor inválido.', 400);
-  if (!dueDate)       throw new AppError('Data de vencimento é obrigatória.', 400);
+  if (!dueDate)                 throw new AppError('Data de vencimento é obrigatória.', 400);
 
-  const cat = category || 'other';
+  const cat = category    || 'other';
   const pm  = paymentMethod || 'pix';
 
   if (isInstallment && installmentTotal > 1) {
-    // Cria todas as parcelas
     const created = [];
-    const base = new Date(dueDate);
+    const base    = new Date(dueDate + 'T12:00:00Z');
 
     for (let i = 0; i < installmentTotal; i++) {
-      const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, base.getUTCDate()));
+      const d   = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, base.getUTCDate()));
       const iso = d.toISOString().slice(0, 10);
-
       const { rows } = await db.query(
         `INSERT INTO expenses
-           (tenant_id, name, supplier, category, amount, payment_method,
-            is_installment, installment_total, installment_current,
-            due_date, status, notes, recurrence)
-         VALUES ($1,$2,$3,$4,$5,$6, true,$7,$8, $9,'pending',$10,$11)
+           (tenant_id,name,supplier,category,amount,payment_method,
+            is_installment,installment_total,installment_current,
+            due_date,status,notes,recurrence)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,'pending',$10,$11)
          RETURNING *`,
         [tenantId, name.trim(), supplier||null, cat, amount, pm,
          installmentTotal, i + 1, iso, notes||null, recurrence||null]
@@ -249,30 +279,31 @@ const createExpense = asyncHandler(async (req, res) => {
     return res.status(201).json({ success: true, data: created });
   }
 
-  // Gasto simples
   const { rows } = await db.query(
     `INSERT INTO expenses
-       (tenant_id, name, supplier, category, amount, payment_method,
-        is_installment, due_date, status, notes, recurrence)
-     VALUES ($1,$2,$3,$4,$5,$6, false,$7,'pending',$8,$9)
+       (tenant_id,name,supplier,category,amount,payment_method,
+        is_installment,due_date,status,notes,recurrence)
+     VALUES ($1,$2,$3,$4,$5,$6,false,$7,'pending',$8,$9)
      RETURNING *`,
     [tenantId, name.trim(), supplier||null, cat, amount, pm,
      dueDate, notes||null, recurrence||null]
   );
+  financeLog({
+    tenantId, userId: req.user?.id, action: 'expense_created',
+    tableName: 'expenses', recordId: rows[0]?.id,
+    afterData: { name: name.trim(), amount, category: cat, due_date: dueDate },
+    amount, ip: req.ip,
+  });
   res.status(201).json({ success: true, data: rows[0] });
 });
 
 /**
  * PUT /api/financeiro/expenses/:id
- * Atualiza um gasto.
  */
 const updateExpense = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
   const { id }   = req.params;
-  const {
-    name, supplier, category, amount, paymentMethod,
-    dueDate, notes, recurrence,
-  } = req.body;
+  const { name, supplier, category, amount, paymentMethod, dueDate, notes, recurrence } = req.body;
 
   const { rows } = await db.query(
     `UPDATE expenses
@@ -296,23 +327,60 @@ const updateExpense = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/financeiro/expenses/:id/pay
- * Marca gasto como pago.
+ *
+ * Marca gasto como pago E registra débito no Banco Virtual.
+ * Usa transação para garantir consistência.
  */
 const payExpense = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
   const { id }   = req.params;
+  const client   = await db.getClient();
 
-  const { rows } = await db.query(
-    `UPDATE expenses
-     SET status     = 'paid',
-         paid_at    = NOW(),
-         updated_at = NOW()
-     WHERE id = $1 AND tenant_id = $2
-     RETURNING *`,
-    [id, tenantId]
-  );
-  if (!rows[0]) throw new AppError('Gasto não encontrado.', 404);
-  res.json({ success: true, data: rows[0] });
+  try {
+    await client.query('BEGIN');
+
+    // 1. Marca como pago (só se ainda pendente — evita duplo débito)
+    const { rows } = await client.query(
+      `UPDATE expenses
+       SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $2 AND status = 'pending'
+       RETURNING *`,
+      [id, tenantId]
+    );
+    if (!rows[0]) throw new AppError('Gasto não encontrado ou já pago.', 404);
+
+    const expense = rows[0];
+
+    // 2. Debita do Banco Virtual (source = 'expense' — não pode ser deletado manualmente)
+    await client.query(
+      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source)
+       VALUES ($1, 'debit', $2, $3, 'expense')`,
+      [
+        tenantId,
+        expense.amount,
+        `Pgto: ${expense.name}${expense.supplier ? ` — ${expense.supplier}` : ''}`,
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    // Auditoria (fire-and-forget)
+    financeLog({
+      tenantId, userId: req.user?.id, action: 'expense_paid',
+      tableName: 'expenses', recordId: expense.id,
+      beforeData: { status: 'pending', amount: expense.amount },
+      afterData:  { status: 'paid' },
+      amount: expense.amount,
+      ip: req.ip,
+    });
+
+    res.json({ success: true, data: expense });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 /**
@@ -327,56 +395,167 @@ const deleteExpense = asyncHandler(async (req, res) => {
     [id, tenantId]
   );
   if (!rowCount) throw new AppError('Gasto não encontrado.', 404);
+  financeLog({
+    tenantId, userId: req.user?.id, action: 'expense_deleted',
+    tableName: 'expenses', recordId: id, ip: req.ip,
+  });
   res.json({ success: true });
 });
 
+// ── Result (DRE simplificado) ──────────────────────────────────────────
+
 /**
  * GET /api/financeiro/result?month=2026-05
+ *
  * Receita do mês vs gastos → lucro estimado.
  */
 const getResult = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
-  const month    = req.query.month ?? new Date().toISOString().slice(0, 7);
-  const [year, mon] = month.split('-').map(Number);
+  const { startDate, endDate, year, month } = getMonthDates(req.query.month);
 
-  const start = new Date(Date.UTC(year, mon - 1, 1, 0, 0, 0));
-  const end   = new Date(Date.UTC(year, mon,     0, 23, 59, 59, 999));
-
-  const [{ rows: [rev] }, { rows: exp }] = await Promise.all([
+  const [{ rows: [rev] }, { rows: [exp] }, { rows: [logist] }] = await Promise.all([
     db.query(
-      `SELECT COALESCE(SUM(total),0)::float AS revenue
-       FROM   orders
-       WHERE  tenant_id=$1 AND status IN('ready','delivered')
-         AND  created_at BETWEEN $2 AND $3`,
-      [tenantId, start, end]
+      `SELECT
+         COALESCE(SUM(o.total),0)::float                                                      AS revenue,
+         COALESCE(SUM(o.total - COALESCE(o.delivery_fee, 0)), 0)::float                       AS products_revenue,
+         COALESCE(SUM(CASE WHEN o.delivery_type = 'delivery'
+                           THEN COALESCE(o.delivery_fee, 0) ELSE 0 END), 0)::float            AS delivery_fees_charged,
+         COALESCE(SUM(oi.total_cost),0)::float                                                 AS total_cmv
+       FROM orders o
+       LEFT JOIN order_items oi ON oi.order_id = o.id
+       WHERE  o.tenant_id = $1
+         AND  o.status IN ('ready','delivered')
+         AND  (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
+      [tenantId, startDate, endDate, TZ]
     ),
     db.query(
-      `SELECT COALESCE(SUM(amount),0)::float AS total_expenses,
-              COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0)::float AS paid_expenses,
-              COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0)::float AS pending_expenses
-       FROM   expenses
-       WHERE  tenant_id=$1
-         AND  EXTRACT(YEAR  FROM due_date)=$2
-         AND  EXTRACT(MONTH FROM due_date)=$3`,
-      [tenantId, year, mon]
+      `SELECT
+         COALESCE(SUM(amount),0)::float                                          AS total_expenses,
+         COALESCE(SUM(CASE WHEN status='paid'    THEN amount ELSE 0 END),0)::float AS paid_expenses,
+         COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0)::float AS pending_expenses
+       FROM expenses
+       WHERE tenant_id = $1
+         AND EXTRACT(YEAR  FROM due_date) = $2
+         AND EXTRACT(MONTH FROM due_date) = $3`,
+      [tenantId, year, month]
+    ),
+    // Repasse total ao motoboy no mês
+    db.query(
+      `SELECT COALESCE(SUM(d.driver_fee), 0)::float AS total_driver_fees
+       FROM deliveries d
+       JOIN orders o ON o.id = d.order_id
+       WHERE d.tenant_id = $1
+         AND d.status = 'delivered'
+         AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
+      [tenantId, startDate, endDate, TZ]
     ),
   ]);
 
-  const revenue  = rev.revenue;
-  const expenses = exp[0];
-  const profit   = revenue - expenses.total_expenses;
+  const monthStr          = req.query.month || new Date().toISOString().slice(0, 7);
+  const grossProfit       = rev.revenue - rev.total_cmv;
+  const netProfit         = rev.revenue - exp.total_expenses;
+  const marginPct         = rev.revenue > 0 ? Math.round((grossProfit / rev.revenue) * 100) : null;
+  const driverFees        = parseFloat(logist.total_driver_fees || 0);
+  const deliveryFees      = parseFloat(rev.delivery_fees_charged || 0);
+  const logisticsResult   = parseFloat((deliveryFees - driverFees).toFixed(2));
 
   res.json({
     success: true,
     data: {
-      month,
-      revenue,
-      total_expenses:   expenses.total_expenses,
-      paid_expenses:    expenses.paid_expenses,
-      pending_expenses: expenses.pending_expenses,
-      profit,
+      month:              monthStr,
+      revenue:            rev.revenue,             // mantido — compatibilidade com frontend
+      total_cmv:          rev.total_cmv,
+      gross_profit:       grossProfit,
+      gross_margin_pct:   marginPct,
+      total_expenses:     exp.total_expenses,
+      paid_expenses:      exp.paid_expenses,
+      pending_expenses:   exp.pending_expenses,
+      profit:             netProfit,
+      profit_after_paid:  rev.revenue - exp.paid_expenses,
+      // Breakdown de logística (campos novos)
+      products_revenue:      parseFloat((rev.products_revenue      || 0).toFixed(2)),
+      delivery_fees_charged: parseFloat((rev.delivery_fees_charged || 0).toFixed(2)),
+      total_driver_fees:     driverFees,
+      logistics_result:      logisticsResult,
     },
   });
 });
 
-module.exports = { summary, listExpenses, getReminders, createExpense, updateExpense, payExpense, deleteExpense, getResult };
+// ── CMV por produto ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/financeiro/cmv?month=2026-05&limit=50
+ *
+ * Ranking de produtos por CMV, margem, receita e lucro bruto.
+ * Usa dados reais de order_items.total_cost.
+ */
+const getCmvByProduct = asyncHandler(async (req, res) => {
+  const tenantId  = req.user.tenantId;
+  const { startDate, endDate } = getMonthDates(req.query.month);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+  const { rows } = await db.query(
+    `SELECT
+       oi.product_name                                                  AS name,
+       COUNT(DISTINCT o.id)::int                                        AS orders_count,
+       SUM(oi.quantity)::float                                          AS qty_sold,
+       ROUND(SUM(oi.total)::numeric, 2)::float                         AS revenue,
+       ROUND(SUM(oi.total_cost)::numeric, 2)::float                    AS total_cost,
+       ROUND((SUM(oi.total) - SUM(oi.total_cost))::numeric, 2)::float  AS gross_profit,
+       CASE WHEN SUM(oi.total) > 0
+            THEN ROUND((SUM(oi.total_cost) / SUM(oi.total) * 100)::numeric, 1)::float
+            ELSE NULL END                                               AS cmv_pct,
+       CASE WHEN SUM(oi.total) > 0
+            THEN ROUND(((SUM(oi.total) - SUM(oi.total_cost)) / SUM(oi.total) * 100)::numeric, 1)::float
+            ELSE NULL END                                               AS margin_pct,
+       ROUND(AVG(oi.unit_price)::numeric, 2)::float                    AS avg_price,
+       ROUND(AVG(oi.unit_cost)::numeric, 2)::float                     AS avg_cost
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready', 'delivered')
+       AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
+     GROUP BY oi.product_name
+     HAVING SUM(oi.total) > 0
+     ORDER BY revenue DESC
+     LIMIT $5`,
+    [tenantId, startDate, endDate, TZ, limit]
+  );
+
+  // Totais consolidados do período
+  const totals = rows.reduce((acc, r) => ({
+    revenue:     acc.revenue     + r.revenue,
+    total_cost:  acc.total_cost  + r.total_cost,
+    gross_profit: acc.gross_profit + r.gross_profit,
+  }), { revenue: 0, total_cost: 0, gross_profit: 0 });
+
+  const avg_cmv_pct = totals.revenue > 0
+    ? parseFloat((totals.total_cost / totals.revenue * 100).toFixed(1))
+    : null;
+
+  res.json({
+    success: true,
+    data: {
+      products: rows,
+      totals: {
+        ...totals,
+        avg_cmv_pct,
+        avg_margin_pct: avg_cmv_pct != null ? parseFloat((100 - avg_cmv_pct).toFixed(1)) : null,
+      },
+      month:    req.query.month || new Date().toISOString().slice(0, 7),
+      products_without_cost: rows.filter(r => r.total_cost === 0).length,
+    },
+  });
+});
+
+module.exports = {
+  summary,
+  listExpenses,
+  getReminders,
+  createExpense,
+  updateExpense,
+  payExpense,
+  deleteExpense,
+  getResult,
+  getCmvByProduct,
+};

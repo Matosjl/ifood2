@@ -1,14 +1,32 @@
 require('dotenv').config();
 
-const { createOrderWorker } = require('./order.worker');
+const { createOrderWorker }                         = require('./order.worker');
+const { createAutomationWorker, createAutomationScheduler } = require('./automation.worker');
 
-const worker = createOrderWorker();
+const orderWorker = createOrderWorker();
+console.log('[Worker] Fila "orders" ativa. Aguardando jobs...');
 
-console.log('[Worker] Iniciado. Aguardando jobs na fila "orders"...');
+let automationWorker;
+let automationQueue;
+
+createAutomationScheduler()
+  .then((queue) => {
+    automationQueue  = queue;
+    automationWorker = createAutomationWorker();
+    console.log('[Worker] Automation Engine ativo. Jobs agendados.');
+  })
+  .catch((err) => {
+    console.error('[Worker] Falha ao iniciar Automation Engine:', err.message);
+    // Não mata o processo — orders continuam funcionando
+  });
 
 const shutdown = async (signal) => {
-  console.log(`[Worker] ${signal} recebido. Encerrando worker graciosamente...`);
-  await worker.close();
+  console.log(`[Worker] ${signal} recebido. Encerrando workers graciosamente...`);
+  await Promise.allSettled([
+    orderWorker.close(),
+    automationWorker?.close(),
+    automationQueue?.close(),
+  ]);
   console.log('[Worker] Encerrado.');
   process.exit(0);
 };

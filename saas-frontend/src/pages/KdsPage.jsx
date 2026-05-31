@@ -39,7 +39,9 @@ function OrderCard({ order, onAction, actionLabel, actionColor, disabled }) {
     ? order.items.filter((i) => i && i.product_name)
     : [];
 
-  const urgency = (Date.now() - new Date(order.created_at).getTime()) / 60000;
+  const urgency       = (Date.now() - new Date(order.created_at).getTime()) / 60000;
+  const minutesStuck  = (Date.now() - new Date(order.updated_at || order.created_at).getTime()) / 60000;
+  const isStuck       = minutesStuck > 8; // Sem atualização por 8+ min
 
   return (
     <motion.div
@@ -49,9 +51,10 @@ function OrderCard({ order, onAction, actionLabel, actionColor, disabled }) {
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ type: 'spring', damping: 24, stiffness: 280 }}
       className={[
-        'bg-gray-900 rounded-2xl border overflow-hidden flex flex-col',
-        urgency > 20 ? 'border-red-500/40 shadow-lg shadow-red-500/10' :
-        urgency > 10 ? 'border-yellow-500/30' : 'border-white/10',
+        'rounded-2xl border overflow-hidden flex flex-col',
+        isStuck  ? 'bg-red-950/60 border-red-500/60 shadow-lg shadow-red-500/20 animate-pulse' :
+        urgency > 20 ? 'bg-gray-900 border-red-500/40 shadow-lg shadow-red-500/10' :
+        urgency > 10 ? 'bg-gray-900 border-yellow-500/30' : 'bg-gray-900 border-white/10',
       ].join(' ')}
     >
       {/* Header */}
@@ -76,7 +79,11 @@ function OrderCard({ order, onAction, actionLabel, actionColor, disabled }) {
           <p className={`text-lg font-black tabular-nums ${elapsedColor(order.created_at)}`}>
             {elapsed(order.created_at)}
           </p>
-          <p className="text-[10px] text-gray-600">aguardando</p>
+          {isStuck ? (
+            <p className="text-[10px] text-red-400 font-bold">🔴 PARADO {Math.round(minutesStuck)}m</p>
+          ) : (
+            <p className="text-[10px] text-gray-600">aguardando</p>
+          )}
         </div>
       </div>
 
@@ -105,6 +112,23 @@ function OrderCard({ order, onAction, actionLabel, actionColor, disabled }) {
           </div>
         ))}
       </div>
+
+      {/* ⚠️ Alerta de troco — expedição vê antes de liberar */}
+      {order.cashChangeRequired > 0 && (
+        <div className="px-4 pb-2">
+          <div className="flex items-center gap-2 bg-yellow-500/20 border border-yellow-500/60 rounded-xl px-3 py-2">
+            <span className="text-xl shrink-0">💵</span>
+            <div>
+              <p className="text-sm font-black text-yellow-300 leading-none">
+                TROCO: R$ {parseFloat(order.cashChangeRequired).toFixed(2).replace('.', ',')}
+              </p>
+              <p className="text-[11px] text-yellow-500 mt-0.5">
+                Cliente entrega R$ {parseFloat(order.cashChangeFor).toFixed(2).replace('.', ',')} — separar troco antes de sair!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notes */}
       {order.notes && (

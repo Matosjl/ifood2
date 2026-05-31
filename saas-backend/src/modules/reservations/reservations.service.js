@@ -19,7 +19,7 @@ async function list(tenantId, { date, status } = {}) {
   }
 
   const { rows } = await db.query(
-    `SELECT r.*, t.number AS table_number, t.label AS table_label
+    `SELECT r.*, t.table_number, t.description AS table_label
      FROM reservations r
      LEFT JOIN restaurant_tables t ON t.id = r.table_id
      WHERE ${wheres.join(' AND ')}

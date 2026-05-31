@@ -5,6 +5,7 @@ import {
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
 import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory, postSangria, postSuprimento, getCaixaMovements } from '../api/caixa';
+import api from '../api/axios';
 import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBancoTransaction } from '../api/banco';
 import usePendingReceipts from '../hooks/usePendingReceipts';
 import ReceiptConfirmModal from '../components/ReceiptConfirmModal';
@@ -109,7 +110,7 @@ function BarChart({ data, formatX, formatTooltip, color = '#3b82f6' }) {
 
 // ── Metric card ───────────────────────────────────────────────
 
-function MetricCard({ label, value, sub, icon, color = 'blue' }) {
+function MetricCard({ label, value, sub, icon, color = 'blue', change }) {
   const colors = {
     blue:   'bg-gradient-to-br from-blue-500/20 to-blue-600/10 border-blue-500/25 text-blue-400',
     green:  'bg-gradient-to-br from-green-500/20 to-emerald-600/10 border-green-500/25 text-green-400',
@@ -117,15 +118,27 @@ function MetricCard({ label, value, sub, icon, color = 'blue' }) {
     red:    'bg-gradient-to-br from-red-500/20 to-rose-600/10 border-red-500/25 text-red-400',
     purple: 'bg-gradient-to-br from-purple-500/20 to-pink-600/10 border-purple-500/25 text-purple-400',
   };
+  const changeBadge = change != null ? (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+      change > 0  ? 'bg-green-500/15 text-green-400' :
+      change < 0  ? 'bg-red-500/15 text-red-400' :
+                    'bg-gray-500/15 text-gray-400'
+    }`}>
+      {change > 0 ? '▲' : change < 0 ? '▼' : '—'} {Math.abs(change)}%
+    </span>
+  ) : null;
   return (
     <div className={`rounded-2xl border p-4 ${colors[color] ?? colors.blue}`}>
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
+            {changeBadge}
+          </div>
           <p className="text-2xl font-black text-white mt-1 leading-tight">{value}</p>
           {sub && <p className="text-xs opacity-60 mt-0.5">{sub}</p>}
         </div>
-        <span className="text-2xl">{icon}</span>
+        <span className="text-2xl shrink-0">{icon}</span>
       </div>
     </div>
   );
@@ -430,12 +443,19 @@ function TabReceitas() {
           </div>
         ) : data && (
           <>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <MetricCard icon="💵" label="Receita"    value={fmtBRL(data.revenue)}
-                sub={`${fmtNum(data.order_count)} pedido${data.order_count !== 1 ? 's' : ''}`} color="green" />
+                sub={`${fmtNum(data.order_count)} pedido${data.order_count !== 1 ? 's' : ''}`}
+                color="green" change={data.change?.revenue} />
+              <MetricCard icon="🏷️" label="CMV"        value={fmtBRL(data.total_cmv)}
+                sub={data.gross_margin_pct != null ? `Margem ${data.gross_margin_pct}%` : 'custo mercadoria'}
+                color={data.gross_margin_pct >= 60 ? 'green' : data.gross_margin_pct >= 40 ? 'orange' : 'red'}
+                change={data.change?.total_cmv != null ? -data.change.total_cmv : null} />
               <MetricCard icon="🧾" label="Concluídos" value={fmtNum(data.order_count)}
-                sub={period === 'today' ? 'hoje' : period === 'week' ? 'últimos 7 dias' : 'neste mês'} color="blue" />
-              <MetricCard icon="🎯" label="Ticket Médio" value={fmtBRL(data.avg_ticket)} sub="por pedido" color="orange" />
+                sub={period === 'today' ? 'hoje' : period === 'week' ? 'últimos 7 dias' : 'neste mês'}
+                color="blue" change={data.change?.order_count} />
+              <MetricCard icon="🎯" label="Ticket Médio" value={fmtBRL(data.avg_ticket)}
+                sub="por pedido" color="orange" change={data.change?.avg_ticket} />
             </div>
 
             <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
@@ -763,6 +783,153 @@ function TabGastos() {
   );
 }
 
+// ── Tab: CMV por Produto ──────────────────────────────────────
+
+function TabCMV() {
+  const [month,    setMonth]    = useState(monthISO());
+  const [data,     setData]     = useState(null);
+  const [loading,  setLoading]  = useState(false);
+  const [sortBy,   setSortBy]   = useState('revenue'); // revenue | cmv_pct | gross_profit | qty_sold
+  const [search,   setSearch]   = useState('');
+
+  const load = useCallback(async (m) => {
+    setLoading(true);
+    try {
+      const { data: res } = await api.get('/financeiro/cmv', { params: { month: m, limit: 100 } });
+      setData(res.data);
+    } catch { setData(null); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(month); }, [month, load]);
+
+  const fmt  = (n) => `R$ ${parseFloat(n || 0).toFixed(2).replace('.', ',')}`;
+  const pct  = (n) => n != null ? `${n.toFixed(1)}%` : '—';
+
+  const cmvColor = (pct) => {
+    if (pct == null) return 'text-gray-500';
+    if (pct <= 30) return 'text-green-400';
+    if (pct <= 45) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+  const marginColor = (pct) => {
+    if (pct == null) return 'text-gray-500';
+    if (pct >= 70) return 'text-green-400';
+    if (pct >= 55) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  const sortedProducts = [...(data?.products ?? [])]
+    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'cmv_pct') return (b.cmv_pct ?? 999) - (a.cmv_pct ?? 999);
+      if (sortBy === 'gross_profit') return b.gross_profit - a.gross_profit;
+      if (sortBy === 'qty_sold') return b.qty_sold - a.qty_sold;
+      return b.revenue - a.revenue;
+    });
+
+  const withoutCost = data?.products_without_cost ?? 0;
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-white/[0.06] shrink-0 flex items-center gap-3 flex-wrap">
+        <div>
+          <p className="text-sm font-black text-white">📉 CMV por Produto</p>
+          <p className="text-xs text-gray-500">Custo de mercadoria vendida · margem bruta</p>
+        </div>
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          {/* Mês */}
+          <input type="month" value={month} onChange={e => { setMonth(e.target.value); load(e.target.value); }}
+            className="bg-gray-800 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
+          {/* Busca */}
+          <input placeholder="Buscar produto..." value={search} onChange={e => setSearch(e.target.value)}
+            className="bg-gray-800 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white w-36 placeholder-gray-600" />
+          {/* Ordenar */}
+          <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+            className="bg-gray-800 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white">
+            <option value="revenue">↓ Receita</option>
+            <option value="cmv_pct">↑ Maior CMV%</option>
+            <option value="gross_profit">↓ Maior Lucro</option>
+            <option value="qty_sold">↓ + Vendidos</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Totais */}
+      {data && (
+        <div className="px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 border-b border-white/[0.06] shrink-0">
+          {[
+            { label: 'Receita total', value: fmt(data.totals.revenue), color: 'text-white' },
+            { label: 'Custo total (CMV)', value: fmt(data.totals.total_cost), color: 'text-red-400' },
+            { label: 'Lucro bruto', value: fmt(data.totals.gross_profit), color: 'text-green-400' },
+            { label: 'CMV médio', value: pct(data.totals.avg_cmv_pct), color: cmvColor(data.totals.avg_cmv_pct) },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="bg-gray-800/60 rounded-xl px-3 py-2.5">
+              <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
+              <p className={`text-lg font-black tabular-nums ${color}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Aviso produtos sem custo */}
+      {withoutCost > 0 && (
+        <div className="mx-4 mt-3 shrink-0 bg-yellow-500/10 border border-yellow-500/30 rounded-xl px-3 py-2 text-xs text-yellow-300 flex items-center gap-2">
+          ⚠️ <span><b>{withoutCost} produto{withoutCost > 1 ? 's' : ''}</b> sem custo cadastrado — CMV real pode ser maior. Cadastre em <b>Produtos → Ficha Técnica</b>.</span>
+        </div>
+      )}
+
+      {/* Tabela */}
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : sortedProducts.length === 0 ? (
+          <div className="text-center py-16 text-gray-600">
+            <p className="text-2xl mb-2">📭</p>
+            <p className="text-sm">Nenhum produto vendido neste período</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {/* Header row */}
+            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-2 px-3 py-1.5">
+              {['Produto', 'Receita', 'CMV (R$)', 'CMV%', 'Lucro', 'Margem%'].map(h => (
+                <p key={h} className="text-[10px] font-bold text-gray-600 uppercase tracking-wide truncate">{h}</p>
+              ))}
+            </div>
+
+            {sortedProducts.map((p, i) => (
+              <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-2 items-center bg-gray-800/50 hover:bg-gray-800 rounded-xl px-3 py-2.5 transition-colors">
+                {/* Nome */}
+                <div>
+                  <p className="text-xs font-semibold text-white truncate">{p.name}</p>
+                  <p className="text-[10px] text-gray-600">{p.qty_sold?.toFixed(p.qty_sold % 1 !== 0 ? 2 : 0)} un · {p.orders_count} pedidos</p>
+                </div>
+                {/* Receita */}
+                <p className="text-xs font-bold text-white tabular-nums">{fmt(p.revenue)}</p>
+                {/* CMV R$ */}
+                <p className="text-xs font-bold text-red-400 tabular-nums">{fmt(p.total_cost)}</p>
+                {/* CMV % */}
+                <p className={`text-xs font-black tabular-nums ${cmvColor(p.cmv_pct)}`}>
+                  {pct(p.cmv_pct)}
+                </p>
+                {/* Lucro */}
+                <p className="text-xs font-bold text-green-400 tabular-nums">{fmt(p.gross_profit)}</p>
+                {/* Margem % */}
+                <p className={`text-xs font-black tabular-nums ${marginColor(p.margin_pct)}`}>
+                  {pct(p.margin_pct)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Tab: Resultado ────────────────────────────────────────────
 
 function TabResultado() {
@@ -866,20 +1033,30 @@ function TabResultado() {
               </div>
             </div>
 
-            {/* Summary rows */}
+            {/* DRE simplificado */}
             <div className="bg-gray-900/60 border border-white/[0.06] rounded-2xl divide-y divide-white/[0.06]">
               {[
-                { label: 'Receita bruta',      value: data.revenue,          color: 'text-green-400', sign: '+' },
-                { label: 'Gastos pagos',        value: data.paid_expenses,    color: 'text-red-400',   sign: '-' },
-                { label: 'Gastos pendentes',    value: data.pending_expenses, color: 'text-yellow-400',sign: '-' },
-                { label: isProfit ? '= Lucro' : '= Prejuízo',
+                { label: '(+) Receita bruta',           value: data.revenue,            color: 'text-green-400',  sign: '' },
+                ...(data.total_cmv > 0 ? [
+                  { label: '(-) CMV (custo mercadoria)', value: data.total_cmv,          color: 'text-orange-400', sign: '-' },
+                  { label: '(=) Lucro bruto',            value: data.gross_profit,       color: data.gross_profit >= 0 ? 'text-green-400' : 'text-red-400', sign: '',
+                    sub: data.gross_margin_pct != null ? `Margem ${data.gross_margin_pct}%` : null },
+                ] : []),
+                { label: '(-) Gastos pagos',             value: data.paid_expenses,      color: 'text-red-400',    sign: '-' },
+                { label: '(=) Resultado real',           value: data.profit_after_paid ?? data.revenue - data.paid_expenses,
+                  color: (data.profit_after_paid ?? 0) >= 0 ? 'text-green-400' : 'text-red-400', sign: '', bold: false },
+                { label: '(-) Gastos pendentes',         value: data.pending_expenses,   color: 'text-yellow-400', sign: '-' },
+                { label: isProfit ? '(=) Lucro projetado' : '(=) Prejuízo projetado',
                   value: Math.abs(data.profit), color: isProfit ? 'text-green-400' : 'text-red-400',
-                  sign: isProfit ? '+' : '-', bold: true },
-              ].map(({ label, value, color, sign, bold }) => (
+                  sign: '', bold: true },
+              ].map(({ label, value, color, sign, bold, sub }) => (
                 <div key={label} className={`flex items-center justify-between px-4 py-3 ${bold ? 'bg-white/[0.03]' : ''}`}>
-                  <span className={`text-sm ${bold ? 'font-black text-white' : 'text-gray-400'}`}>{label}</span>
+                  <div>
+                    <span className={`text-sm ${bold ? 'font-black text-white' : 'text-gray-400'}`}>{label}</span>
+                    {sub && <p className="text-[10px] text-gray-500">{sub}</p>}
+                  </div>
                   <span className={`text-sm font-bold tabular-nums ${color}`}>
-                    {sign}{fmtBRL(value)}
+                    {sign}{fmtBRL(typeof value === 'number' ? Math.abs(value) : value)}
                   </span>
                 </div>
               ))}
@@ -900,8 +1077,22 @@ function TabResultado() {
 // ── Tab: Caixa ────────────────────────────────────────────────
 
 const PM_LABELS = {
-  cash: '💵 Dinheiro', pix: '📱 Pix', credit: '💳 Crédito',
-  debit: '💳 Débito', voucher: '🎫 Vale Ref.', other: '🔖 Outro',
+  // Formas de pagamento dos pedidos
+  cash:         '💵 Dinheiro',
+  pix:          '📱 Pix',
+  credit:       '💳 Crédito',
+  debit:        '💳 Débito',
+  voucher:      '🎫 Vale Ref.',
+  other:        '🔖 Outro',
+  fiado:        '📒 Fiado',
+  pending:      '⏳ A cobrar',
+  // Chaves do fechamento de caixa (contagem física)
+  cash_counted: '💵 Dinheiro contado (físico)',
+  card_counted: '💳 Cartão contado (físico)',
+  pix_counted:  '📱 PIX contado (físico)',
+  card_system:  '🖥️ Total maquininha (sistema)',
+  cash_system:  '💵 Dinheiro (sistema)',
+  pix_system:   '📱 PIX (sistema)',
 };
 
 function TabCaixa() {
@@ -916,6 +1107,9 @@ function TabCaixa() {
   const [openNote,    setOpenNote]    = useState('');
   const [closeNote,   setCloseNote]   = useState('');
   const [confirm,     setConfirm]     = useState(false);
+  const [unpaidOrders,   setUnpaidOrders]   = useState([]); // pedidos sem pagamento ao fechar
+  const [stockAlerts,    setStockAlerts]    = useState([]); // insumos críticos na abertura
+  const [stockAlertDismissed, setStockAlertDismissed] = useState(false);
   // Contagem física no fechamento
   const [cashCounted, setCashCounted] = useState('');
   const [cardCounted, setCardCounted] = useState('');
@@ -951,6 +1145,15 @@ function TabCaixa() {
     try {
       await openCaixa({ openingBalance: parseFloat(openVal) || 0, notes: openNote || undefined });
       setOpenVal(''); setOpenNote('');
+      // Verifica estoque crítico ao abrir o dia
+      try {
+        const insRes = await api.get('/insumos?limit=200');
+        const critical = (insRes.data.data ?? []).filter(
+          (i) => parseFloat(i.min_qty || 0) > 0 && parseFloat(i.qty_in_stock || 0) <= parseFloat(i.min_qty || 0)
+        );
+        setStockAlerts(critical);
+        setStockAlertDismissed(false);
+      } catch { /* não bloqueia */ }
       await load();
     } catch (e) { setErr(e?.response?.data?.message ?? 'Erro ao abrir caixa.'); }
     finally { setSaving(false); }
@@ -1016,7 +1219,7 @@ function TabCaixa() {
 
       {/* ── CAIXA FECHADO → abrir ───────────────────────────── */}
       {!caixa && (
-        <div className="sticky top-0 z-10 bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden shadow-2xl">
+        <div className="sticky top-0 z-10 bg-gray-900/60 border border-white/[0.06] rounded-2xl overflow-hidden shadow-2xl shrink-0">
           <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-3">
             <span className="text-2xl">🔐</span>
             <div>
@@ -1047,6 +1250,36 @@ function TabCaixa() {
             >
               {saving ? 'Abrindo…' : '🟢 Abrir Caixa'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ALERTA ESTOQUE CRÍTICO (pós-abertura) ────────────── */}
+      {stockAlerts.length > 0 && !stockAlertDismissed && (
+        <div className="bg-red-900/30 border border-red-500/40 rounded-2xl p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-bold text-red-400 mb-2">
+                🔴 {stockAlerts.length} insumo(s) abaixo do estoque mínimo!
+              </p>
+              <div className="space-y-1">
+                {stockAlerts.slice(0, 5).map((i) => (
+                  <p key={i.id} className="text-xs text-red-300/80">
+                    • {i.name}: <strong>{parseFloat(i.qty_in_stock).toFixed(2)} {i.unit}</strong>
+                    &nbsp;(mín: {parseFloat(i.min_qty).toFixed(2)} {i.unit})
+                  </p>
+                ))}
+                {stockAlerts.length > 5 && (
+                  <p className="text-xs text-red-300/50">...e mais {stockAlerts.length - 5} itens</p>
+                )}
+              </div>
+              <p className="text-[11px] text-red-300/60 mt-2">Atualize o estoque em Produtos → Estoque antes de começar.</p>
+            </div>
+            <button
+              onClick={() => setStockAlertDismissed(true)}
+              className="text-red-400/60 hover:text-red-300 text-lg shrink-0"
+              title="Dispensar"
+            >×</button>
           </div>
         </div>
       )}
@@ -1176,13 +1409,39 @@ function TabCaixa() {
           {/* Close caixa */}
           {!confirm ? (
             <button
-              onClick={() => setConfirm(true)}
+              onClick={async () => {
+                // Verifica pedidos entregues sem forma de pagamento definida
+                try {
+                  const res = await api.get('/orders?status=delivered&limit=50');
+                  const unpaid = (res.data.data ?? []).filter(
+                    (o) => !o.payment_method || o.payment_method === 'pending'
+                  );
+                  setUnpaidOrders(unpaid);
+                } catch { setUnpaidOrders([]); }
+                setConfirm(true);
+              }}
               className="w-full py-3 rounded-xl border-2 border-red-500/40 text-red-400 font-bold text-sm hover:bg-red-500/10 transition-colors"
             >
               🔒 Fechar Caixa
             </button>
           ) : (
             <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 space-y-4">
+              {/* Aviso pedidos sem pagamento */}
+              {unpaidOrders.length > 0 && (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl px-3 py-2">
+                  <p className="text-xs font-bold text-yellow-400 mb-1">
+                    ⚠️ {unpaidOrders.length} pedido(s) sem forma de pagamento!
+                  </p>
+                  {unpaidOrders.slice(0, 3).map((o) => (
+                    <p key={o.id} className="text-[11px] text-yellow-300/70">
+                      #{o.order_number} — {o.customer_name || 'sem nome'}
+                    </p>
+                  ))}
+                  {unpaidOrders.length > 3 && (
+                    <p className="text-[11px] text-yellow-300/50">...e mais {unpaidOrders.length - 3}</p>
+                  )}
+                </div>
+              )}
               <div>
                 <p className="text-sm font-bold text-red-400 mb-1">🔒 Fechamento de Caixa</p>
                 <p className="text-xs text-gray-400">Informe os valores que você contou fisicamente. O sistema compara com as vendas registradas.</p>
@@ -1624,6 +1883,7 @@ const TABS = [
   { id: 'receitas',  label: '📈 Receitas'  },
   { id: 'gastos',    label: '💸 Gastos'    },
   { id: 'resultado', label: '📊 Resultado' },
+  { id: 'cmv',       label: '📉 CMV'       },
   { id: 'banco',     label: '🏦 Banco'     },
   { id: 'notas',     label: '📋 Notas'     },
 ];
@@ -1676,6 +1936,7 @@ export default function FinanceiroPage() {
         {tab === 'receitas'  && <TabReceitas />}
         {tab === 'gastos'    && <TabGastos />}
         {tab === 'resultado' && <TabResultado />}
+        {tab === 'cmv'       && <TabCMV />}
         {tab === 'banco'     && <TabBanco />}
         {tab === 'notas'     && <TabNotas />}
       </div>
