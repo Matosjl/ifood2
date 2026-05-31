@@ -759,11 +759,18 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
             </label>
           )}
 
-          {/* Itens do Combo — somente na edição e quando is_combo */}
-          {isEdit && form.isCombo && (
+          {/* Itens do Combo — só aparece quando já salvo com is_combo = true no banco */}
+          {isEdit && product?.is_combo && (
             <div className="pt-4 border-t border-white/[0.06]">
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🎁 Itens do Combo</p>
               <ComboManager productId={product.id} allProducts={allProducts} />
+            </div>
+          )}
+
+          {/* Aviso: marcou combo mas ainda não salvou */}
+          {isEdit && form.isCombo && !product?.is_combo && (
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-3 py-2.5 text-xs text-orange-300">
+              💡 Clique em <strong>Salvar Alterações</strong> primeiro. Os itens do combo serão configurados depois.
             </div>
           )}
 
