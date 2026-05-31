@@ -31,6 +31,11 @@ const replenishRules = [
   body('reason').optional().isLength({ max: 300 }).withMessage('Motivo muito longo.'),
 ];
 
+// ── Código de barras (antes de /:id para não conflitar) ───────
+
+router.get('/barcode/:code',        ctrl.getByBarcode);
+router.get('/barcode-lookup/:code', ctrl.lookupBarcode);
+
 // ── Produtos ──────────────────────────────────────────────────
 
 router.get('/',              ctrl.list);

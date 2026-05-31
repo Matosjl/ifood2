@@ -177,7 +177,9 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price_source VARCHAR(30) NOT 
 -- ── COMBOS ─────────────────────────────────────────────────────
 -- Produto do tipo combo agrupa produtos filhos e os vende como um item único.
 -- O estoque e o CMV são calculados pelos filhos, não pelo combo em si.
-ALTER TABLE products ADD COLUMN IF NOT EXISTS is_combo BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_combo  BOOLEAN     NOT NULL DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode   VARCHAR(60)          DEFAULT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode ON products(tenant_id, barcode) WHERE barcode IS NOT NULL;
 
 -- Itens que compõem cada combo
 CREATE TABLE IF NOT EXISTS product_combos (

@@ -223,6 +223,50 @@ const deleteOption = asyncHandler(async (req, res) => {
   res.json({ success: true });
 });
 
+// ── Código de barras ──────────────────────────────────────────
+
+/** GET /api/products/barcode/:code — busca produto por barcode no tenant */
+const getByBarcode = asyncHandler(async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT p.*, c.name AS category_name
+     FROM products p
+     LEFT JOIN categories c ON c.id = p.category_id
+     WHERE p.tenant_id = $1 AND p.barcode = $2 AND p.active = true
+     LIMIT 1`,
+    [req.user.tenantId, req.params.code.trim()]
+  );
+  if (!rows[0]) return res.json({ success: true, data: null });
+  res.json({ success: true, data: rows[0] });
+});
+
+/** GET /api/products/barcode-lookup/:code — consulta Open Food Facts */
+const lookupBarcode = asyncHandler(async (req, res) => {
+  const code = req.params.code.trim();
+  const https = require('https');
+
+  const result = await new Promise((resolve, reject) => {
+    const url = `https://world.openfoodfacts.org/api/v0/product/${code}.json`;
+    https.get(url, { headers: { 'User-Agent': 'ZapFome/1.0' } }, (resp) => {
+      let raw = '';
+      resp.on('data', d => raw += d);
+      resp.on('end', () => {
+        try {
+          const json = JSON.parse(raw);
+          if (json.status !== 1 || !json.product) return resolve(null);
+          const p = json.product;
+          const name = p.product_name_pt || p.product_name || p.product_name_en || '';
+          const brand = p.brands || '';
+          const cat = (p.categories_tags || [])[0]?.replace('pt:', '').replace('en:', '') || '';
+          resolve({ name: [name, brand].filter(Boolean).join(' — '), category: cat, barcode: code });
+        } catch { resolve(null); }
+      });
+      resp.on('error', reject);
+    }).on('error', reject);
+  });
+
+  res.json({ success: true, data: result });
+});
+
 module.exports = {
   list, getOne, create, update, remove,
   replenish, movements, allMovements,
@@ -230,4 +274,5 @@ module.exports = {
   uploadImage,
   createGroup, updateGroup, deleteGroup,
   createOption, updateOption, deleteOption,
+  getByBarcode, lookupBarcode,
 };

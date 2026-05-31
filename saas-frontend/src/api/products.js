@@ -15,6 +15,10 @@ export const deleteCategory  = (id)         => api.delete(`/categories/${id}`);
 
 // ── Stock ─────────────────────────────────────────────────────
 export const replenishStock   = (id, data) => api.post(`/products/${id}/replenish`, data);
+
+// ── Código de barras ──────────────────────────────────────────
+export const getByBarcode    = (code) => api.get(`/products/barcode/${encodeURIComponent(code)}`);
+export const lookupBarcode   = (code) => api.get(`/products/barcode-lookup/${encodeURIComponent(code)}`);
 export const listMovements    = (productId, params) =>
   api.get(`/products/${productId}/movements`, { params });
 export const listAllMovements = (params) =>

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axios';
 import PrecificadorTab from '../components/PrecificadorTab';
-import { listProducts, replenishStock, listAllMovements } from '../api/products';
+import { listProducts, replenishStock, listAllMovements, createProduct, listCategories } from '../api/products';
+import BarcodeModal from '../components/BarcodeModal';
 import {
   listInsumos, createInsumo, updateInsumo, deleteInsumo, adjustInsumoStock,
   getProductInsumos, setProductInsumos,
@@ -1453,6 +1454,134 @@ function DecisionCard({ decision, onAsk }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Modal de cadastro rápido por código de barras
+// ─────────────────────────────────────────────────────────────
+
+function BarcodeQuickCreateModal({ preset, onClose, onSaved }) {
+  const [categories, setCategories] = useState([]);
+  const [form, setForm] = useState({
+    name:        preset?.name     || '',
+    barcode:     preset?.barcode  || '',
+    categoryId:  '',
+    saleType:    'unit',
+    costPrice:   '',
+    salePrice:   '',
+    stockQty:    '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState(null);
+
+  useEffect(() => {
+    listCategories().then(r => setCategories(r.data.data ?? [])).catch(() => {});
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim())  return setError('Nome é obrigatório.');
+    if (!form.salePrice)    return setError('Preço de venda é obrigatório.');
+    setSaving(true);
+    setError(null);
+    try {
+      const { data } = await createProduct({
+        name:           form.name.trim(),
+        barcode:        form.barcode.trim() || undefined,
+        categoryId:     form.categoryId    || undefined,
+        saleType:       form.saleType,
+        costPrice:      parseFloat(form.costPrice)  || 0,
+        salePrice:      parseFloat(form.salePrice)  || 0,
+        stockQty:       parseFloat(form.stockQty)   || 0,
+      });
+      onSaved(data.data);
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Erro ao salvar produto.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-gray-900 rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-black text-white">Cadastrar Produto</h2>
+            <p className="text-xs text-gray-500 mt-0.5 font-mono">{form.barcode || 'Código manual'}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3 overflow-y-auto max-h-[80vh]">
+          <div>
+            <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome *</label>
+            <input value={form.name} onChange={e => set('name', e.target.value)}
+              className="input w-full" placeholder="Nome do produto" autoFocus />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 font-semibold mb-1 block">Código de barras</label>
+            <input value={form.barcode} onChange={e => set('barcode', e.target.value)}
+              className="input w-full font-mono" placeholder="Código de barras" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1 block">Categoria</label>
+              <select value={form.categoryId} onChange={e => set('categoryId', e.target.value)} className="input w-full">
+                <option value="">Sem categoria</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1 block">Tipo</label>
+              <div className="flex rounded-xl overflow-hidden border border-white/10 h-[38px]">
+                {['unit','kg'].map(t => (
+                  <button key={t} type="button" onClick={() => set('saleType', t)}
+                    className={`flex-1 text-sm font-semibold transition-colors ${form.saleType === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                    {t === 'unit' ? 'Unidade' : 'Kg'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1 block">Custo (R$)</label>
+              <input type="number" min="0" step="0.01" value={form.costPrice}
+                onChange={e => set('costPrice', e.target.value)} className="input w-full" placeholder="0.00" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1 block">Venda (R$) *</label>
+              <input type="number" min="0" step="0.01" value={form.salePrice}
+                onChange={e => set('salePrice', e.target.value)} className="input w-full" placeholder="0.00" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-semibold mb-1 block">Estoque</label>
+              <input type="number" min="0" step={form.saleType === 'kg' ? '0.1' : '1'} value={form.stockQty}
+                onChange={e => set('stockQty', e.target.value)} className="input w-full" placeholder="0" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2 rounded-xl text-sm text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" disabled={saving} className="flex-1 btn-green disabled:opacity-50">
+              {saving ? 'Salvando...' : 'Cadastrar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────
 
@@ -1463,7 +1592,9 @@ export default function StockPage() {
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
   const [tab,       setTab]       = useState('stock'); // 'stock' | 'movements' | 'insumos' | 'producao' | 'ficha'
-  const [repProduct, setRepProduct] = useState(null);
+  const [repProduct,    setRepProduct]    = useState(null);
+  const [barcodeOpen,   setBarcodeOpen]   = useState(false);
+  const [barcodePreset, setBarcodePreset] = useState(null); // { name, barcode, ... } para pré-preencher
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1521,9 +1652,20 @@ export default function StockPage() {
           className="input flex-1 max-w-xs text-sm"
         />
         <button
+          onClick={() => setBarcodeOpen(true)}
+          title="Leitor de código de barras"
+          className="ml-auto btn-green px-3 py-2 text-sm flex items-center gap-1.5"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M3 4h1v16H3V4zm3 0h1v16H6V4zm3 0h2v16H9V4zm4 0h1v16h-1V4zm3 0h1v16h-1V4zm3 0h1v16h-1V4z" />
+          </svg>
+          Leitor
+        </button>
+        <button
           onClick={load}
           title="Atualizar"
-          className="ml-auto p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -1724,6 +1866,36 @@ export default function StockPage() {
           product={repProduct}
           onClose={() => setRepProduct(null)}
           onDone={handleReplenished}
+        />
+      )}
+
+      {/* ── Barcode modal ─────────────────────────────────────── */}
+      {barcodeOpen && (
+        <BarcodeModal
+          onClose={() => { setBarcodeOpen(false); setBarcodePreset(null); }}
+          onFoundProduct={(product) => {
+            // Produto existente → abre replenish para atualizar estoque
+            setBarcodeOpen(false);
+            setRepProduct(product);
+          }}
+          onNewProduct={(prefill) => {
+            // Produto novo → guarda preset e abre QuickRegister via ProductsPage
+            // Por enquanto abre modal de reposição com alerta
+            setBarcodeOpen(false);
+            setBarcodePreset(prefill);
+          }}
+        />
+      )}
+
+      {/* ── Cadastro rápido por barcode ───────────────────────── */}
+      {barcodePreset && (
+        <BarcodeQuickCreateModal
+          preset={barcodePreset}
+          onClose={() => setBarcodePreset(null)}
+          onSaved={(p) => {
+            setProducts((prev) => [p, ...prev]);
+            setBarcodePreset(null);
+          }}
         />
       )}
     </div>
