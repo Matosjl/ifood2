@@ -1,6 +1,6 @@
 'use strict';
 const router     = require('express').Router();
-const { authenticate, authorize } = require('../../middleware/auth');
+const { authenticate, authorize } = require('../../middleware/auth.middleware');
 const ctrl       = require('./producao.controller');
 
 router.use(authenticate);
