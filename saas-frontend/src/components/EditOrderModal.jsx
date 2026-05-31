@@ -271,36 +271,31 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                   onChange={(e) => setSearch(e.target.value)} className="input w-full" autoFocus />
               </div>
 
-              <div className="col-scroll flex-1 px-3 pb-3 space-y-1.5">
+              <div className="col-scroll flex-1 px-3 pb-3 space-y-1">
                 {loading && <p className="text-gray-500 text-sm text-center py-8">Carregando...</p>}
 
-                {searchResults && (
-                  searchResults.length === 0
-                    ? <p className="text-gray-500 text-sm text-center py-8">Nenhum produto encontrado</p>
-                    : searchResults.map((p) => {
-                        const inCart = cart[p.id];
-                        return (
-                          <button key={p.id} onClick={() => handleAdd(p)}
-                            className={[
-                              'w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors',
-                              'bg-gray-800/60 hover:bg-gray-700/80',
-                              inCart ? 'ring-1 ring-blue-500/60' : '',
-                            ].join(' ')}>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-gray-200 truncate">{p.name}</p>
-                              <p className="text-xs text-gray-500">{fmt(p.sale_price)}/{p.sale_type === 'kg' ? 'kg' : 'un'}</p>
-                            </div>
-                            {inCart && <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full shrink-0">{inCart.qty}×</span>}
-                            <span className="text-green-400 font-bold text-sm shrink-0">{fmt(p.sale_price)}</span>
-                          </button>
-                        );
-                      })
-                )}
+                {/* Lista plana — sem categorias, mostra todos os produtos */}
+                {!loading && (searchResults ?? products).map((p) => {
+                  const inCart = cart[p.id];
+                  return (
+                    <button key={p.id} onClick={() => handleAdd(p)}
+                      className={[
+                        'w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors',
+                        'bg-gray-800/60 hover:bg-gray-700/80',
+                        inCart ? 'ring-1 ring-blue-500/60 bg-blue-500/5' : '',
+                      ].join(' ')}>
+                      <span className="text-sm font-medium text-gray-200 truncate flex-1">{p.name}</span>
+                      {inCart && (
+                        <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full shrink-0 tabular-nums">{inCart.qty}×</span>
+                      )}
+                      <span className="text-green-400 font-bold text-sm shrink-0 tabular-nums">{fmt(p.sale_price)}</span>
+                    </button>
+                  );
+                })}
 
-                {!searchResults && !loading && categories.map(({ name: catName, items }) => (
-                  <CategoryAccordion key={catName} name={catName} items={items} cart={cart}
-                    onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} />
-                ))}
+                {!loading && (searchResults ?? products).length === 0 && (
+                  <p className="text-gray-500 text-sm text-center py-8">Nenhum produto encontrado</p>
+                )}
               </div>
             </div>
 
