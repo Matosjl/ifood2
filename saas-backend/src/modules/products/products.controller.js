@@ -254,10 +254,14 @@ const lookupBarcode = asyncHandler(async (req, res) => {
           const json = JSON.parse(raw);
           if (json.status !== 1 || !json.product) return resolve(null);
           const p = json.product;
-          const name = p.product_name_pt || p.product_name || p.product_name_en || '';
-          const brand = p.brands || '';
-          const cat = (p.categories_tags || [])[0]?.replace('pt:', '').replace('en:', '') || '';
-          resolve({ name: [name, brand].filter(Boolean).join(' — '), category: cat, barcode: code });
+          const name  = (p.product_name_pt || p.product_name || p.product_name_en || '').trim();
+          // brands pode vir como "Orquidea,Orquidea,Orquidea" — pega só o primeiro único
+          const brand = [...new Set((p.brands || '').split(',').map(s => s.trim()).filter(Boolean))][0] || '';
+          const cat   = (p.categories_tags || [])[0]?.replace(/^(pt|en|fr):/, '') || '';
+          const finalName = name
+            ? (brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} — ${brand}` : name)
+            : brand;
+          resolve({ name: finalName, category: cat, barcode: code });
         } catch { resolve(null); }
       });
       resp.on('error', reject);

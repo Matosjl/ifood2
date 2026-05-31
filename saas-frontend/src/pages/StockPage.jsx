@@ -1872,17 +1872,14 @@ export default function StockPage() {
       {/* ── Barcode modal ─────────────────────────────────────── */}
       {barcodeOpen && (
         <BarcodeModal
-          onClose={() => { setBarcodeOpen(false); setBarcodePreset(null); }}
+          onClose={() => setBarcodeOpen(false)}
           onFoundProduct={(product) => {
-            // Produto existente → abre replenish para atualizar estoque
             setBarcodeOpen(false);
             setRepProduct(product);
           }}
           onNewProduct={(prefill) => {
-            // Produto novo → guarda preset e abre QuickRegister via ProductsPage
-            // Por enquanto abre modal de reposição com alerta
-            setBarcodeOpen(false);
             setBarcodePreset(prefill);
+            setBarcodeOpen(false);
           }}
         />
       )}
