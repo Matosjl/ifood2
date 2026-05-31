@@ -94,20 +94,21 @@ class Product {
   // ── Escrita ────────────────────────────────────────────────
 
   static async create(tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured } = data;
+    const { categoryId, name, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured, isCombo } = data;
     const { rows } = await dbClient.query(
       `INSERT INTO products
-         (tenant_id, category_id, name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         (tenant_id, category_id, name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured, is_combo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
       [tenantId, categoryId || null, name.trim(), description || null,
-       saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0, featured ?? false]
+       saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0,
+       featured ?? false, isCombo ?? false]
     );
     return rows[0];
   }
 
   static async update(id, tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, alertThreshold, active, featured } = data;
+    const { categoryId, name, description, saleType, costPrice, salePrice, alertThreshold, active, featured, isCombo } = data;
     const { rows } = await dbClient.query(
       `UPDATE products
        SET category_id     = COALESCE($3, category_id),
@@ -119,11 +120,13 @@ class Product {
            alert_threshold = COALESCE($9, alert_threshold),
            active          = COALESCE($10, active),
            featured        = COALESCE($11, featured),
+           is_combo        = COALESCE($12, is_combo),
            updated_at      = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
       [id, tenantId, categoryId, name?.trim(), description, saleType, costPrice, salePrice, alertThreshold, active,
-       featured !== undefined ? featured : null]
+       featured !== undefined ? featured : null,
+       isCombo  !== undefined ? isCombo  : null]
     );
     return rows[0] || null;
   }

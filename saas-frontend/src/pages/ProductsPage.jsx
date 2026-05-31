@@ -7,9 +7,139 @@ import {
 } from '../api/products';
 import { uploadProductImage } from '../api/products_upload';
 import { listInsumos, getProductInsumos, setProductInsumos } from '../api/insumos';
+import { getCombo, addComboItem, removeComboItem } from '../api/combos';
+import QuickRegisterModal from '../components/QuickRegisterModal';
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtPct = (n) => (n != null && n !== '' ? `${parseFloat(n).toFixed(1)}%` : '—');
+
+// ─────────────────────────────────────────────────────────────
+// Combo Manager (usado dentro do ProductModal quando is_combo)
+// ─────────────────────────────────────────────────────────────
+
+function ComboManager({ productId, allProducts }) {
+  const [combo,    setCombo]    = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [childId,  setChildId]  = useState('');
+  const [qty,      setQty]      = useState('1');
+  const [adding,   setAdding]   = useState(false);
+  const [error,    setError]    = useState(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await getCombo(productId);
+      setCombo(data.data);
+    } catch (e) {
+      setError(e.response?.data?.message ?? 'Erro ao carregar combo.');
+    } finally {
+      setLoading(false);
+    }
+  }, [productId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleAdd = async () => {
+    if (!childId || !qty || parseFloat(qty) <= 0) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const { data } = await addComboItem(productId, { child_product_id: childId, qty: parseFloat(qty) });
+      setCombo(data.data);
+      setChildId('');
+      setQty('1');
+    } catch (e) {
+      setError(e.response?.data?.message ?? 'Erro ao adicionar item.');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRemove = async (itemId) => {
+    setError(null);
+    try {
+      const { data } = await removeComboItem(productId, itemId);
+      setCombo(data.data);
+    } catch (e) {
+      setError(e.response?.data?.message ?? 'Erro ao remover item.');
+    }
+  };
+
+  // Produtos disponíveis: não é o próprio, não é combo, está ativo
+  const available = (allProducts ?? []).filter(
+    (p) => p.id !== productId && !p.is_combo && p.active
+  );
+
+  if (loading) return (
+    <div className="flex justify-center py-4">
+      <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        O combo debita o estoque dos filhos na venda. O custo é calculado automaticamente.
+      </p>
+
+      {/* Itens atuais */}
+      {combo?.items?.length > 0 ? (
+        <div className="space-y-1.5">
+          {combo.items.map((item) => (
+            <div key={item.id} className="flex items-center gap-2 bg-gray-800/40 rounded-xl px-3 py-2 border border-white/[0.06]">
+              <span className="flex-1 text-sm text-gray-200 truncate">{item.child_name}</span>
+              <span className="text-xs text-gray-500 shrink-0">×{item.qty}</span>
+              <span className="text-xs text-green-400 font-semibold shrink-0 tabular-nums">
+                R$ {parseFloat(item.line_cost ?? 0).toFixed(2)}
+              </span>
+              <button type="button" onClick={() => handleRemove(item.id)}
+                className="text-gray-600 hover:text-red-400 transition-colors text-sm shrink-0 ml-1">✕</button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-600 italic">Nenhum item adicionado ainda.</p>
+      )}
+
+      {/* Resumo financeiro */}
+      {combo && (
+        <div className="grid grid-cols-3 gap-2 bg-gray-800/30 rounded-xl px-3 py-2 border border-white/[0.04]">
+          <div className="text-center">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Custo</p>
+            <p className="text-sm font-bold text-red-400 tabular-nums">R$ {parseFloat(combo.estimated_cost ?? 0).toFixed(2)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Venda</p>
+            <p className="text-sm font-bold text-gray-200 tabular-nums">R$ {parseFloat(combo.combo?.sale_price ?? 0).toFixed(2)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Margem</p>
+            <p className={`text-sm font-bold tabular-nums ${(combo.margin_pct ?? 0) >= 20 ? 'text-green-400' : 'text-yellow-400'}`}>
+              {combo.margin_pct != null ? `${combo.margin_pct}%` : '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Adicionar item */}
+      <div className="flex gap-2">
+        <select value={childId} onChange={(e) => setChildId(e.target.value)} className="input flex-1 text-sm">
+          <option value="">Selecionar produto...</option>
+          {available.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <input type="number" min="0.5" step="0.5" value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          className="input w-16 text-sm text-center" placeholder="Qtd" />
+        <button type="button" onClick={handleAdd} disabled={adding || !childId}
+          className="px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-sm font-bold disabled:opacity-50 transition-colors shrink-0">
+          {adding ? '...' : '+'}
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────
 // Product modal (create / edit)
@@ -332,7 +462,7 @@ function FichaTecnicaManager({ productId }) {
 // Product modal (create / edit)
 // ─────────────────────────────────────────────────────────────
 
-function ProductModal({ product, categories, onClose, onSaved }) {
+function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
   const isEdit = !!product;
 
   const [form, setForm] = useState({
@@ -346,6 +476,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
     description:    product?.description    ?? '',
     active:         product?.active         ?? true,
     featured:       product?.featured       ?? false,
+    isCombo:        product?.is_combo       ?? false,
   });
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState(null);
@@ -379,6 +510,7 @@ function ProductModal({ product, categories, onClose, onSaved }) {
         alertThreshold: parseFloat(form.alertThreshold) || 0,
         description:    form.description || undefined,
         featured:       form.featured,
+        isCombo:        form.isCombo,
       };
       if (!isEdit) payload.stockQty = parseFloat(form.stockQty) || 0;
       else         payload.active   = form.active;
@@ -603,6 +735,17 @@ function ProductModal({ product, categories, onClose, onSaved }) {
             <span className="text-sm text-gray-300">⭐ Produto em destaque <span className="text-gray-600 text-xs">(aparece no carrossel do cardápio)</span></span>
           </label>
 
+          {/* Combo */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={form.isCombo}
+              onChange={(e) => set('isCombo', e.target.checked)}
+              className="w-4 h-4 accent-orange-500 rounded"
+            />
+            <span className="text-sm text-gray-300">🎁 Este produto é um combo <span className="text-gray-600 text-xs">(agrupa produtos filhos)</span></span>
+          </label>
+
           {/* Ativo — edit only */}
           {isEdit && (
             <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -614,6 +757,21 @@ function ProductModal({ product, categories, onClose, onSaved }) {
               />
               <span className="text-sm text-gray-300">Produto ativo (aparece ao criar pedidos)</span>
             </label>
+          )}
+
+          {/* Itens do Combo — somente na edição e quando is_combo */}
+          {isEdit && form.isCombo && (
+            <div className="pt-4 border-t border-white/[0.06]">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🎁 Itens do Combo</p>
+              <ComboManager productId={product.id} allProducts={allProducts} />
+            </div>
+          )}
+
+          {/* Aviso: salve primeiro para gerenciar itens */}
+          {!isEdit && form.isCombo && (
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-3 py-2.5 text-xs text-orange-300">
+              💡 Salve o produto primeiro. Os itens do combo serão configurados na edição.
+            </div>
           )}
 
           {/* Variações — somente na edição */}
@@ -765,7 +923,7 @@ export default function ProductsPage() {
   const [search,       setSearch]       = useState('');
   const [catFilter,    setCatFilter]    = useState('');
   const [showInactive, setShowInactive] = useState(false);
-  const [modal,        setModal]        = useState(null); // null | {type:'product',product?} | {type:'category'}
+  const [modal,        setModal]        = useState(null); // null | {type:'product',product?} | {type:'category'} | {type:'quickRegister'}
   const [error,        setError]        = useState(null);
 
   const load = useCallback(async () => {
@@ -851,6 +1009,14 @@ export default function ProductsPage() {
             className="px-3 py-1.5 rounded-xl text-xs font-semibold text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 transition-colors"
           >
             Categorias
+          </button>
+
+          {/* Quick Register */}
+          <button
+            onClick={() => setModal({ type: 'quickRegister' })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-sm font-semibold transition-colors"
+          >
+            ⚡ Rápido
           </button>
 
           {/* Novo produto */}
@@ -1038,6 +1204,7 @@ export default function ProductsPage() {
         <ProductModal
           product={modal.product}
           categories={categories}
+          allProducts={products}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />
@@ -1052,6 +1219,23 @@ export default function ProductsPage() {
           onDeleted={(id) =>
             setCategories((prev) => prev.filter((c) => c.id !== id))
           }
+        />
+      )}
+      {modal?.type === 'quickRegister' && (
+        <QuickRegisterModal
+          onClose={() => setModal(null)}
+          onSaved={(created) => {
+            setProducts((prev) => [created, ...prev]);
+          }}
+          onComplete={(productId) => {
+            // Open full product modal — either with existing product or blank
+            if (productId) {
+              const existing = products.find((p) => p.id === productId);
+              setModal({ type: 'product', product: existing ?? { id: productId } });
+            } else {
+              setModal({ type: 'product' });
+            }
+          }}
         />
       )}
     </div>
