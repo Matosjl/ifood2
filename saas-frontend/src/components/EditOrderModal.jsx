@@ -265,7 +265,7 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
           <div className="flex flex-1 min-h-0 divide-x divide-white/10">
 
             {/* LEFT — Catálogo */}
-            <div className="flex flex-col w-1/2 min-h-0">
+            <div className="flex flex-col w-3/5 min-h-0">
               <div className="p-3 shrink-0">
                 <input type="text" placeholder="Buscar produto..." value={search}
                   onChange={(e) => setSearch(e.target.value)} className="input w-full" autoFocus />
@@ -280,11 +280,10 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                     : searchResults.map((p) => {
                         const inCart = cart[p.id];
                         return (
-                          <button key={p.id} onClick={() => p.stock_qty > 0 && handleAdd(p)}
-                            disabled={p.stock_qty <= 0}
+                          <button key={p.id} onClick={() => handleAdd(p)}
                             className={[
                               'w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors',
-                              p.stock_qty <= 0 ? 'opacity-40 cursor-not-allowed bg-gray-800/40' : 'bg-gray-800/60 hover:bg-gray-700/80',
+                              'bg-gray-800/60 hover:bg-gray-700/80',
                               inCart ? 'ring-1 ring-blue-500/60' : '',
                             ].join(' ')}>
                             <div className="min-w-0">
@@ -306,37 +305,48 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
             </div>
 
             {/* RIGHT — Carrinho */}
-            <div className="flex flex-col w-1/2 min-h-0">
+            <div className="flex flex-col w-2/5 min-h-0">
+              {/* Header do carrinho */}
+              <div className="px-3 pt-3 pb-2 shrink-0 border-b border-white/[0.06]">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
+                  🛒 Pedido atual
+                  {cartEntries.length > 0 && (
+                    <span className="ml-2 bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full text-[10px]">
+                      {cartEntries.length} {cartEntries.length === 1 ? 'item' : 'itens'}
+                    </span>
+                  )}
+                </p>
+              </div>
+
               <div className="col-scroll flex-1 p-3 space-y-2">
                 {cartEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
                     <span className="text-3xl">🛒</span>
-                    <p className="text-sm italic">Selecione produtos no catálogo</p>
+                    <p className="text-sm italic">Selecione produtos</p>
                   </div>
                 ) : (
                   cartEntries.map(({ product: p, qty, weightKg }) => (
-                    <div key={p.id} className="bg-gray-800/60 rounded-xl p-2.5 space-y-1.5">
+                    <div key={p.id} className="bg-gray-800/60 rounded-xl p-2.5 space-y-1.5 border border-white/[0.05]">
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-semibold text-gray-200 leading-tight flex-1 min-w-0 truncate">{p.name}</p>
-                        <button onClick={() => handleRemove(p.id)} className="text-gray-600 hover:text-red-400 shrink-0 mt-0.5 transition-colors">
+                        <p className="text-xs font-semibold text-gray-200 leading-tight flex-1 min-w-0">{p.name}</p>
+                        <button onClick={() => handleRemove(p.id)} className="text-gray-600 hover:text-red-400 shrink-0 transition-colors">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
                         </button>
                       </div>
                       {p.sale_type === 'kg' ? (
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-400 shrink-0">Peso (kg)</label>
+                        <div className="flex items-center gap-1.5">
                           <input type="number" min="0.1" step="0.1" value={weightKg}
                             onChange={(e) => handleWeight(p.id, e.target.value)}
-                            className="input w-20 text-sm" placeholder="0.0" />
+                            className="input w-16 text-xs py-1" placeholder="kg" />
                           {weightKg && <span className="text-xs text-green-400 font-semibold ml-auto">{fmt(parseFloat(p.sale_price) * parseFloat(weightKg))}</span>}
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => handleQty(p.id, qty - 1)} className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-bold flex items-center justify-center">−</button>
-                          <span className="w-7 text-center text-sm font-bold text-white tabular-nums">{qty}</span>
-                          <button onClick={() => handleQty(p.id, qty + 1)} className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-bold flex items-center justify-center">+</button>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => handleQty(p.id, qty - 1)} className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-bold flex items-center justify-center text-sm">−</button>
+                          <span className="w-6 text-center text-sm font-bold text-white tabular-nums">{qty}</span>
+                          <button onClick={() => handleQty(p.id, qty + 1)} className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center text-sm">+</button>
                           <span className="text-xs text-green-400 font-semibold ml-auto">{fmt(parseFloat(p.sale_price) * qty)}</span>
                         </div>
                       )}
@@ -348,11 +358,11 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
               {/* Footer */}
               <div className="p-3 border-t border-white/10 space-y-2 shrink-0">
                 {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-xl font-black text-white">{fmt(total)}</span>
                   <button onClick={handleSubmit} disabled={submitting || cartEntries.length === 0}
-                    className="btn-green px-6 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {submitting ? 'Salvando...' : 'Salvar Alterações'}
+                    className="btn-green px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                    {submitting ? 'Salvando...' : 'Salvar'}
                   </button>
                 </div>
               </div>
@@ -401,12 +411,9 @@ function CategoryAccordion({ name, items, cart, onAdd, onQty, onWeight }) {
                     <p className={`text-sm font-medium truncate ${inCart ? 'text-white' : 'text-gray-300'}`}>{p.name}</p>
                     <p className="text-xs text-gray-500">
                       {fmt(p.sale_price)}/{p.sale_type === 'kg' ? 'kg' : 'un'}
-                      {p.stock_qty <= 0 && <span className="text-red-400 ml-1">· Sem estoque</span>}
                     </p>
                   </div>
-                  {p.stock_qty <= 0 ? (
-                    <span className="text-xs text-red-400/60 italic shrink-0">Esgotado</span>
-                  ) : p.sale_type === 'kg' ? (
+                  {p.sale_type === 'kg' ? (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <input type="number" min="0.1" step="0.1" placeholder="kg"
                         value={inCart?.weightKg ?? ''}
