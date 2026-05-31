@@ -1472,17 +1472,42 @@ function TabCaixa() {
                 </div>
               </div>
 
-              {/* Totais contados vs sistema */}
-              {(cashCounted !== '' || cardCounted !== '' || pixCounted !== '') && (() => {
-                const counted = (parseFloat(cashCounted)||0) + (parseFloat(cardCounted)||0) + (parseFloat(pixCounted)||0);
-                const diff = counted; // diff final calculado no backend
+              {/* Preview da diferença antes de fechar */}
+              {(cashCounted !== '' || cardCounted !== '' || pixCounted !== '') && caixa && (() => {
+                // Calcula o esperado com os dados do caixa atual
+                // Nota: sangrias/suprimentos serão considerados no backend
+                const ps = caixa.payment_summary ?? {};
+                const cashC = parseFloat(cashCounted) || 0;
+                const cardC = parseFloat(cardCounted) || 0;
+                const pixC  = parseFloat(pixCounted)  || 0;
+                const diffColor = (v) => v > 0.01 ? 'text-green-400' : v < -0.01 ? 'text-red-400' : 'text-gray-400';
+                const fmtDiff = (v) => `${v >= 0 ? '+' : ''}${fmtBRL(v)}`;
                 return (
-                  <div className="bg-gray-900/60 rounded-xl p-3 text-xs space-y-1">
-                    <div className="flex justify-between text-gray-400">
-                      <span>Total contado:</span>
-                      <span className="text-white font-bold">{fmtBRL(counted)}</span>
+                  <div className="bg-gray-900/60 rounded-xl p-3 text-xs space-y-1.5">
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wide mb-1">Prévia da conferência</p>
+                    {cashCounted !== '' && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">💵 Dinheiro contado</span>
+                        <span className="text-white font-bold tabular-nums">{fmtBRL(cashC)}</span>
+                      </div>
+                    )}
+                    {cardCounted !== '' && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">💳 Cartão contado</span>
+                        <span className="text-white font-bold tabular-nums">{fmtBRL(cardC)}</span>
+                      </div>
+                    )}
+                    {pixCounted !== '' && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">📱 PIX contado</span>
+                        <span className="text-white font-bold tabular-nums">{fmtBRL(pixC)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-white/[0.06] pt-1.5">
+                      <span className="text-gray-400">Total contado</span>
+                      <span className="text-white font-black tabular-nums">{fmtBRL(cashC + cardC + pixC)}</span>
                     </div>
-                    <p className="text-gray-500 italic">A diferença será calculada ao fechar e salva no relatório.</p>
+                    <p className="text-gray-600 italic text-[10px]">Diferença detalhada por método aparece no relatório após fechar.</p>
                   </div>
                 );
               })()}
@@ -1536,28 +1561,104 @@ function TabCaixa() {
                 </div>
 
                 {/* Expanded detail */}
-                {detail?.id === h.id && h.payment_summary && (
-                  <div className="px-4 pb-4 border-t border-white/[0.06] pt-3 space-y-2">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Vendas por forma de pagamento</p>
-                    {Object.entries(h.payment_summary)
-                      .filter(([, v]) => v > 0)
-                      .map(([k, v]) => (
-                        <div key={k} className="flex justify-between text-sm">
-                          <span className="text-gray-400">{PM_LABELS[k] ?? k}</span>
-                          <span className="font-bold text-white tabular-nums">{fmtBRL(v)}</span>
+                {detail?.id === h.id && h.payment_summary && (() => {
+                  const ps = h.payment_summary;
+                  const diffColor = (v) => v > 0.01 ? 'text-green-400' : v < -0.01 ? 'text-red-400' : 'text-gray-400';
+                  const fmtDiff = (v) => v === undefined ? '—' : `${v >= 0 ? '+' : ''}${fmtBRL(v)}`;
+                  return (
+                  <div className="px-4 pb-4 border-t border-white/[0.06] pt-3 space-y-3">
+
+                    {/* Vendas registradas */}
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">Vendas registradas</p>
+                      {[['cash','💵 Dinheiro'],['pix','📱 PIX'],['debit','💳 Débito'],['credit','💳 Crédito'],['voucher','🎫 Vale Ref.'],['fiado','📒 Fiado'],['other','🔖 Outro']]
+                        .filter(([k]) => ps[k] > 0)
+                        .map(([k, label]) => (
+                          <div key={k} className="flex justify-between text-xs text-gray-400 py-0.5">
+                            <span>{label}</span>
+                            <span className="tabular-nums text-white">{fmtBRL(ps[k])}</span>
+                          </div>
+                        ))}
+                    </div>
+
+                    {/* Comparação por método */}
+                    {(ps.expected_cash !== undefined || ps.cash_counted !== undefined) && (
+                    <div className="bg-gray-800/40 rounded-xl p-2.5 space-y-2">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Conferência física</p>
+
+                      {/* Dinheiro */}
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-gray-600 font-semibold">💵 DINHEIRO</p>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Esperado (troco + vendas - sangrias)</span>
+                          <span className="text-gray-300 tabular-nums">{fmtBRL(ps.expected_cash)}</span>
                         </div>
-                      ))}
-                    <div className="border-t border-white/[0.06] pt-2 flex justify-between text-sm font-black">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Contado fisicamente</span>
+                          <span className="text-white font-bold tabular-nums">{fmtBRL(ps.cash_counted)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-bold">
+                          <span className="text-gray-400">Diferença</span>
+                          <span className={`tabular-nums ${diffColor(ps.cash_diff)}`}>{fmtDiff(ps.cash_diff)}</span>
+                        </div>
+                      </div>
+
+                      {/* Cartão */}
+                      <div className="space-y-0.5 border-t border-white/[0.04] pt-1.5">
+                        <p className="text-[10px] text-gray-600 font-semibold">💳 CARTÃO (maquininha)</p>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Esperado (débito + crédito + vale)</span>
+                          <span className="text-gray-300 tabular-nums">{fmtBRL(ps.expected_card)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Contado na maquininha</span>
+                          <span className="text-white font-bold tabular-nums">{fmtBRL(ps.card_counted)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-bold">
+                          <span className="text-gray-400">Diferença</span>
+                          <span className={`tabular-nums ${diffColor(ps.card_diff)}`}>{fmtDiff(ps.card_diff)}</span>
+                        </div>
+                      </div>
+
+                      {/* PIX */}
+                      <div className="space-y-0.5 border-t border-white/[0.04] pt-1.5">
+                        <p className="text-[10px] text-gray-600 font-semibold">📱 PIX</p>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Esperado (vendas em PIX)</span>
+                          <span className="text-gray-300 tabular-nums">{fmtBRL(ps.expected_pix)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Contado no app/banco</span>
+                          <span className="text-white font-bold tabular-nums">{fmtBRL(ps.pix_counted)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-bold">
+                          <span className="text-gray-400">Diferença</span>
+                          <span className={`tabular-nums ${diffColor(ps.pix_diff)}`}>{fmtDiff(ps.pix_diff)}</span>
+                        </div>
+                      </div>
+
+                      {/* Saldo total */}
+                      <div className="border-t border-white/[0.06] pt-2 flex justify-between text-sm font-black">
+                        <span className="text-gray-300">Diferença total</span>
+                        <span className={diffColor(h.discrepancy)}>{fmtDiff(h.discrepancy)}</span>
+                      </div>
+                      {ps.sangrias > 0 && (
+                        <p className="text-[11px] text-gray-500">Sangrias no período: {fmtBRL(ps.sangrias)}</p>
+                      )}
+                      {ps.suprimentos > 0 && (
+                        <p className="text-[11px] text-gray-500">Suprimentos no período: {fmtBRL(ps.suprimentos)}</p>
+                      )}
+                    </div>
+                    )}
+
+                    <div className="flex justify-between text-sm font-black border-t border-white/[0.06] pt-2">
                       <span className="text-gray-300">Abertura (troco)</span>
                       <span className="text-white">{fmtBRL(h.opening_balance)}</span>
                     </div>
-                    <div className="flex justify-between text-sm font-black">
-                      <span className="text-green-400">Total em caixa (dinheiro + abertura)</span>
-                      <span className="text-green-400">{fmtBRL(h.closing_balance)}</span>
-                    </div>
-                    {h.notes && <p className="text-xs text-gray-500 italic mt-1">"{h.notes}"</p>}
+                    {h.notes && <p className="text-xs text-gray-500 italic">"{h.notes}"</p>}
                   </div>
-                )}
+                  );
+                })()}
               </div>
             ))}
           </div>

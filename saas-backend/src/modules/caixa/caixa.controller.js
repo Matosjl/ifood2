@@ -66,70 +66,88 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const caixa = caixas[0];
   if (!caixa) throw new AppError('Nenhum caixa aberto encontrado.', 404);
 
-  // Summarize orders since caixa opened.
-  // JOIN com deliveries para calcular o valor real esperado no caixa físico:
-  // para entregas pagas em dinheiro, o motoboy ficou com driver_fee —
-  // o caixa não deve esperar o total completo nesses casos.
+  // ── Vendas por método de pagamento ────────────────────────────
   const { rows: summary } = await db.query(
     `SELECT
-       COUNT(*)::int                                                              AS total_orders,
-       -- Receita contábil total (inclui delivery_fee — para banco_transactions)
-       COALESCE(SUM(o.total), 0)::float                                          AS total_revenue,
-       -- Valor esperado fisicamente no caixa:
-       --   entrega + dinheiro + entregue → desconta driver_fee (ficou com o motoboy)
-       --   PIX/cartão → motoboy recebe repasse separado, valor digital chega integral
-       --   retirada/mesa → comportamento normal
-       COALESCE(SUM(
-         CASE
-           WHEN o.payment_method = 'cash' AND o.delivery_type = 'delivery'
-           THEN o.total - COALESCE(d.driver_fee, 0)
-           ELSE o.total
-         END
-       ), 0)::float                                                               AS expected_cash_in_register,
-       -- Total de repasses ao motoboy no período (para transparência no fechamento)
+       COUNT(*)::int                                                                AS total_orders,
+       COALESCE(SUM(o.total), 0)::float                                            AS total_revenue,
        COALESCE(SUM(COALESCE(d.driver_fee, 0))
-         FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                  AS total_driver_fees,
-       COALESCE(SUM(CASE WHEN o.payment_method='cash'    THEN o.total ELSE 0 END),0)::float AS cash,
+         FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                   AS total_driver_fees,
+       -- Por método
+       COALESCE(SUM(CASE WHEN o.payment_method='cash'
+         THEN o.total - COALESCE(d.driver_fee,0) ELSE 0 END),0)::float            AS cash,
        COALESCE(SUM(CASE WHEN o.payment_method='pix'     THEN o.total ELSE 0 END),0)::float AS pix,
        COALESCE(SUM(CASE WHEN o.payment_method='credit'  THEN o.total ELSE 0 END),0)::float AS credit,
        COALESCE(SUM(CASE WHEN o.payment_method='debit'   THEN o.total ELSE 0 END),0)::float AS debit,
        COALESCE(SUM(CASE WHEN o.payment_method='voucher' THEN o.total ELSE 0 END),0)::float AS voucher,
-       COALESCE(SUM(CASE WHEN o.payment_method='other'   THEN o.total ELSE 0 END),0)::float AS other
+       COALESCE(SUM(CASE WHEN o.payment_method='other'   THEN o.total ELSE 0 END),0)::float AS other,
+       COALESCE(SUM(CASE WHEN o.payment_method='fiado'   THEN o.total ELSE 0 END),0)::float AS fiado
      FROM orders o
      LEFT JOIN deliveries d ON d.order_id = o.id AND d.status = 'delivered'
      WHERE o.tenant_id = $1
-       AND o.status IN ('ready', 'delivered')
+       AND o.status NOT IN ('cancelled', 'pending')
        AND o.created_at >= $2`,
     [tenantId, caixa.opened_at]
   );
 
+  // ── Sangrias e suprimentos do caixa ───────────────────────────
+  const { rows: movs } = await db.query(
+    `SELECT type, COALESCE(SUM(amount),0)::float AS total
+     FROM caixa_movements WHERE cash_register_id = $1 AND tenant_id = $2
+     GROUP BY type`,
+    [caixa.id, tenantId]
+  );
+  const sangriasTotal    = movs.find(m => m.type === 'sangria')?.total    || 0;
+  const suprimentosTotal = movs.find(m => m.type === 'suprimento')?.total || 0;
+
   const s = summary[0];
 
-  // Sistema: cartão = crédito + débito + vale
-  const cardSystem = s.credit + s.debit + s.voucher;
+  // ── Esperados por método (conta correta) ─────────────────────
+  // Dinheiro: troco inicial + vendas em cash - sangrias + suprimentos
+  const expectedCash = parseFloat(caixa.opening_balance) + s.cash - sangriasTotal + suprimentosTotal;
+  // PIX: exatamente o que o sistema registrou (vai para conta bancária)
+  const expectedPix  = s.pix;
+  // Cartão: débito + crédito + vale refeição (vai para conta bancária via maquininha)
+  const expectedCard = s.credit + s.debit + s.voucher;
 
   // Valores contados pelo operador
-  const cashC  = parseFloat(cashCounted ?? 0);
-  const cardC  = parseFloat(cardCounted ?? 0);
-  const pixC   = parseFloat(pixCounted  ?? 0);
-  const totalCounted = cashC + cardC + pixC;
+  const cashC = parseFloat(cashCounted ?? 0);
+  const cardC = parseFloat(cardCounted ?? 0);
+  const pixC  = parseFloat(pixCounted  ?? 0);
 
-  // Diferença: positivo = sobra, negativo = falta
-  // Usa expected_cash_in_register (não total_revenue) para não gerar
-  // cash_difference falso por driver_fee retido pelo motoboy em entregas em dinheiro
-  const discrepancy = parseFloat((totalCounted - s.expected_cash_in_register).toFixed(2));
+  // ── Diferença por método (positivo = sobra, negativo = falta) ─
+  const cashDiff = parseFloat((cashC - expectedCash).toFixed(2));
+  const cardDiff = parseFloat((cardC - expectedCard).toFixed(2));
+  const pixDiff  = parseFloat((pixC  - expectedPix ).toFixed(2));
+  // Discrepância total = soma das diferenças por método
+  const discrepancy = parseFloat((cashDiff + cardDiff + pixDiff).toFixed(2));
 
   const paymentSummary = {
-    cash: s.cash, pix: s.pix, credit: s.credit,
-    debit: s.debit, voucher: s.voucher, other: s.other,
+    // Vendas registradas no sistema
+    cash:    s.cash,   pix:    s.pix,
+    credit:  s.credit, debit:  s.debit,
+    voucher: s.voucher, other: s.other,
+    fiado:   s.fiado,
+    // Esperados por método
+    expected_cash: parseFloat(expectedCash.toFixed(2)),
+    expected_pix:  parseFloat(expectedPix.toFixed(2)),
+    expected_card: parseFloat(expectedCard.toFixed(2)),
     // Valores contados pelo operador
-    cash_counted:              cashC,
-    card_counted:              cardC,
-    pix_counted:               pixC,
-    card_system:               cardSystem,
-    // Logística: para transparência no fechamento
+    cash_counted: cashC,
+    card_counted: cardC,
+    pix_counted:  pixC,
+    // Diferença por método
+    cash_diff:    cashDiff,
+    card_diff:    cardDiff,
+    pix_diff:     pixDiff,
+    // Movimentações do caixa
+    sangrias:     sangriasTotal,
+    suprimentos:  suprimentosTotal,
+    // Logística
     total_driver_fees:         s.total_driver_fees,
-    expected_cash_in_register: s.expected_cash_in_register,
+    // Compatibilidade com versão anterior
+    card_system:               expectedCard,
+    expected_cash_in_register: parseFloat((expectedCash + expectedPix + expectedCard).toFixed(2)),
   };
 
   const closingBalance = parseFloat(caixa.opening_balance) + cashC;
@@ -189,7 +207,7 @@ const closeCaixa = asyncHandler(async (req, res) => {
       type:        'cash_difference',
       orderId:     null,
       cost:        Math.abs(discrepancy),
-      description: `Fechamento de caixa: esperado no caixa R$ ${s.expected_cash_in_register.toFixed(2)}${s.total_driver_fees > 0 ? ` (vendas R$ ${s.total_revenue.toFixed(2)} - repasse motoboys R$ ${s.total_driver_fees.toFixed(2)})` : ''}, contado R$ ${totalCounted.toFixed(2)}, diferença R$ ${discrepancy > 0 ? '+' : ''}${discrepancy.toFixed(2)}`,
+      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)}) | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})`,
       source:      'auto',
     }).catch(() => {}); // fire-and-forget — nunca bloqueia resposta
   }
