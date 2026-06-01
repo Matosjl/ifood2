@@ -466,13 +466,13 @@ const getFechamentoMensal = async (tenantId, month) => {
 
   // Query 3: clientes com pendências globais (para cobrança).
   const { rows: fiadoPendente } = await db.query(
-    `SELECT fc.nome, fc.telefone,
+    `SELECT fc.name AS nome, fc.phone AS telefone,
             COALESCE(SUM(c.valor) FILTER (WHERE c.status='pendente'),0)::float AS saldo_pendente,
             COUNT(c.id) FILTER (WHERE c.status='pendente')::int AS qtd_pedidos
      FROM fiado_clientes fc
      JOIN fiado_compras c ON c.cliente_id = fc.id
      WHERE fc.tenant_id = $1
-     GROUP BY fc.nome, fc.telefone
+     GROUP BY fc.name, fc.phone
      HAVING SUM(c.valor) FILTER (WHERE c.status='pendente') > 0
      ORDER BY saldo_pendente DESC
      LIMIT 20`,
