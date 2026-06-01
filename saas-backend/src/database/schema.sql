@@ -938,6 +938,10 @@ CREATE INDEX IF NOT EXISTS idx_finance_logs_user   ON finance_logs(user_id);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lat DECIMAL(10,7);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lng DECIMAL(10,7);
 
+-- Percentual da taxa de entrega repassado ao motoboy (default 70%)
+-- Configura por tenant em Configurações → Entrega
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS driver_fee_pct DECIMAL(5,2) NOT NULL DEFAULT 70;
+
 -- ── IDEMPOTÊNCIA DE DEDUÇÃO DE INSUMOS ────────────────────────
 -- Garante que deductForOrder nunca execute duas vezes no mesmo pedido.
 -- insumos_deducted = true → dedução já realizada, ignorar nova chamada.

@@ -35,6 +35,8 @@ const NAV_GROUPS = [
   {
     label: 'Gestão',
     items: [
+      { key: 'fechamento',      emoji: '📋', label: 'Fechamento',      roles: ['owner','manager'] },
+      { key: 'confiabilidade',  emoji: '🛡️', label: 'Confiabilidade', roles: ['owner','manager'] },
       { key: 'financial',  emoji: '💰', label: 'Financeiro',  roles: ['owner','manager','caixa'] },
       { key: 'clientes',   emoji: '👥', label: 'Clientes',    roles: ['owner','manager','staff','caixa'] },
       { key: 'fidelidade', emoji: '⭐', label: 'Fidelidade',  roles: ['owner','manager'] },

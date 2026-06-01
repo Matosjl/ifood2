@@ -129,6 +129,7 @@ app.use('/api/ai',         aiRoutes);       // Agentes IA (VPS2) — auth via JW
 app.use('/api/addons',     addonsRoutes);   // Complementos / Adicionais
 app.use('/api/insumos',    insumosRoutes);  // Controle de insumos / ingredientes
 app.use('/api/combos',     require('./modules/combos/combos.routes')); // Combos (produtos agrupados)
+app.use('/api/operacao',   require('./modules/operacao/operacao.routes')); // Fechamento operacional
 app.use('/api/producao',   producaoRoutes); // Lotes de produção (Módulo Produção)
 app.use('/api/coupons',    couponsRoutes);
 app.use('/api/tables',     tablesRoutes);

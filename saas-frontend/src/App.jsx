@@ -9,6 +9,8 @@ import FinanceiroPage    from './pages/FinanceiroPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
 import FiadoPage         from './pages/FiadoPage';
 import RelatoriosPage    from './pages/RelatoriosPage';
+import FechamentoPage    from './pages/FechamentoPage';
+import ConfiabilidadePage from './pages/ConfiabilidadePage';
 import EntregasPage      from './pages/EntregasPage';
 import PlansPage         from './pages/PlansPage';
 import AIInsightsPage    from './pages/AIInsightsPage';
@@ -183,6 +185,8 @@ export default function App() {
               {page === 'stock'      && <StockPage />}
               {page === 'financial'  && <FinanceiroPage />}
               {page === 'relatorios' && <RelatoriosPage />}
+              {page === 'fechamento'      && <FechamentoPage />}
+              {page === 'confiabilidade' && <ConfiabilidadePage />}
               {page === 'fiado'      && <FiadoPage />}
               {page === 'entregas'   && <EntregasPage />}
               {page === 'ai'         && <AICenterPage />}
