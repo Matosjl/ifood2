@@ -455,16 +455,15 @@ const getFechamentoMensal = async (tenantId, month) => {
     params
   );
 
-  // Query 2: saldo global pendente — quanto o tenant tem a receber no total,
-  // independente de quando a dívida foi gerada. Útil como contexto extra.
+  // Query 2: saldo global pendente — sem filtro de data, passa só tenantId
   const { rows: [fiadoGlobal] } = await db.query(
     `SELECT COALESCE(SUM(valor) FILTER (WHERE status='pendente'),0)::float AS saldo_pendente_global
      FROM fiado_compras
      WHERE tenant_id = $1`,
-    params
+    [tenantId]
   );
 
-  // Query 3: clientes com pendências globais (para cobrança).
+  // Query 3: clientes com pendências globais — sem filtro de data, passa só tenantId
   const { rows: fiadoPendente } = await db.query(
     `SELECT fc.name AS nome, fc.phone AS telefone,
             COALESCE(SUM(c.valor) FILTER (WHERE c.status='pendente'),0)::float AS saldo_pendente,
@@ -476,7 +475,7 @@ const getFechamentoMensal = async (tenantId, month) => {
      HAVING SUM(c.valor) FILTER (WHERE c.status='pendente') > 0
      ORDER BY saldo_pendente DESC
      LIMIT 20`,
-    params
+    [tenantId]
   );
 
   // ── 5. CMV ─────────────────────────────────────────────────────
