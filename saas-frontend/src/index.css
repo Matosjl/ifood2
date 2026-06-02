@@ -296,3 +296,4 @@
   40%,100% { transform: translateY(0); opacity: 1; }
 }
 .num-tick { animation: blinkUp 0.35s ease-out; }
+
