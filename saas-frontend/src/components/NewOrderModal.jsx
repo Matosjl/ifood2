@@ -6,12 +6,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProducts, createOrder, searchCustomers, createCustomer } from '../api/orders';
 import { getProductAddonGroups } from '../api/addons';
+import { getOptionGroups as getComboOptionGroups } from '../api/combos';
 import { getCurrentCaixa } from '../api/caixa';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 import { getFullSettings, validateCoupon } from '../api/users';
 import { Map, MapMarker, MarkerContent, MapControls } from './ui/map';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
+import BarcodeModal from './BarcodeModal';
 
 // Ray-casting point-in-polygon — [lng,lat] ponto, polygon = [[lng,lat],...]
 function pointInPolygon([px, py], polygon) {
@@ -841,7 +843,7 @@ function AddonPicker({ product, groups, currentAddons = [], onConfirm, onClose }
   );
 }
 
-function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, onWeight, onRemove, onItemNotes }) {
+function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, onWeight, onRemove, onItemNotes, onScanBarcode }) {
   const categories = groupByCategory(products);
 
   const searchResults = search
@@ -855,9 +857,22 @@ function StepItems({ products, loading, search, setSearch, cart, onAdd, onQty, o
     <div className="flex gap-4 h-full min-h-[320px]">
       {/* Catalog */}
       <div className="flex flex-col flex-1 min-w-0">
-        <input type="text" placeholder="Buscar produto..." value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="input w-full mb-3 shrink-0" autoFocus />
+        <div className="flex gap-2 mb-3 shrink-0">
+          <input type="text" placeholder="Buscar produto..." value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input flex-1" autoFocus />
+          <button
+            type="button"
+            onClick={onScanBarcode}
+            title="Leitor de código de barras"
+            className="px-3 rounded-xl border border-white/10 bg-gray-800 hover:bg-gray-700 text-orange-400 hover:text-orange-300 transition-colors shrink-0"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M3 4h1v16H3V4zm3 0h1v16H6V4zm3 0h2v16H9V4zm4 0h1v16h-1V4zm3 0h1v16h-1V4zm3 0h1v16h-1V4z" />
+            </svg>
+          </button>
+        </div>
 
         <div className="col-scroll flex-1 space-y-1.5">
           {loading && <p className="text-gray-500 text-sm text-center py-8">Carregando...</p>}
@@ -1477,6 +1492,11 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [submitting,  setSubmitting]  = useState(false);
   const [error,       setError]       = useState(null);
   const [caixaOpen,   setCaixaOpen]   = useState(null);
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [barcodeError,     setBarcodeError]     = useState(null);
+
+  // Mode selector: null=escolhendo, 'normal'=com cliente, 'counter'=balcão rápido
+  const [orderMode, setOrderMode] = useState(null);
 
   // Wizard
   const [stepIndex, setStepIndex]    = useState(0);
@@ -1531,6 +1551,11 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [addonPickerProduct,  setAddonPickerProduct]  = useState(null);
   const [addonPickerGroups,   setAddonPickerGroups]   = useState([]);
   const addonGroupsCache = useRef({});  // productId → groups[]
+  // Combo option picker (Combo V2)
+  const [comboPickerProduct,  setComboPickerProduct]  = useState(null);
+  const [comboPickerGroups,   setComboPickerGroups]   = useState([]);
+  const [comboChoices,        setComboChoices]        = useState({}); // { groupId: { product_id, product_name, extra_price } }
+  const comboOptionGroupsCache = useRef({});  // productId → groups[]
 
   // Variation picker
   const [varPickerProduct,    setVarPickerProduct]    = useState(null);
@@ -1629,7 +1654,24 @@ export default function NewOrderModal({ onClose, onCreated }) {
       return;
     }
 
-    // 2. Addons (grupos opcionais)
+    // 2. Combo com Grupos de Escolha (Combo V2)
+    if (p.is_combo) {
+      if (!(p.id in comboOptionGroupsCache.current)) {
+        try {
+          const { data } = await getComboOptionGroups(p.id);
+          comboOptionGroupsCache.current[p.id] = data.data ?? [];
+        } catch { comboOptionGroupsCache.current[p.id] = []; }
+      }
+      const comboGroups = comboOptionGroupsCache.current[p.id] ?? [];
+      if (comboGroups.length > 0) {
+        setComboPickerProduct(p);
+        setComboPickerGroups(comboGroups);
+        setComboChoices({});
+        return;
+      }
+    }
+
+    // 3. Addons (grupos opcionais)
     if (!(p.id in addonGroupsCache.current)) {
       try {
         const { data } = await getProductAddonGroups(p.id);
@@ -1647,6 +1689,23 @@ export default function NewOrderModal({ onClose, onCreated }) {
   }, []);
   const handleItemNotes = useCallback((id, val) =>
     setCart((c) => ({ ...c, [id]: { ...c[id], notes: val } })), []);
+
+  // ── Barcode scanner ───────────────────────────────────────────
+  const handleBarcodeFound = useCallback((product) => {
+    setBarcodeError(null);
+    setShowBarcodeModal(false);
+    // Produto inativo: bloqueado (API já filtra active=true, mas defesa dupla)
+    if (!product || !product.active) {
+      setBarcodeError('Produto inativo — não pode ser adicionado ao pedido.');
+      return;
+    }
+    // Estoque insuficiente
+    if (parseFloat(product.stock_qty ?? 0) <= 0 && product.sale_type !== 'kg') {
+      setBarcodeError(`"${product.name}" sem estoque disponível.`);
+      return;
+    }
+    handleAdd(product);
+  }, [handleAdd]);
 
   const handleQty    = useCallback((id, qty) => {
     if (qty <= 0) setCart((c) => removeFromCart(c, id));
@@ -1768,6 +1827,15 @@ export default function NewOrderModal({ onClose, onCreated }) {
   };
 
   const goBack = () => {
+    // No modo balcão, "Voltar" no primeiro passo (produtos) retorna ao seletor de modo
+    if (orderMode === 'counter' && stepIndex === 1) {
+      setOrderMode(null);
+      setStepIndex(0);
+      setName('');
+      setPickupMode(false);
+      setError(null);
+      return;
+    }
     if (stepIndex > 0) {
       setDirection(-1);
       setStepIndex((i) => i - 1);
@@ -1783,7 +1851,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
     setError(null);
     setSubmitting(true);
 
-    const items = cartEntries.map(({ product, qty, weightKg, addons, notes: itemNotes, variation }) => {
+    const items = cartEntries.map(({ product, qty, weightKg, addons, notes: itemNotes, variation, choices }) => {
       const varLabel = variation?.length
         ? ` (${variation.map((s) => s.optionName).join(', ')})`
         : '';
@@ -1796,6 +1864,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
         ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
         ...(varPrice != null ? { unitPrice: varPrice } : {}),
         ...(addons?.length ? { addons } : {}),
+        ...(choices?.length ? { choices } : {}),
         ...(itemNotes?.trim() ? { notes: itemNotes.trim() } : {}),
       };
     });
@@ -1964,6 +2033,32 @@ export default function NewOrderModal({ onClose, onCreated }) {
           />
         )}
 
+        {/* Barcode scanner modal — passo 2 */}
+        {showBarcodeModal && (
+          <BarcodeModal
+            onClose={() => setShowBarcodeModal(false)}
+            onFoundProduct={handleBarcodeFound}
+            onNewProduct={({ barcode: scannedCode } = {}) => {
+              setShowBarcodeModal(false);
+              // Fallback client-side: normaliza EAN (strip non-digits, zeros à esquerda)
+              // e busca nos produtos já carregados em memória
+              const norm = (c) => String(c ?? '').replace(/\D/g, '').replace(/^0+/, '') || String(c ?? '').trim();
+              const found = scannedCode
+                ? products.find((p) => p.barcode && norm(p.barcode) === norm(scannedCode))
+                : null;
+              if (found) {
+                handleBarcodeFound(found);
+              } else {
+                setBarcodeError(
+                  scannedCode
+                    ? `Código "${scannedCode}" não encontrado. Verifique se o produto está ativo e com barcode cadastrado.`
+                    : 'Produto não encontrado com este código.'
+                );
+              }
+            }}
+          />
+        )}
+
         {/* Variation picker overlay */}
         {varPickerProduct && (
           <VariationPicker
@@ -2000,6 +2095,90 @@ export default function NewOrderModal({ onClose, onCreated }) {
           )}
         </AnimatePresence>
 
+        {/* Combo Option Picker overlay (Combo V2) */}
+        {comboPickerProduct && (
+          <div className="absolute inset-0 z-30 bg-gray-950/95 flex flex-col rounded-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
+              <div>
+                <p className="font-bold text-white">{comboPickerProduct.name}</p>
+                <p className="text-xs text-gray-400">Escolha as opções do combo</p>
+              </div>
+              <button onClick={() => setComboPickerProduct(null)} className="text-gray-400 hover:text-white text-lg">×</button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-5">
+              {comboPickerGroups.map((group) => {
+                const sel = comboChoices[group.id];
+                return (
+                  <div key={group.id}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm font-bold text-gray-200">{group.name}</p>
+                      <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">
+                        {group.min_select === 0 ? 'Opcional' : 'Obrigatório'}
+                        {group.max_select > 1 ? ` · máx ${group.max_select}` : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {group.items.map((item) => {
+                        const isSel = sel?.product_id === item.product_id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setComboChoices((prev) => ({
+                              ...prev,
+                              [group.id]: isSel ? undefined : { product_id: item.product_id, product_name: item.product_name, extra_price: parseFloat(item.extra_price) || 0 },
+                            }))}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors text-left ${
+                              isSel
+                                ? 'bg-orange-500/20 border-orange-500/50 text-white'
+                                : 'bg-gray-800/40 border-white/[0.06] text-gray-300 hover:border-orange-500/30'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                              isSel ? 'border-orange-500 bg-orange-500' : 'border-gray-600'
+                            }`}>
+                              {isSel && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </span>
+                            <span className="flex-1 text-sm">{item.product_name}</span>
+                            {parseFloat(item.extra_price) > 0 && (
+                              <span className="text-xs text-orange-400 font-semibold shrink-0">
+                                +R$ {parseFloat(item.extra_price).toFixed(2)}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-4 border-t border-white/[0.06] shrink-0">
+              {(() => {
+                const missingRequired = comboPickerGroups.some(
+                  (g) => g.min_select > 0 && !comboChoices[g.id]?.product_id
+                );
+                const choicesArr = Object.entries(comboChoices)
+                  .filter(([, v]) => v?.product_id)
+                  .map(([group_id, v]) => ({ group_id, ...v }));
+                return (
+                  <button
+                    disabled={missingRequired}
+                    onClick={() => {
+                      setCart((c) => addToCart(c, comboPickerProduct, [], [], choicesArr));
+                      setComboPickerProduct(null);
+                      setComboChoices({});
+                    }}
+                    className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {missingRequired ? 'Selecione as opções obrigatórias' : 'Adicionar ao pedido'}
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="px-5 pt-4 pb-0 border-b border-white/[0.06] shrink-0">
           <div className="flex items-center justify-between mb-4">
@@ -2015,8 +2194,8 @@ export default function NewOrderModal({ onClose, onCreated }) {
             </button>
           </div>
 
-          {/* Stepper premium com labels */}
-          <div className="hidden md:flex items-end gap-0 -mx-5 px-5">
+          {/* Stepper premium com labels — oculto na tela de seleção de modo */}
+          <div className={`items-end gap-0 -mx-5 px-5 ${orderMode === null ? 'hidden' : 'hidden md:flex'}`}>
             {STEPS.map((s, i) => {
               const done    = i < stepIndex;
               const current = i === stepIndex;
@@ -2074,8 +2253,61 @@ export default function NewOrderModal({ onClose, onCreated }) {
           </div>
         )}
 
+        {/* Seletor de modo — Balcão rápido vs Cliente identificado */}
+        {caixaOpen !== false && orderMode === null && (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
+            <div className="text-center">
+              <p className="text-base font-black text-white mb-1">Como deseja vender?</p>
+              <p className="text-xs text-gray-500">Escolha o modo para este pedido</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
+              {/* Balcão rápido */}
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderMode('counter');
+                  setName('Cliente Balcão');
+                  setPickupMode(true);
+                  setDeliveryType('pickup');
+                  setStepIndex(1);
+                  setDirection(1);
+                }}
+                className="flex flex-col items-center gap-3 py-8 px-4 rounded-2xl border-2 border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 hover:border-orange-500/70 transition-all active:scale-95 group"
+              >
+                <span className="text-4xl">⚡</span>
+                <div className="text-center">
+                  <p className="text-sm font-black text-orange-300 group-hover:text-orange-200">Balcão rápido</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">Sem cliente<br/>Vai direto ao pagamento</p>
+                </div>
+              </button>
+
+              {/* Cliente identificado */}
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderMode('normal');
+                  setStepIndex(0);
+                  setDirection(1);
+                }}
+                className="flex flex-col items-center gap-3 py-8 px-4 rounded-2xl border-2 border-white/10 bg-gray-800/40 hover:bg-gray-800 hover:border-white/20 transition-all active:scale-95 group"
+              >
+                <span className="text-4xl">👤</span>
+                <div className="text-center">
+                  <p className="text-sm font-black text-gray-200 group-hover:text-white">Cliente identificado</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">Com nome, telefone<br/>e histórico</p>
+                </div>
+              </button>
+            </div>
+
+            <button onClick={onClose}
+              className="text-xs text-gray-600 hover:text-gray-400 transition-colors mt-2">
+              Cancelar
+            </button>
+          </div>
+        )}
+
         {/* Step content */}
-        {caixaOpen !== false && (
+        {caixaOpen !== false && orderMode !== null && (
           <>
             <div className={`flex-1 relative ${stepIndex === 1 ? 'overflow-hidden p-4' : stepIndex === 0 ? 'overflow-hidden p-5' : 'overflow-y-auto p-5'}`}>
               <AnimatePresence mode="wait" custom={direction}>
@@ -2099,8 +2331,17 @@ export default function NewOrderModal({ onClose, onCreated }) {
                       allCustomers={allCustomers} custLoading={custLoading} />
                   )}
                   {stepIndex === 1 && (
-                    <StepItems products={products} loading={loading} search={search} setSearch={setSearch}
-                      cart={cart} onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} onRemove={handleRemove} onItemNotes={handleItemNotes} />
+                    <>
+                      {barcodeError && (
+                        <div className="mb-2 px-3 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center justify-between gap-2 shrink-0">
+                          <span>⚠️ {barcodeError}</span>
+                          <button onClick={() => setBarcodeError(null)} className="text-red-400/60 hover:text-red-300">×</button>
+                        </div>
+                      )}
+                      <StepItems products={products} loading={loading} search={search} setSearch={setSearch}
+                        cart={cart} onAdd={handleAdd} onQty={handleQty} onWeight={handleWeight} onRemove={handleRemove} onItemNotes={handleItemNotes}
+                        onScanBarcode={() => { setBarcodeError(null); setShowBarcodeModal(true); }} />
+                    </>
                   )}
                   {stepIndex === 2 && (
                     <StepPayment
@@ -2152,7 +2393,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
               style={{ background: 'linear-gradient(0deg, #141f2e 0%, #1a2332 100%)' }}>
               <button onClick={goBack}
                 className="px-5 py-2.5 rounded-xl text-sm text-gray-500 hover:text-white hover:bg-white/[0.07] transition-all font-semibold border border-transparent hover:border-white/10">
-                {stepIndex === 0 ? 'Cancelar' : '← Voltar'}
+                {stepIndex === 0 ? 'Cancelar' : (orderMode === 'counter' && stepIndex === 1) ? '← Modo' : '← Voltar'}
               </button>
 
               {error && (

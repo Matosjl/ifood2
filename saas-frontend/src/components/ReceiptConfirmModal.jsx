@@ -14,9 +14,12 @@ const fmtDate = (d) => {
 };
 
 const MATCH_LABELS = {
-  auto_match:  { label: 'Encontrado',  color: 'text-green-400',  bg: 'bg-green-500/15 border-green-500/30'  },
-  ask:         { label: 'Sugestão',    color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
-  create_new:  { label: 'Criar novo',  color: 'text-blue-400',   bg: 'bg-blue-500/15 border-blue-500/30'    },
+  // Chave real enviada pelo backend (action='auto')
+  auto:        { label: 'Encontrado',    color: 'text-green-400',  bg: 'bg-green-500/15 border-green-500/30'  },
+  // Mantido por compatibilidade (caso algum registro antigo use 'auto_match')
+  auto_match:  { label: 'Encontrado',    color: 'text-green-400',  bg: 'bg-green-500/15 border-green-500/30'  },
+  ask:         { label: 'Revisar',       color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
+  create_new:  { label: 'Não cadastrado', color: 'text-blue-400',  bg: 'bg-blue-500/15 border-blue-500/30'    },
 };
 
 function MatchBadge({ type }) {
@@ -29,16 +32,20 @@ function MatchBadge({ type }) {
 }
 
 function ItemRow({ item, editing, onChange }) {
+  // Os campos de exibição vêm do raw (item.raw.*) mas são normalizados para o nível do item
+  // na inicialização do estado — acedemos diretamente aqui.
+  const actionKey = item.action ?? 'create_new';
+
   if (!editing) {
     return (
       <div className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-white font-medium truncate">{item.descricao || 'Item sem nome'}</span>
-            <MatchBadge type={item.match_type} />
+            <MatchBadge type={actionKey} />
           </div>
-          {item.matched_name && item.match_type !== 'create_new' && (
-            <p className="text-xs text-gray-400 mt-0.5">→ {item.matched_name}</p>
+          {item.match_name && actionKey !== 'create_new' && (
+            <p className="text-xs text-gray-400 mt-0.5">→ {item.match_name}</p>
           )}
         </div>
         <div className="text-right shrink-0">
@@ -79,9 +86,9 @@ function ItemRow({ item, editing, onChange }) {
         />
       </div>
       <div className="flex items-center gap-2 mt-1">
-        <MatchBadge type={item.match_type} />
-        {item.matched_name && (
-          <span className="text-xs text-gray-400">→ {item.matched_name}</span>
+        <MatchBadge type={actionKey} />
+        {item.match_name && (
+          <span className="text-xs text-gray-400">→ {item.match_name}</span>
         )}
       </div>
     </div>
@@ -106,22 +113,44 @@ export default function ReceiptConfirmModal({ receipt, onClose, onDone }) {
         .then(setImageUrl)
         .catch(() => {/* sem imagem */});
     }
-    // Carrega itens do matched_items
+    // Normaliza matched_items: achata it.raw.* no nível do objeto para
+    // que ItemRow consiga acessar item.descricao, item.quantidade, etc.
     const mi = receipt.matched_items ?? [];
-    setItems(mi.map((it) => ({ ...it })));
+    setItems(mi.map((it) => ({
+      ...it,
+      descricao:   it.raw?.descricao   ?? it.descricao   ?? '',
+      quantidade:  it.raw?.quantidade  ?? it.quantidade  ?? 0,
+      unidade:     it.raw?.unidade     ?? it.unidade     ?? 'un',
+      valor_unit:  it.raw?.valor_unit  ?? it.valor_unit  ?? 0,
+      valor_total: it.raw?.valor_total ?? it.valor_total ?? 0,
+    })));
   }, [receipt.id]);
 
   const handleConfirm = async () => {
     setSaving(true); setErr('');
     try {
       if (editing) {
-        await editReceipt(receipt.id, { matched_items: items });
+        // Reconstitui raw antes de enviar ao backend
+        const itemsToSave = items.map((it) => ({
+          ...it,
+          raw: {
+            ...(it.raw ?? {}),
+            descricao:   it.descricao,
+            quantidade:  it.quantidade,
+            unidade:     it.unidade,
+            valor_unit:  it.valor_unit,
+            valor_total: it.valor_total,
+          },
+        }));
+        await editReceipt(receipt.id, { matched_items: itemsToSave });
       }
       await confirmReceipt(receipt.id);
       onDone(receipt.id, 'confirmed');
       onClose();
     } catch (e) {
-      setErr(e?.response?.data?.message ?? 'Erro ao confirmar.');
+      const msg = e?.response?.data?.message ?? e?.message ?? 'Erro ao confirmar.';
+      // 422 = bloqueio por itens 'ask' ou divergência — mensagem do backend já é clara
+      setErr(msg);
     } finally {
       setSaving(false);
     }
@@ -140,7 +169,8 @@ export default function ReceiptConfirmModal({ receipt, onClose, onDone }) {
     }
   };
 
-  const askItems = items.filter((it) => it.match_type === 'ask');
+  // action é o campo correto; match_type é 'insumo'|'product'|null
+  const askItems = items.filter((it) => it.action === 'ask');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">

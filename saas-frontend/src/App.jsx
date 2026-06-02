@@ -6,6 +6,8 @@ import DashboardPage     from './pages/DashboardPage';
 import ProductsPage      from './pages/ProductsPage';
 import StockPage         from './pages/StockPage';
 import FinanceiroPage    from './pages/FinanceiroPage';
+import NotasRevisarPage  from './pages/NotasRevisarPage';
+import ConsumoInternoPage from './pages/ConsumoInternoPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
 import FiadoPage         from './pages/FiadoPage';
 import RelatoriosPage    from './pages/RelatoriosPage';
@@ -183,7 +185,9 @@ export default function App() {
               {page === 'reservas'   && <ReservasPage />}
               {page === 'products'   && <ProductsPage />}
               {page === 'stock'      && <StockPage />}
-              {page === 'financial'  && <FinanceiroPage />}
+              {page === 'financial'      && <FinanceiroPage />}
+              {page === 'notas_revisar'  && <NotasRevisarPage />}
+              {page === 'consumo_interno' && <ConsumoInternoPage />}
               {page === 'relatorios' && <RelatoriosPage />}
               {page === 'fechamento'      && <FechamentoPage />}
               {page === 'confiabilidade' && <ConfiabilidadePage />}

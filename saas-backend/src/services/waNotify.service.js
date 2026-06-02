@@ -255,7 +255,10 @@ function buildReceiptPreview(pending) {
     );
   }
 
-  const linhas = itens.slice(0, 12).map((m, idx) => {
+  const hasAsk      = itens.some((m) => m.action === 'ask');
+  const hasUnknown  = itens.some((m) => m.action === 'create_new');
+
+  const linhas = itens.slice(0, 12).map((m) => {
     const r = m.raw || {};
     const qty = Number(r.quantidade || 0);
     const unidade = r.unidade || 'un';
@@ -264,33 +267,44 @@ function buildReceiptPreview(pending) {
     let icon, suffix;
     if (m.action === 'auto' && m.match_name) {
       icon = '✅';
-      suffix = `→ *${m.match_name}* (estoque +${qty})`;
+      suffix = `→ *${m.match_name}* (estoque +${qty}${unidade})`;
     } else if (m.action === 'ask' && m.match_name) {
       icon = '❓';
-      suffix = `→ casar com *${m.match_name}*? (score ${(m.score || 0).toFixed(2)})`;
+      suffix = `→ possível match: *${m.match_name}* — confirme no painel`;
     } else {
       icon = '🆕';
-      suffix = '→ vou criar como novo insumo';
+      suffix = '→ item não reconhecido — revisar no painel';
     }
 
     return `${icon} ${qty}${unidade} ${r.descricao} (${valor})\n   ${suffix}`;
   }).join('\n');
 
-  const restantes = itens.length > 12 ? `\n   _...mais ${itens.length - 12} itens_` : '';
+  const restantes  = itens.length > 12 ? `\n   _...mais ${itens.length - 12} itens_` : '';
   const fornecedor = raw.fornecedor ? `*${raw.fornecedor}*\n` : '';
-  const data = raw.data_emissao ? `📅 ${raw.data_emissao}\n` : '';
-  const total = fmtBRL(raw.total);
-  const conf = Number(raw.confianca || 0);
-  const confAlert = conf < 0.6 ? `\n⚠️ _Confiança baixa (${(conf*100).toFixed(0)}%) — confere antes de confirmar._` : '';
+  const data       = raw.data_emissao ? `📅 ${raw.data_emissao}\n` : '';
+  const total      = fmtBRL(raw.total);
+  const conf       = Number(raw.confianca || 0);
+
+  // Avisos contextuais
+  const avisos = [];
+  if (conf < 0.6)    avisos.push(`⚠️ _Confiança baixa (${(conf * 100).toFixed(0)}%) — confira os valores antes de confirmar._`);
+  if (hasAsk)        avisos.push(`❓ _Há itens com correspondência incerta (marcados com ❓). Abra o painel para revisá-los antes de confirmar._`);
+  if (hasUnknown)    avisos.push(`🆕 _Itens não reconhecidos (marcados com 🆕) NÃO serão lançados no estoque ao confirmar. Cadastre-os depois no painel._`);
+  const avisoBloco  = avisos.length ? '\n\n' + avisos.join('\n') : '';
+
+  // Texto do botão SIM muda se há itens problemáticos
+  const simLabel = (hasAsk || hasUnknown)
+    ? `✅ *SIM* — confirmar financeiro (itens ❓🆕 ficam pendentes no painel)`
+    : `✅ *SIM* — confirmar e atualizar estoque/financeiro`;
 
   return (
     `📸 *Nota fiscal recebida*\n\n` +
     fornecedor + data +
     `💰 Total: *${total}*\n\n` +
-    `*Itens:*\n${linhas}${restantes}${confAlert}\n\n` +
+    `*Itens:*\n${linhas}${restantes}${avisoBloco}\n\n` +
     `_Código:_ *${pending.short_code}*\n\n` +
     `Responda:\n` +
-    `✅ *SIM* — confirmar e atualizar estoque/financeiro\n` +
+    `${simLabel}\n` +
     `❌ *NÃO* — cancelar esta nota\n` +
     `✏️ *EDITAR* — abrir no app pra ajustar`
   );

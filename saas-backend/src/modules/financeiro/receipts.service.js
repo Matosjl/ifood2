@@ -155,6 +155,38 @@ async function confirm(tenantId, id, userId = null) {
     throw new AppError('Total da nota é zero ou inválido — edite antes de confirmar', 400);
   }
 
+  // P2 — Bloqueia confirmação em lote se há itens com action='ask' (correspondência incerta).
+  // O usuário deve resolver cada item no painel antes de confirmar.
+  const askItems = matched.filter((m) => m.action === 'ask');
+  if (askItems.length > 0) {
+    const nomes = askItems
+      .slice(0, 3)
+      .map((m) => m.raw?.descricao || m.match_name || 'item desconhecido')
+      .join(', ');
+    const sufixo = askItems.length > 3 ? ` e mais ${askItems.length - 3}` : '';
+    throw new AppError(
+      `Há ${askItems.length} ${askItems.length === 1 ? 'item' : 'itens'} com correspondência incerta que precisam de revisão: ${nomes}${sufixo}. ` +
+      `Abra o painel, edite os itens marcados como "Revisar" e tente confirmar novamente.`,
+      422
+    );
+  }
+
+  // P3 — Valida soma dos itens vs total da nota.
+  const somaItens = matched.reduce((acc, m) => {
+    const vt = parseFloat(m.raw?.valor_total ?? 0);
+    return acc + (isNaN(vt) ? 0 : vt);
+  }, 0);
+  const TOLERANCIA = 0.50; // R$ 0,50 de tolerância para arredondamentos
+  if (matched.length > 0 && Math.abs(somaItens - total) > TOLERANCIA) {
+    const diff = (somaItens - total).toFixed(2).replace('.', ',');
+    const sinal = somaItens > total ? '+' : '';
+    throw new AppError(
+      `Divergência entre soma dos itens (R$ ${somaItens.toFixed(2).replace('.', ',')}) e total da nota (R$ ${total.toFixed(2).replace('.', ',')}). ` +
+      `Diferença: R$ ${sinal}${diff}. Edite os valores antes de confirmar.`,
+      422
+    );
+  }
+
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
@@ -305,6 +337,238 @@ async function expireOld() {
   return rowCount;
 }
 
+// ── Notas para Revisar ────────────────────────────────────────────
+
+/**
+ * Retorna todos os pending_receipts relevantes para a tela "Notas para Revisar":
+ *   - status='awaiting_confirmation' (não expiradas)
+ *   - status='extraction_failed' (últimos 7 dias)
+ *   - status='confirmed' com itens action='create_new' (últimos 30 dias)
+ */
+async function listForRevisar(tenantId) {
+  const { rows } = await db.query(
+    `SELECT id, tenant_id, sender_phone, source, raw_extraction, matched_items,
+            status, short_code, expense_id, expires_at, confirmed_at, created_at
+     FROM pending_receipts
+     WHERE tenant_id = $1
+       AND (
+         (status = 'awaiting_confirmation'
+          AND (expires_at IS NULL OR expires_at > NOW()))
+         OR
+         (status = 'extraction_failed'
+          AND created_at > NOW() - INTERVAL '7 days')
+         OR
+         (status = 'confirmed'
+          AND confirmed_at > NOW() - INTERVAL '30 days'
+          AND matched_items::text LIKE '%"create_new"%')
+       )
+     ORDER BY
+       CASE status
+         WHEN 'awaiting_confirmation' THEN 1
+         WHEN 'extraction_failed'     THEN 2
+         WHEN 'confirmed'             THEN 3
+         ELSE 4
+       END,
+       created_at DESC
+     LIMIT 50`,
+    [tenantId]
+  );
+  // Para 'confirmed': filtra no JS para garantir que há itens create_new reais
+  return rows.filter((r) => {
+    if (r.status !== 'confirmed') return true;
+    return (r.matched_items || []).some((m) => m.action === 'create_new');
+  });
+}
+
+/**
+ * Contagem de pendências para badge no Sidebar (awaiting + extraction_failed ativos).
+ */
+async function countPending(tenantId) {
+  const { rows } = await db.query(
+    `SELECT COUNT(*) AS total
+     FROM pending_receipts
+     WHERE tenant_id = $1
+       AND (
+         (status = 'awaiting_confirmation'
+          AND (expires_at IS NULL OR expires_at > NOW()))
+         OR
+         (status = 'extraction_failed'
+          AND created_at > NOW() - INTERVAL '7 days')
+       )`,
+    [tenantId]
+  );
+  return parseInt(rows[0]?.total ?? 0, 10);
+}
+
+// ── Resolve item create_new ───────────────────────────────────────
+
+/**
+ * Resolve um item create_new de uma nota já confirmada.
+ * Altera apenas estoque — o financeiro já foi lançado na confirmação original.
+ *
+ * @param {string} tenantId
+ * @param {string} receiptId  — pending_receipts.id
+ * @param {number} itemIdx    — índice do item em matched_items
+ * @param {{ mode, insumo_id?, name?, unit?, qty, unit_cost }} body
+ * @param {string|null} userId
+ *
+ * mode='create': cria insumo novo, lança estoque, insumo_movement
+ * mode='match':  usa insumo existente, lança estoque, insumo_movement
+ */
+async function resolveItem(tenantId, receiptId, itemIdx, body, userId = null) {
+  const { mode, insumo_id, name, unit = 'un', qty, unit_cost } = body;
+
+  // ── Validações de entrada ─────────────────────────────────────
+  if (!['create', 'match'].includes(mode)) {
+    throw new AppError('mode deve ser "create" ou "match"', 400);
+  }
+  if (mode === 'match' && !insumo_id) {
+    throw new AppError('insumo_id é obrigatório quando mode=match', 400);
+  }
+  if (mode === 'create' && !name?.trim()) {
+    throw new AppError('name é obrigatório quando mode=create', 400);
+  }
+  const parsedQty  = parseFloat(qty);
+  const parsedCost = parseFloat(unit_cost ?? 0);
+  if (!parsedQty || parsedQty <= 0)  throw new AppError('qty deve ser maior que zero', 400);
+  if (parsedCost < 0)                throw new AppError('unit_cost não pode ser negativo', 400);
+
+  // ── Carrega a nota ────────────────────────────────────────────
+  const pending = await getById(tenantId, receiptId);
+
+  // Permite resolver itens de notas confirmed (e também awaiting, caso o dono queira adiantar)
+  if (!['confirmed', 'awaiting_confirmation'].includes(pending.status)) {
+    throw new AppError(
+      `Não é possível resolver itens de uma nota com status "${pending.status}"`,
+      400
+    );
+  }
+
+  const matched = Array.isArray(pending.matched_items) ? pending.matched_items : [];
+  const idx     = parseInt(itemIdx, 10);
+
+  if (isNaN(idx) || idx < 0 || idx >= matched.length) {
+    throw new AppError(`Índice de item inválido: ${itemIdx}`, 400);
+  }
+
+  const item = matched[idx];
+
+  // Impede resolver item que já foi resolvido (action !== 'create_new')
+  if (item.action !== 'create_new') {
+    throw new AppError(
+      `Item já está resolvido (action="${item.action}") — não é possível resolver novamente`,
+      409
+    );
+  }
+
+  // ── Transação ─────────────────────────────────────────────────
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    let resolvedInsumoId;
+    let resolvedInsumoName;
+
+    if (mode === 'create') {
+      // Cria o insumo
+      const { rows: [newInsumo] } = await client.query(
+        `INSERT INTO insumos (tenant_id, name, unit, qty_in_stock, cost_per_unit)
+         VALUES ($1, $2, $3, 0, $4)
+         RETURNING id, name, unit, qty_in_stock`,
+        [tenantId, name.trim(), unit, parsedCost]
+      );
+      resolvedInsumoId   = newInsumo.id;
+      resolvedInsumoName = newInsumo.name;
+
+      logger.info('insumo criado via resolveItem', {
+        tenantId, insumoId: resolvedInsumoId, name: resolvedInsumoName,
+      });
+    } else {
+      // Valida que o insumo pertence ao tenant
+      const { rows: [existing] } = await client.query(
+        `SELECT id, name, unit FROM insumos WHERE id = $1 AND tenant_id = $2`,
+        [insumo_id, tenantId]
+      );
+      if (!existing) throw new AppError('Insumo não encontrado', 404);
+      resolvedInsumoId   = existing.id;
+      resolvedInsumoName = existing.name;
+    }
+
+    // Captura estoque atual antes de incrementar
+    const { rows: [before] } = await client.query(
+      `SELECT qty_in_stock FROM insumos WHERE id = $1 AND tenant_id = $2`,
+      [resolvedInsumoId, tenantId]
+    );
+    const qtyBefore = parseFloat(before?.qty_in_stock ?? 0);
+    const qtyAfter  = parseFloat((qtyBefore + parsedQty).toFixed(3));
+
+    // Incrementa estoque
+    await client.query(
+      `UPDATE insumos
+       SET qty_in_stock  = $1,
+           cost_per_unit = CASE WHEN $2 > 0 THEN $2 ELSE cost_per_unit END,
+           updated_at    = NOW()
+       WHERE id = $3 AND tenant_id = $4`,
+      [qtyAfter, parsedCost, resolvedInsumoId, tenantId]
+    );
+
+    // Cria insumo_movement tipo 'purchase' (compra via nota fiscal)
+    await client.query(
+      `INSERT INTO insumo_movements
+         (tenant_id, insumo_id, type, qty, qty_before, qty_after,
+          reason, reference_type, created_by)
+       VALUES ($1, $2, 'purchase', $3, $4, $5, $6, 'receipt', $7)`,
+      [
+        tenantId, resolvedInsumoId, parsedQty, qtyBefore, qtyAfter,
+        `Lançamento retroativo via nota fiscal (receipt ${receiptId}, item ${idx})`,
+        userId,
+      ]
+    );
+
+    // Atualiza matched_items[idx]: marca como resolvido
+    const updatedMatched = matched.map((m, i) => {
+      if (i !== idx) return m;
+      return {
+        ...m,
+        action:     'auto',        // resolvido — não aparece mais como pendente
+        match_type: 'insumo',
+        match_id:   resolvedInsumoId,
+        match_name: resolvedInsumoName,
+        resolved_at: new Date().toISOString(),
+        resolved_by: userId,
+        resolved_mode: mode,
+      };
+    });
+
+    const { rows: [updatedPending] } = await client.query(
+      `UPDATE pending_receipts
+       SET matched_items = $2::jsonb, updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $3
+       RETURNING id, status, short_code, matched_items, raw_extraction, confirmed_at`,
+      [receiptId, JSON.stringify(updatedMatched), tenantId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info('item create_new resolvido', {
+      tenantId, receiptId, itemIdx: idx, mode,
+      insumoId: resolvedInsumoId, qty: parsedQty,
+    });
+
+    return {
+      item:     updatedMatched[idx],
+      insumo:   { id: resolvedInsumoId, name: resolvedInsumoName, qty_after: qtyAfter },
+      pending:  updatedPending,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error('falha em resolveItem — rollback', { tenantId, receiptId, itemIdx, error: err.message });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   listPending,
   getById,
@@ -314,4 +578,7 @@ module.exports = {
   reject,
   confirm,
   expireOld,
+  listForRevisar,
+  countPending,
+  resolveItem,
 };

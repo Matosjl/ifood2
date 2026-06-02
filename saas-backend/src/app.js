@@ -142,6 +142,8 @@ app.use('/api/ratings',        require('./modules/ratings/ratings.routes'));
 app.use('/api/reservations',   require('./modules/reservations/reservations.routes'));
 app.use('/api/locations',      locationsRoutes);
 app.use('/api/incidents',      require('./modules/incidents/incidents.routes'));
+app.use('/api/consumo-interno', require('./modules/consumo/consumo.routes'));   // Consumo interno
+app.use('/api/vazamentos',      require('./modules/consumo/vazamentos.routes')); // Centro de Vazamentos
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {

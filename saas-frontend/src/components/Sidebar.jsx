@@ -37,6 +37,8 @@ const NAV_GROUPS = [
     items: [
       { key: 'fechamento',      emoji: '📋', label: 'Fechamento',      roles: ['owner','manager'] },
       { key: 'confiabilidade',  emoji: '🛡️', label: 'Confiabilidade', roles: ['owner','manager'] },
+      { key: 'consumo_interno', emoji: '🍽', label: 'Consumo Interno', roles: ['owner','manager','caixa','staff'] },
+      { key: 'notas_revisar',   emoji: '📄', label: 'Notas p/ Revisar', roles: ['owner','manager','caixa'] },
       { key: 'financial',  emoji: '💰', label: 'Financeiro',  roles: ['owner','manager','caixa'] },
       { key: 'clientes',   emoji: '👥', label: 'Clientes',    roles: ['owner','manager','staff','caixa'] },
       { key: 'fidelidade', emoji: '⭐', label: 'Fidelidade',  roles: ['owner','manager'] },

@@ -10,6 +10,7 @@ import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBanco
 import usePendingReceipts from '../hooks/usePendingReceipts';
 import ReceiptConfirmModal from '../components/ReceiptConfirmModal';
 import ReceiptUploadModal  from '../components/ReceiptUploadModal';
+import VazamentosCard      from '../components/VazamentosCard';
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -976,6 +977,9 @@ function TabResultado() {
           </div>
         ) : data && (
           <>
+            {/* Vazamentos */}
+            <VazamentosCard mes={month} />
+
             {/* Big result card */}
             <div className={`rounded-2xl border p-6 text-center ${
               isProfit
@@ -1110,6 +1114,11 @@ function TabCaixa() {
   const [unpaidOrders,   setUnpaidOrders]   = useState([]); // pedidos sem pagamento ao fechar
   const [stockAlerts,    setStockAlerts]    = useState([]); // insumos críticos na abertura
   const [stockAlertDismissed, setStockAlertDismissed] = useState(false);
+  const [staleAlertDismissed,   setStaleAlertDismissed]   = useState(false);
+  const [sangriaLimit,          setSangriaLimit]           = useState(null);  // R$ | null
+  const [sangriaLimitInput,     setSangriaLimitInput]      = useState('');
+  const [sangriaLimitSaving,    setSangriaLimitSaving]     = useState(false);
+  const [sangriaWarning,        setSangriaWarning]         = useState(null);  // { totalHoje, limit }
   // Contagem física no fechamento
   const [cashCounted, setCashCounted] = useState('');
   const [cardCounted, setCardCounted] = useState('');
@@ -1125,12 +1134,16 @@ function TabCaixa() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [currRes, histRes] = await Promise.all([
+      const [currRes, histRes, tenantRes] = await Promise.all([
         getCurrentCaixa(),
         getCaixaHistory({ limit: 20 }),
+        api.get('/tenant/me'),
       ]);
       setCaixa(currRes.data.data);
       setHistory(histRes.data.data ?? []);
+      const lim = tenantRes.data.data?.sangria_daily_limit;
+      setSangriaLimit(lim ?? null);
+      setSangriaLimitInput(lim ? String(parseFloat(lim).toFixed(2)) : '');
       // Carrega movimentos do caixa atual
       const movRes = await getCaixaMovements();
       setMovements(movRes.data.data ?? []);
@@ -1189,12 +1202,25 @@ function TabCaixa() {
     setMovSaving(true); setMovErr('');
     try {
       const fn = movModal === 'sangria' ? postSangria : postSuprimento;
-      await fn({ amount: parseFloat(movAmount), reason: movReason || undefined });
+      const res = await fn({ amount: parseFloat(movAmount), reason: movReason || undefined });
+      if (movModal === 'sangria' && res.data.warning?.limitExceeded) {
+        setSangriaWarning(res.data.warning);
+      }
       setMovModal(null); setMovAmount(''); setMovReason('');
       const movRes = await getCaixaMovements();
       setMovements(movRes.data.data ?? []);
     } catch (e) { setMovErr(e?.response?.data?.message ?? 'Erro ao registrar.'); }
     finally { setMovSaving(false); }
+  };
+
+  const handleSangriaLimitSave = async () => {
+    setSangriaLimitSaving(true);
+    try {
+      const val = parseFloat(sangriaLimitInput);
+      await api.patch('/tenant/sangria-limit', { limit: isNaN(val) || val <= 0 ? null : val });
+      setSangriaLimit(isNaN(val) || val <= 0 ? null : val);
+    } catch { /* silencioso */ }
+    finally { setSangriaLimitSaving(false); }
   };
 
   const totalSangrias    = movements.filter(m => m.type === 'sangria').reduce((s,m) => s + parseFloat(m.amount), 0);
@@ -1284,6 +1310,51 @@ function TabCaixa() {
         </div>
       )}
 
+      {/* ── ALERTA: caixa aberto desde dia anterior ──────────── */}
+      {caixa?.stale && !staleAlertDismissed && (
+        <div className="bg-orange-900/30 border border-orange-500/40 rounded-2xl p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-bold text-orange-400 mb-1">
+                🚨 Caixa aberto há {caixa.days_open} {caixa.days_open === 1 ? 'dia' : 'dias'}
+              </p>
+              <p className="text-xs text-orange-300/80">
+                Este caixa foi aberto em {new Date(caixa.opened_at).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })} e não foi fechado.
+                Feche o caixa do dia anterior antes de registrar vendas de hoje.
+              </p>
+            </div>
+            <button
+              onClick={() => setStaleAlertDismissed(true)}
+              className="text-orange-400/60 hover:text-orange-300 text-lg shrink-0"
+              title="Dispensar"
+            >×</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ALERTA: sangria acima do limite ──────────────────── */}
+      {sangriaWarning && (
+        <div className="bg-orange-900/30 border border-orange-500/40 rounded-2xl p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-bold text-orange-400 mb-1">
+                ⚠️ Sangrias acima do limite diário
+              </p>
+              <p className="text-xs text-orange-300/80">
+                Total de sangrias hoje: <strong>R$ {parseFloat(sangriaWarning.totalHoje).toFixed(2)}</strong>
+                {' '}(limite: R$ {parseFloat(sangriaWarning.limit).toFixed(2)}).
+                Um incidente foi registrado automaticamente.
+              </p>
+            </div>
+            <button
+              onClick={() => setSangriaWarning(null)}
+              className="text-orange-400/60 hover:text-orange-300 text-lg shrink-0"
+              title="Dispensar"
+            >×</button>
+          </div>
+        </div>
+      )}
+
       {/* ── CAIXA ABERTO ─────────────────────────────────────── */}
       {caixa && (
         <div className="space-y-4">
@@ -1322,6 +1393,23 @@ function TabCaixa() {
               className="py-2.5 rounded-xl border border-blue-500/30 text-blue-400 font-semibold text-sm hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-1.5"
             >
               📥 Suprimento
+            </button>
+          </div>
+
+          {/* Limite diário de sangria */}
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min="0" step="10" placeholder="Limite diário de sangria (R$)"
+              value={sangriaLimitInput}
+              onChange={(e) => setSangriaLimitInput(e.target.value)}
+              className="flex-1 bg-gray-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+            <button
+              onClick={handleSangriaLimitSave}
+              disabled={sangriaLimitSaving}
+              className="px-3 py-2 rounded-xl bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/30 text-orange-400 text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
+            >
+              {sangriaLimitSaving ? '…' : 'Salvar limite'}
             </button>
           </div>
 
@@ -1372,6 +1460,12 @@ function TabCaixa() {
                     ? 'Registre a retirada de dinheiro do caixa (ex: depósito, troco, pagamento).'
                     : 'Registre a entrada de dinheiro no caixa (ex: troco adicional, reforço).'}
                 </p>
+                {movModal === 'sangria' && sangriaLimit != null && (
+                  <p className="text-[11px] text-orange-400/70 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-1.5">
+                    Limite diário: <strong>R$ {parseFloat(sangriaLimit).toFixed(2)}</strong>
+                    {' · '}Total hoje: R$ {totalSangrias.toFixed(2)}
+                  </p>
+                )}
                 {movErr && <p className="text-red-400 text-xs bg-red-500/10 rounded-lg px-3 py-2">{movErr}</p>}
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 mb-1">Valor (R$) *</label>

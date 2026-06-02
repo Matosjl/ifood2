@@ -13,6 +13,7 @@
  *   4. Emite evento socket 'receipt:created' pro frontend
  *   5. Retorna o pending_receipt criado
  */
+const crypto      = require('crypto');
 const db          = require('../../config/database');
 const aiService   = require('../../services/ai.service');
 const matcher     = require('./matcher.service');
@@ -47,6 +48,19 @@ async function ingest({ tenantId, imageBuffer, contentType = 'image/jpeg', sende
 
   logger.info('iniciando ingest', { tenantId, size: imageBuffer.length, source });
 
+  // 0. Deduplicação por SHA-256 — bloqueia reprocessamento da mesma imagem
+  const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+  const { rows: existing } = await db.query(
+    `SELECT id, short_code FROM pending_receipts
+     WHERE tenant_id = $1 AND image_hash = $2
+     LIMIT 1`,
+    [tenantId, imageHash]
+  );
+  if (existing[0]) {
+    logger.info('OCR duplicado ignorado', { tenantId, imageHash, existingId: existing[0].id });
+    return existing[0]; // retorna o registro já existente sem reprocessar
+  }
+
   // 1. Chama VPS2 pra extrair dados via Ollama Vision
   let extraction;
   try {
@@ -65,13 +79,15 @@ async function ingest({ tenantId, imageBuffer, contentType = 'image/jpeg', sende
   // 2. Roda matcher
   const matchedItems = await matcher.matchAll(tenantId, extraction.itens || []);
 
-  // 3. INSERT em pending_receipts
+  // 3. INSERT em pending_receipts (com image_hash para deduplicação futura)
   const shortCode = generateShortCode();
   const { rows } = await db.query(
     `INSERT INTO pending_receipts
        (tenant_id, sender_phone, source, image_bytes, raw_extraction, matched_items,
-        short_code, status)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, 'awaiting_confirmation')
+        short_code, status, image_hash)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, 'awaiting_confirmation', $8)
+     ON CONFLICT (tenant_id, image_hash) WHERE image_hash IS NOT NULL
+     DO NOTHING
      RETURNING *`,
     [
       tenantId,
@@ -81,6 +97,7 @@ async function ingest({ tenantId, imageBuffer, contentType = 'image/jpeg', sende
       JSON.stringify(extraction),
       JSON.stringify(matchedItems),
       shortCode,
+      imageHash,
     ]
   );
 

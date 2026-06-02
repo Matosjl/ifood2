@@ -102,4 +102,40 @@ const reject = asyncHandler(async (req, res) => {
   res.json({ success: true, data: safe });
 });
 
-module.exports = { upload, listPending, getOne, getImage, confirm, edit, reject };
+
+/**
+ * GET /api/financeiro/receipts/revisar
+ */
+const listForRevisar = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const items = await receiptsService.listForRevisar(tenantId);
+  const sanitized = items.map(({ image_bytes, ...rest }) => rest);
+  res.json({ success: true, data: sanitized });
+});
+
+/**
+ * GET /api/financeiro/receipts/revisar/count
+ */
+const countPending = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const count = await receiptsService.countPending(tenantId);
+  res.json({ success: true, data: { count } });
+});
+
+/**
+ * POST /api/financeiro/receipts/:id/items/:idx/resolve
+ * Resolve item create_new: cria/casa insumo e lanca estoque retroativamente.
+ * NAO cria nova despesa - financeiro ja foi lancado na confirmacao.
+ */
+const resolveItem = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const userId   = req.user.id || req.user.userId || null;
+  const { id, idx } = req.params;
+  const result = await receiptsService.resolveItem(tenantId, id, idx, req.body, userId);
+  res.json({ success: true, data: result });
+});
+
+module.exports = {
+  upload, listPending, getOne, getImage, confirm, edit, reject,
+  listForRevisar, countPending, resolveItem,
+};

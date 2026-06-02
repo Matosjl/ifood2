@@ -9,7 +9,7 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
 
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2-vision:11b-q4_K_M")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b")
     OLLAMA_REQUEST_TIMEOUT: int = int(os.getenv("OLLAMA_REQUEST_TIMEOUT", "120"))
     # Modelos pequenos (moondream) não suportam format=json — desabilite explicitamente
     OLLAMA_FORMAT_JSON: bool = os.getenv("OLLAMA_FORMAT_JSON", "true").lower() == "true"

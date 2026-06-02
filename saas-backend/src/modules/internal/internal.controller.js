@@ -462,7 +462,22 @@ const handleReceiptReply = asyncHandler(async (req, res) => {
   }
 
   if (action === 'confirm') {
-    const result = await receiptsService.confirm(req.tenantId, pending.id);
+    let result;
+    try {
+      result = await receiptsService.confirm(req.tenantId, pending.id);
+    } catch (confirmErr) {
+      if (confirmErr.statusCode === 422 || confirmErr.status === 422) {
+        try {
+          await waNotify.sendText(req.tenantId, senderPhone,
+            '⚠️ *Não foi possível confirmar automaticamente.*\n\n' +
+            confirmErr.message +
+            '\n\nAcesse o painel para revisar: https://app.zapfome.com/financeiro'
+          );
+        } catch {}
+        return res.json({ success: true, data: { handled: true, action: 'confirm_blocked', reason: confirmErr.message } });
+      }
+      throw confirmErr;
+    }
     try {
       await waNotify.sendReceiptConfirmed(req.tenantId, senderPhone, result);
     } catch {}

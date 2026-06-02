@@ -1068,3 +1068,78 @@ CREATE TABLE IF NOT EXISTS insumo_movements (
 
 CREATE INDEX IF NOT EXISTS idx_insumo_mvt_tenant ON insumo_movements(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_insumo_mvt_insumo ON insumo_movements(insumo_id, created_at DESC);
+
+-- ── SPRINT ANTI-ERRO A (004) — motivo de cancelamento ──────────
+ALTER TABLE orders      ADD COLUMN IF NOT EXISTS cancel_reason TEXT;
+
+-- ── SPRINT ANTI-ERRO A (005) — limite diário de sangria ────────
+ALTER TABLE tenants     ADD COLUMN IF NOT EXISTS sangria_daily_limit NUMERIC DEFAULT NULL;
+
+-- ── COMBO V2 (006) — Grupos de Escolha ─────────────────────────
+CREATE TABLE IF NOT EXISTS combo_option_groups (
+  id               UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID        NOT NULL REFERENCES tenants(id)  ON DELETE CASCADE,
+  combo_product_id UUID        NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  name             TEXT        NOT NULL,
+  min_select       INTEGER     NOT NULL DEFAULT 1,
+  max_select       INTEGER     NOT NULL DEFAULT 1,
+  sort_order       INTEGER     NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_cog_min_max CHECK (min_select >= 0 AND max_select >= 1 AND max_select >= min_select)
+);
+CREATE INDEX IF NOT EXISTS idx_cog_combo  ON combo_option_groups(combo_product_id);
+CREATE INDEX IF NOT EXISTS idx_cog_tenant ON combo_option_groups(tenant_id);
+
+CREATE TABLE IF NOT EXISTS combo_option_items (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id)             ON DELETE CASCADE,
+  group_id    UUID        NOT NULL REFERENCES combo_option_groups(id) ON DELETE CASCADE,
+  product_id  UUID        NOT NULL REFERENCES products(id)            ON DELETE RESTRICT,
+  extra_price NUMERIC     NOT NULL DEFAULT 0,
+  sort_order  INTEGER     NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (group_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS idx_coi_group  ON combo_option_items(group_id);
+CREATE INDEX IF NOT EXISTS idx_coi_tenant ON combo_option_items(tenant_id);
+
+CREATE TABLE IF NOT EXISTS order_item_combo_choices (
+  id            UUID    PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_item_id UUID    NOT NULL REFERENCES order_items(id)          ON DELETE CASCADE,
+  group_id      UUID    NOT NULL REFERENCES combo_option_groups(id)  ON DELETE RESTRICT,
+  product_id    UUID    NOT NULL REFERENCES products(id)             ON DELETE RESTRICT,
+  extra_price   NUMERIC NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_oicc_order_item ON order_item_combo_choices(order_item_id);
+
+-- ── SPRINT ANTI-ERRO B (007) — deduplicação OCR ────────────────
+ALTER TABLE pending_receipts ADD COLUMN IF NOT EXISTS image_hash VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_receipts_hash
+  ON pending_receipts(tenant_id, image_hash)
+  WHERE image_hash IS NOT NULL;
+
+-- ── SPRINT CONSUMO INTERNO + VAZAMENTOS (008) ──────────────────
+
+-- Tabela unificada de consumos internos (funcionário, família, brinde, degustação, perda)
+-- Aceita insumo_id OU product_id (obrigatoriamente um dos dois)
+CREATE TABLE IF NOT EXISTS internal_consumptions (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id)     ON DELETE CASCADE,
+  insumo_id        UUID          REFERENCES insumos(id)              ON DELETE SET NULL,
+  product_id       UUID          REFERENCES products(id)             ON DELETE SET NULL,
+  item_name        VARCHAR(200)  NOT NULL,    -- snapshot do nome no momento
+  unit             VARCHAR(20)   NOT NULL DEFAULT 'un',
+  quantity         DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
+  unit_cost        DECIMAL(10,4) NOT NULL DEFAULT 0,
+  total_cost       DECIMAL(10,2) NOT NULL DEFAULT 0,
+  consumption_type VARCHAR(30)   NOT NULL DEFAULT 'funcionario',
+  -- 'funcionario' | 'familia' | 'brinde' | 'degustacao' | 'perda'
+  notes            TEXT,
+  created_by       UUID          REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_ic_source CHECK (insumo_id IS NOT NULL OR product_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_internal_cons_tenant ON internal_consumptions(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_internal_cons_insumo ON internal_consumptions(insumo_id);
+CREATE INDEX IF NOT EXISTS idx_internal_cons_product ON internal_consumptions(product_id);
