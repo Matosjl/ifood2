@@ -66,6 +66,7 @@ function Timer({ createdAt, endAt }) {
 export default function OrderCard({ order, onStatusChange, onAcknowledge, onMarkPaid, onEditItems, drivers, onAssign }) {
   const [isNew,           setIsNew]           = useState(true);
   const [confirming,      setConfirming]       = useState(null);   // status sendo confirmado
+  const [cancelReason,    setCancelReason]     = useState('');     // motivo do cancelamento
   const [showPayPick,     setShowPayPick]      = useState(false);  // picker de forma de pgto
   const [showPixModal,    setShowPixModal]     = useState(false);  // QR PIX
   const [payLoading,      setPayLoading]       = useState(false);
@@ -88,13 +89,14 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
 
   const handleAction = (action) => {
     onAcknowledge?.(order.id);
-    if (action.confirm) setConfirming(action.status);
+    if (action.confirm) { setCancelReason(''); setConfirming(action.status); }
     else onStatusChange(order.id, action.status);
   };
 
   const confirmAction = () => {
-    onStatusChange(order.id, confirming);
+    onStatusChange(order.id, confirming, confirming === 'cancelled' ? cancelReason : undefined);
     setConfirming(null);
+    setCancelReason('');
   };
 
   const handleReceivePay = async (method) => {
@@ -403,7 +405,41 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       {/* Actions */}
       {!showPayPick && (
         <div className="px-3 pb-3 flex gap-2 flex-wrap">
-          {confirming ? (
+          {confirming === 'cancelled' ? (
+            <div className="w-full space-y-2">
+              <p className="text-xs text-red-400 font-semibold">Motivo do cancelamento:</p>
+              <div className="grid grid-cols-2 gap-1">
+                {['Cliente desistiu', 'Erro de lançamento', 'Produto indisponível', 'Duplicado'].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setCancelReason(r)}
+                    className={`text-[11px] px-2 py-1.5 rounded-lg border transition-colors text-left ${
+                      cancelReason === r
+                        ? 'bg-red-500/25 border-red-500/60 text-red-300'
+                        : 'bg-gray-800 border-white/10 text-gray-400 hover:border-red-500/40 hover:text-red-400'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2 pt-0.5">
+                <button
+                  onClick={confirmAction}
+                  disabled={!cancelReason}
+                  className="btn-red flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Confirmar
+                </button>
+                <button
+                  onClick={() => { setConfirming(null); setCancelReason(''); }}
+                  className="btn-ghost flex-1"
+                >
+                  Voltar
+                </button>
+              </div>
+            </div>
+          ) : confirming ? (
             <>
               <span className="text-xs text-red-400 self-center">Confirmar cancelamento?</span>
               <button onClick={confirmAction}             className="btn-red   flex-1">Sim</button>

@@ -1,10 +1,10 @@
 // ── Shared cart helpers ────────────────────────────────────────
 // Funções puras usadas tanto no NewOrderModal quanto no EditOrderModal.
 
-export const addToCart = (cart, product, addons = [], variation = null) => {
+export const addToCart = (cart, product, addons = [], variation = null, choices = null) => {
   const prev = cart[product.id];
-  // Se já está no carrinho sem addons e sem variação, só incrementa qty (preserva notes/variation)
-  if (prev && addons.length === 0 && variation === null) {
+  // Se já está no carrinho sem addons, variação e choices, só incrementa qty
+  if (prev && addons.length === 0 && variation === null && choices === null) {
     return { ...cart, [product.id]: { ...prev, qty: prev.qty + 1 } };
   }
   return {
@@ -16,6 +16,7 @@ export const addToCart = (cart, product, addons = [], variation = null) => {
       addons,
       notes:     prev?.notes ?? '',
       variation, // null ou [{ groupId, groupName, optionId, optionName, price }]
+      choices,   // null ou [{ group_id, product_id, product_name, extra_price }]
     },
   };
 };
@@ -38,14 +39,17 @@ export const itemBasePrice = ({ product, variation }) => {
   return parseFloat(product.sale_price) || 0;
 };
 
+const choicesExtra = (choices = []) =>
+  (choices ?? []).reduce((sum, c) => sum + (parseFloat(c.extra_price) || 0), 0);
+
 export const cartTotal = (cart) =>
   Object.values(cart).reduce((sum, entry) => {
-    const { product, qty, weightKg, addons, variation } = entry;
-    const base = product.sale_type === 'kg'
-      ? itemBasePrice(entry) * parseFloat(weightKg || 0)
-      : itemBasePrice(entry) * (qty || 0);
+    const { product, qty, weightKg, addons, choices } = entry;
+    const units = product.sale_type === 'kg' ? parseFloat(weightKg || 0) : (qty || 0);
+    const base        = itemBasePrice(entry) * units;
     const extrasPrice = addonPrice(addons) * (product.sale_type === 'kg' ? 1 : (qty || 0));
-    return sum + base + extrasPrice;
+    const choicePrice = choicesExtra(choices) * (product.sale_type === 'kg' ? 1 : (qty || 0));
+    return sum + base + extrasPrice + choicePrice;
   }, 0);
 
 /** Agrupa array de produtos por category_name → [{ name, items }] */

@@ -215,8 +215,8 @@ export default function OrdersBoard({
 }) {
   const [editingOrder, setEditingOrder] = useState(null);
 
-  const handleStatus = (id, status) => {
-    if (status === 'cancelled') doCancel(id);
+  const handleStatus = (id, status, reason) => {
+    if (status === 'cancelled') doCancel(id, reason);
     else changeStatus(id, status);
   };
 

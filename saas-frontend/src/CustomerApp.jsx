@@ -4,6 +4,7 @@ import {
   getPublicCustomer, submitPublicRating, getPublicOrderHistory,
 } from './api/public';
 import DeliveryMapPicker from './components/DeliveryMapPicker';
+import SplashScreen from './components/SplashScreen';
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -731,6 +732,7 @@ export default function CustomerApp({ slug }) {
   const [menuData,    setMenuData]    = useState(null);
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [menuError,   setMenuError]   = useState(null);
+  const [splashDone,  setSplashDone]  = useState(false);
 
   const [cart,           setCart]           = useState(emptyCart());
   const [cartOpen,       setCartOpen]       = useState(false);
@@ -1073,7 +1075,7 @@ export default function CustomerApp({ slug }) {
 
   // ── Render: loading / error ───────────────────────────────
 
-  if (loadingMenu) {
+  if (loadingMenu && splashDone) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -1466,8 +1468,18 @@ export default function CustomerApp({ slug }) {
   const hasActiveOrder = order && activeOrderStatuses.includes(order.status);
   const STATUS_LABEL_SHORT = { pending: 'Aguardando confirmação', confirmed: 'Confirmado', preparing: 'Em preparo 👨‍🍳', ready: 'Pronto! ✅', delivering: 'Saiu para entrega 🛵' };
 
+  const restaurantName = menuData?.tenant?.name ?? 'Restaurante';
+
   return (
     <div className="min-h-screen bg-zinc-950">
+
+      {/* ── Splash de entrada ── */}
+      {!splashDone && (
+        <SplashScreen
+          restaurantName={restaurantName}
+          onDone={() => setSplashDone(true)}
+        />
+      )}
 
       {/* Banner de pedido ativo — sticky no topo */}
       {hasActiveOrder && (

@@ -42,3 +42,15 @@ export const editReceipt = (id, patch) =>
 /** DELETE /api/financeiro/receipts/:id — rejeita (não apaga) */
 export const rejectReceipt = (id, reason) =>
   api.delete(`/financeiro/receipts/${id}`, { data: { reason } });
+
+/** GET /api/financeiro/receipts/revisar — todas as notas que precisam de atenção */
+export const getRevisarReceipts = () =>
+  api.get('/financeiro/receipts/revisar');
+
+/** GET /api/financeiro/receipts/revisar/count — badge do Sidebar */
+export const getRevisarCount = () =>
+  api.get('/financeiro/receipts/revisar/count');
+
+/** POST /api/financeiro/receipts/:id/items/:idx/resolve */
+export const resolveReceiptItem = (id, idx, body) =>
+  api.post(`/financeiro/receipts/${id}/items/${idx}/resolve`, body);

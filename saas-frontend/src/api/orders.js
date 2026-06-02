@@ -13,8 +13,8 @@ export const createOrder = (payload) =>
 export const updateOrderStatus = (id, status) =>
   api.patch(`/orders/${id}/status`, { status });
 
-export const cancelOrder = (id) =>
-  api.patch(`/orders/${id}/status`, { status: 'cancelled' });
+export const cancelOrder = (id, reason) =>
+  api.patch(`/orders/${id}/status`, { status: 'cancelled', cancelReason: reason ?? null });
 
 export const searchCustomers = (q, limit) =>
   api.get('/orders/customers', { params: { q, ...(limit ? { limit } : {}) } });

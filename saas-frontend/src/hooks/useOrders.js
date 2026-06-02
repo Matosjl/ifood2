@@ -313,13 +313,13 @@ export default function useOrders() {
     }
   }, [orders, acknowledgeOrder]);
 
-  const doCancel = useCallback(async (id) => {
+  const doCancel = useCallback(async (id, reason) => {
     clearAutoConfirmTimer(id); // cancela auto-confirmação pendente
     const snapshot = orders.find((o) => o.id === id);
     setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status: 'cancelled' } : o));
     acknowledgeOrder(id);
     try {
-      await cancelOrder(id);
+      await cancelOrder(id, reason);
     } catch (err) {
       if (snapshot) setOrders((prev) => prev.map((o) => o.id === id ? snapshot : o));
       setStatusError(`Pedido #${snapshot?.orderNumber ?? ''}: ${getApiError(err, 'Erro ao cancelar pedido')}`);

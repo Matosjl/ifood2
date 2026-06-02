@@ -138,6 +138,117 @@ function BarChart({ data = [], unit = '', barColor = '#3b82f6', height = 160 }) 
   );
 }
 
+// ── SVG Line chart (time series) ─────────────────────────────
+
+/**
+ * Line chart com área preenchida — ideal para série temporal.
+ * @param {Array<{label, value}>} data
+ * @param {string}  color    – cor da linha/área (hex)
+ * @param {string}  unit     – unidade para tooltip
+ * @param {number}  height   – altura da área SVG em px
+ */
+function LineChart({ data = [], color = '#3b82f6', unit = '', height = 160 }) {
+  if (!data.length || data.every((d) => d.value === 0)) return (
+    <div className="flex items-center justify-center text-gray-600 text-sm italic" style={{ height: height + 36 }}>
+      Sem dados para exibir
+    </div>
+  );
+
+  const W = 1000;  // SVG viewBox width (unidade interna)
+  const H = height;
+  const PAD_X = 8;
+  const PAD_Y = 12;
+  const maxVal = Math.max(...data.map((d) => d.value), 1);
+
+  // Mapeamento de valor → coordenada Y (invertido: 0 = baixo)
+  const yScale = (v) => H - PAD_Y - ((v / maxVal) * (H - PAD_Y * 2));
+  const xScale = (i) => PAD_X + (i / (data.length - 1 || 1)) * (W - PAD_X * 2);
+
+  // Polyline points
+  const pts  = data.map((d, i) => `${xScale(i)},${yScale(d.value)}`).join(' ');
+  // Area path (filled)
+  const area = [
+    `M ${xScale(0)},${H}`,
+    ...data.map((d, i) => `L ${xScale(i)},${yScale(d.value)}`),
+    `L ${xScale(data.length - 1)},${H}`,
+    'Z',
+  ].join(' ');
+
+  const gradId = `lg-${color.replace('#', '')}`;
+
+  // Gridlines at 25/50/75/100%
+  const grids = [0.25, 0.5, 0.75, 1];
+
+  return (
+    <div className="relative select-none" style={{ height: height + 36 }}>
+      {/* Y labels */}
+      {grids.map((pct) => {
+        const topPx = (1 - pct) * (H - PAD_Y * 2) + PAD_Y * 0.5;
+        return (
+          <div key={pct} className="absolute left-0 right-0 flex items-center pointer-events-none" style={{ top: topPx }}>
+            <span className="text-[10px] text-gray-600 w-8 shrink-0 text-right pr-1.5 tabular-nums leading-none">
+              {Math.round(maxVal * pct)}
+            </span>
+            <div className="flex-1 border-t border-white/[0.05]" />
+          </div>
+        );
+      })}
+
+      {/* SVG chart */}
+      <div className="absolute left-9 right-0" style={{ top: 0, height: H }}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full overflow-visible">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor={color} stopOpacity="0.30" />
+              <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          {/* Area fill */}
+          <path d={area} fill={`url(#${gradId})`} />
+          {/* Line */}
+          <polyline
+            points={pts}
+            fill="none"
+            stroke={color}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {/* Dots */}
+          {data.map((d, i) => d.value > 0 && (
+            <g key={i}>
+              <circle
+                cx={xScale(i)} cy={yScale(d.value)} r="5"
+                fill={color} fillOpacity="0.9" stroke="#111827" strokeWidth="1.5"
+              />
+              {/* Tooltip on hover */}
+              <title>{d.label}: {d.value} {unit}</title>
+            </g>
+          ))}
+        </svg>
+      </div>
+
+      {/* X labels — mostrar só algumas para não sobrepor */}
+      <div className="absolute left-9 right-0 flex items-start" style={{ top: H + 4 }}>
+        {data.map((d, i) => {
+          // mostra label se: primeiro, último, ou a cada N pontos
+          const step   = Math.max(1, Math.floor(data.length / 10));
+          const show   = i === 0 || i === data.length - 1 || i % step === 0;
+          return (
+            <div key={i} className="flex-1 text-center">
+              {show && (
+                <span className="text-[9px] text-gray-500 leading-tight block truncate px-0.5">
+                  {d.label}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Horizontal bar (ranking items) ───────────────────────────
 
 function HBarChart({ data = [], maxValue }) {
@@ -490,8 +601,12 @@ export default function RelatoriosPage() {
   const topProduct = topProducts[0]?.label ?? '—';
 
   // History stats
-  const cancelledCount = orders.filter((o) => o.status === 'cancelled').length;
-  const pendingCount   = orders.filter((o) => ['pending','confirmed','preparing','ready'].includes(o.status)).length;
+  const cancelledCount   = orders.filter((o) => o.status === 'cancelled').length;
+  const pendingCount     = orders.filter((o) => ['pending','confirmed','preparing','ready'].includes(o.status)).length;
+  const inProgressCount  = orders.filter((o) => ['pending','confirmed','preparing'].includes(o.status)).length;
+  const readyCount       = orders.filter((o) => o.status === 'ready').length;
+  const completedCount   = orders.filter((o) => ['ready','delivered'].includes(o.status)).length;
+  const deliveredCount   = orders.filter((o) => o.status === 'delivered').length;
 
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
@@ -614,6 +729,68 @@ export default function RelatoriosPage() {
           {activeTab === 'demand' && (
             <div className="space-y-4">
 
+              {/* ── Status dos pedidos (aberto/concluído/cancelado) ── */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-gray-900/60 rounded-2xl border border-blue-500/20 p-4">
+                  <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">⏳ Em andamento</p>
+                  <p className="text-3xl font-black text-blue-400">{loadingHist ? '…' : inProgressCount}</p>
+                  {readyCount > 0 && (
+                    <p className="text-xs text-green-400 mt-1">+ {readyCount} pronto{readyCount > 1 ? 's' : ''} p/ retirar</p>
+                  )}
+                </div>
+                <div className="bg-gray-900/60 rounded-2xl border border-green-500/20 p-4">
+                  <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">✅ Concluídos</p>
+                  <p className="text-3xl font-black text-green-400">{loadingHist ? '…' : completedCount}</p>
+                  <p className="text-xs text-gray-500 mt-1">{deliveredCount} entregue{deliveredCount !== 1 ? 's' : ''}</p>
+                </div>
+                <div className="bg-gray-900/60 rounded-2xl border border-red-500/20 p-4">
+                  <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">❌ Cancelados</p>
+                  <p className={`text-3xl font-black ${cancelledCount > 0 ? 'text-red-400' : 'text-gray-600'}`}>
+                    {loadingHist ? '…' : cancelledCount}
+                  </p>
+                  {cancelledCount === 0 && <p className="text-xs text-gray-600 mt-1">nenhum hoje</p>}
+                </div>
+              </div>
+
+              {/* ── Top produtos vendidos (resumo rápido) ── */}
+              {topProducts.length > 0 && (
+                <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-sm font-black text-white">🥇 Produtos Mais Vendidos</h2>
+                    <button onClick={() => setActiveTab('products')}
+                      className="text-xs text-orange-400 hover:text-orange-300 transition-colors">
+                      Ver ranking completo →
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {topProducts.slice(0, 5).map((p, i) => {
+                      const maxQty = topProducts[0]?.qty || 1;
+                      const pct    = Math.round((p.qty / maxQty) * 100);
+                      return (
+                        <div key={i} className="flex items-center gap-3">
+                          <span className="w-5 text-xs font-black text-gray-500 shrink-0">#{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-center mb-0.5">
+                              <p className="text-sm text-gray-200 truncate font-medium">{p.label}</p>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                <span className="text-xs font-bold text-gray-300">{p.qty} un</span>
+                                <span className="text-xs text-gray-500">{fmtBRL(p.revenue)}</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-orange-500/70 transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Pedidos por hora/dia */}
               <div className="bg-gray-900/60 rounded-2xl border border-white/[0.06] p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -634,10 +811,10 @@ export default function RelatoriosPage() {
                     <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : (
-                  <BarChart
+                  <LineChart
                     data={visibleTimeSeries}
                     unit="pedidos"
-                    barColor="#3b82f6"
+                    color="#3b82f6"
                     height={160}
                   />
                 )}
@@ -661,10 +838,10 @@ export default function RelatoriosPage() {
                     <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : (
-                  <BarChart
+                  <LineChart
                     data={revenueSeriesData}
                     unit="R$"
-                    barColor="#22c55e"
+                    color="#22c55e"
                     height={140}
                   />
                 )}

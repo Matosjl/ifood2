@@ -7,7 +7,11 @@ import {
 } from '../api/products';
 import { uploadProductImage } from '../api/products_upload';
 import { listInsumos, getProductInsumos, setProductInsumos } from '../api/insumos';
-import { getCombo, addComboItem, removeComboItem } from '../api/combos';
+import {
+  getCombo, addComboItem, removeComboItem,
+  getOptionGroups, createOptionGroup, deleteOptionGroup, updateOptionGroup,
+  addOptionItem, removeOptionItem,
+} from '../api/combos';
 import QuickRegisterModal from '../components/QuickRegisterModal';
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
@@ -133,6 +137,141 @@ function ComboManager({ productId, allProducts }) {
         <button type="button" onClick={handleAdd} disabled={adding || !childId}
           className="px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-sm font-bold disabled:opacity-50 transition-colors shrink-0">
           {adding ? '...' : '+'}
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Option Group Manager — Grupos de Escolha (Combo V2)
+// ─────────────────────────────────────────────────────────────
+
+function OptionGroupManager({ productId, allProducts }) {
+  const [groups,     setGroups]     = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [grpName,    setGrpName]    = useState('');
+  const [grpMin,     setGrpMin]     = useState('1');
+  const [grpMax,     setGrpMax]     = useState('1');
+  const [addingGrp,  setAddingGrp]  = useState(false);
+  const [newItem,    setNewItem]    = useState({});
+  const [addingItem, setAddingItem] = useState({});
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await getOptionGroups(productId);
+      setGroups(data.data ?? []);
+    } catch (e) { setError(e.response?.data?.message ?? 'Erro ao carregar grupos.'); }
+    finally { setLoading(false); }
+  }, [productId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleAddGroup = async () => {
+    if (!grpName.trim()) return;
+    setAddingGrp(true); setError(null);
+    try {
+      await createOptionGroup(productId, { name: grpName.trim(), min_select: parseInt(grpMin)||1, max_select: parseInt(grpMax)||1 });
+      setGrpName(''); setGrpMin('1'); setGrpMax('1');
+      await reload();
+    } catch (e) { setError(e.response?.data?.message ?? 'Erro ao criar grupo.'); }
+    finally { setAddingGrp(false); }
+  };
+
+  const handleDeleteGroup = async (groupId) => {
+    setError(null);
+    try { await deleteOptionGroup(productId, groupId); await reload(); }
+    catch (e) { setError(e.response?.data?.message ?? 'Erro ao remover grupo.'); }
+  };
+
+  const handleAddItem = async (groupId) => {
+    const f = newItem[groupId] ?? {};
+    if (!f.product_id) return;
+    setAddingItem((p) => ({ ...p, [groupId]: true })); setError(null);
+    try {
+      await addOptionItem(productId, groupId, { product_id: f.product_id, extra_price: parseFloat(f.extra_price)||0 });
+      setNewItem((p) => ({ ...p, [groupId]: { product_id: '', extra_price: '' } }));
+      await reload();
+    } catch (e) { setError(e.response?.data?.message ?? 'Erro ao adicionar opção.'); }
+    finally { setAddingItem((p) => ({ ...p, [groupId]: false })); }
+  };
+
+  const handleRemoveItem = async (groupId, itemId) => {
+    setError(null);
+    try { await removeOptionItem(productId, groupId, itemId); await reload(); }
+    catch (e) { setError(e.response?.data?.message ?? 'Erro ao remover opção.'); }
+  };
+
+  const available = (allProducts ?? []).filter((p) => p.id !== productId && !p.is_combo && p.active);
+
+  if (loading) return <div className="flex justify-center py-3"><div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>;
+
+  return (
+    <div className="space-y-3 mt-4 pt-4 border-t border-white/[0.06]">
+      <p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Grupos de Escolha</p>
+      <p className="text-xs text-gray-500">O cliente escolhe entre as opções. Estoque e CMV baixam só do item escolhido.</p>
+
+      {groups.length === 0 && <p className="text-xs text-gray-600 italic">Nenhum grupo criado ainda.</p>}
+
+      {groups.map((group) => {
+        const f = newItem[group.id] ?? {};
+        const groupProductIds = group.items.map((i) => i.product_id);
+        const availableForGroup = available.filter((p) => !groupProductIds.includes(p.id));
+        return (
+          <div key={group.id} className="bg-gray-800/40 rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
+              <span className="flex-1 text-sm font-semibold text-gray-200">{group.name}</span>
+              <span className="text-[10px] text-gray-500 bg-gray-700/60 px-1.5 py-0.5 rounded">
+                {group.min_select === group.max_select ? `Escolha ${group.max_select}` : `${group.min_select}–${group.max_select}`}
+              </span>
+              <button type="button" onClick={() => handleDeleteGroup(group.id)}
+                className="text-gray-600 hover:text-red-400 text-xs transition-colors ml-1">✕</button>
+            </div>
+            <div className="px-3 py-2 space-y-1.5">
+              {group.items.length === 0 && <p className="text-xs text-gray-600 italic">Sem opções.</p>}
+              {group.items.map((item) => (
+                <div key={item.id} className="flex items-center gap-2">
+                  <span className="flex-1 text-xs text-gray-300 truncate">{item.product_name}</span>
+                  {parseFloat(item.extra_price) > 0 && (
+                    <span className="text-[10px] text-orange-400 font-semibold shrink-0">+R$ {parseFloat(item.extra_price).toFixed(2)}</span>
+                  )}
+                  <button type="button" onClick={() => handleRemoveItem(group.id, item.id)}
+                    className="text-gray-600 hover:text-red-400 text-xs transition-colors">✕</button>
+                </div>
+              ))}
+              <div className="flex gap-1.5 pt-1">
+                <select value={f.product_id ?? ''} onChange={(e) => setNewItem((p) => ({ ...p, [group.id]: { ...f, product_id: e.target.value } }))} className="input flex-1 text-xs">
+                  <option value="">Adicionar opção...</option>
+                  {availableForGroup.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <input type="number" min="0" step="0.5" placeholder="+R$"
+                  value={f.extra_price ?? ''} onChange={(e) => setNewItem((p) => ({ ...p, [group.id]: { ...f, extra_price: e.target.value } }))}
+                  className="input w-16 text-xs text-center" />
+                <button type="button" onClick={() => handleAddItem(group.id)} disabled={addingItem[group.id] || !f.product_id}
+                  className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold disabled:opacity-50 transition-colors shrink-0">
+                  {addingItem[group.id] ? '…' : '+'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="flex gap-1.5 items-center flex-wrap">
+        <input type="text" placeholder="Nome do grupo (ex: Refrigerante)" value={grpName} onChange={(e) => setGrpName(e.target.value)} className="input flex-1 text-sm min-w-[150px]" />
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-xs text-gray-500">Min</span>
+          <input type="number" min="0" max="10" value={grpMin} onChange={(e) => setGrpMin(e.target.value)} className="input w-12 text-xs text-center" />
+          <span className="text-xs text-gray-500">Max</span>
+          <input type="number" min="1" max="10" value={grpMax} onChange={(e) => setGrpMax(e.target.value)} className="input w-12 text-xs text-center" />
+        </div>
+        <button type="button" onClick={handleAddGroup} disabled={addingGrp || !grpName.trim()}
+          className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold disabled:opacity-50 transition-colors shrink-0">
+          {addingGrp ? '…' : '+ Criar Grupo'}
         </button>
       </div>
 
@@ -764,6 +903,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
             <div className="pt-4 border-t border-white/[0.06]">
               <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">🎁 Itens do Combo</p>
               <ComboManager productId={product.id} allProducts={allProducts} />
+              <OptionGroupManager productId={product.id} allProducts={allProducts} />
             </div>
           )}
 
@@ -981,6 +1121,11 @@ export default function ProductsPage() {
     return 'text-green-400';
   };
 
+  const isBelowCost = (p) =>
+    parseFloat(p.cost_price) > 0 && parseFloat(p.sale_price) < parseFloat(p.cost_price);
+
+  const belowCostCount = products.filter(isBelowCost).length;
+
   return (
     <div className="flex flex-col h-full bg-gray-950 overflow-hidden">
 
@@ -1064,6 +1209,19 @@ export default function ProductsPage() {
         </div>
       )}
 
+      {/* ── Alerta: produtos abaixo do custo ──────────────────── */}
+      {belowCostCount > 0 && (
+        <div className="mx-4 mt-3 flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-sm shrink-0">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <span>
+            <strong>{belowCostCount}</strong> {belowCostCount === 1 ? 'produto está sendo vendido' : 'produtos estão sendo vendidos'} abaixo do custo — verifique preço ou custo cadastrado.
+          </span>
+        </div>
+      )}
+
       {/* ── Table ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto p-4">
         {error && (
@@ -1120,7 +1278,14 @@ export default function ProductsPage() {
                         </div>
                       )}
                       <div>
-                        <p className="font-semibold text-gray-200 leading-tight">{p.name}</p>
+                        <div className="flex items-center gap-1.5 leading-tight">
+                          <p className="font-semibold text-gray-200">{p.name}</p>
+                          {isBelowCost(p) && (
+                            <span className="text-[10px] bg-red-500/15 text-red-400 px-1 py-0.5 rounded font-semibold shrink-0">
+                              ⚠ custo
+                            </span>
+                          )}
+                        </div>
                         {p.description && (
                           <p className="text-xs text-gray-500 truncate max-w-[180px] mt-0.5">{p.description}</p>
                         )}
