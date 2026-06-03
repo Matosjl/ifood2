@@ -43,7 +43,7 @@ async function getActiveTenants() {
         t.slug,
         t.owner_whatsapp AS owner_phone
       FROM tenants t
-      WHERE t.status = 'active'
+      WHERE t.subscription_status IN ('active', 'trialing')
         -- Só tenants com atividade recente (últimos 30 dias)
         AND EXISTS (
           SELECT 1 FROM orders o
