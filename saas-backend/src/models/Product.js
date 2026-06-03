@@ -94,13 +94,13 @@ class Product {
   // ── Escrita ────────────────────────────────────────────────
 
   static async create(tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured, isCombo, barcode } = data;
+    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured, isCombo, barcode } = data;
     const { rows } = await dbClient.query(
       `INSERT INTO products
-         (tenant_id, category_id, name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured, is_combo, barcode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         (tenant_id, category_id, name, display_name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured, is_combo, barcode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
-      [tenantId, categoryId || null, name.trim(), description || null,
+      [tenantId, categoryId || null, name.trim(), displayName?.trim() || null, description || null,
        saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0,
        featured ?? false, isCombo ?? false, barcode?.trim() || null]
     );
@@ -108,24 +108,27 @@ class Product {
   }
 
   static async update(id, tenantId, data, dbClient = db) {
-    const { categoryId, name, description, saleType, costPrice, salePrice, alertThreshold, active, featured, isCombo, barcode } = data;
+    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, alertThreshold, active, featured, isCombo, barcode } = data;
     const { rows } = await dbClient.query(
       `UPDATE products
        SET category_id     = COALESCE($3, category_id),
            name            = COALESCE($4, name),
-           description     = COALESCE($5, description),
-           sale_type       = COALESCE($6, sale_type),
-           cost_price      = COALESCE($7, cost_price),
-           sale_price      = COALESCE($8, sale_price),
-           alert_threshold = COALESCE($9, alert_threshold),
-           active          = COALESCE($10, active),
-           featured        = COALESCE($11, featured),
-           is_combo        = COALESCE($12, is_combo),
-           barcode         = CASE WHEN $13::text IS NOT NULL THEN $13 ELSE barcode END,
+           display_name    = CASE WHEN $5::text IS NOT NULL THEN NULLIF($5, '') ELSE display_name END,
+           description     = COALESCE($6, description),
+           sale_type       = COALESCE($7, sale_type),
+           cost_price      = COALESCE($8, cost_price),
+           sale_price      = COALESCE($9, sale_price),
+           alert_threshold = COALESCE($10, alert_threshold),
+           active          = COALESCE($11, active),
+           featured        = COALESCE($12, featured),
+           is_combo        = COALESCE($13, is_combo),
+           barcode         = CASE WHEN $14::text IS NOT NULL THEN $14 ELSE barcode END,
            updated_at      = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
-      [id, tenantId, categoryId, name?.trim(), description, saleType, costPrice, salePrice, alertThreshold, active,
+      [id, tenantId, categoryId, name?.trim(),
+       displayName !== undefined ? (displayName?.trim() || '') : null,
+       description, saleType, costPrice, salePrice, alertThreshold, active,
        featured !== undefined ? featured : null,
        isCombo  !== undefined ? isCombo  : null,
        barcode  !== undefined ? (barcode?.trim() || null) : null]

@@ -443,10 +443,10 @@ function AddonPicker({ product, groups, onConfirm, onClose }) {
         <div className="px-5 pb-3 shrink-0 border-b border-gray-100">
           <div className="flex items-start gap-3">
             {product.image_url && (
-              <img src={product.image_url} alt={product.name} className="w-14 h-14 rounded-xl object-cover shrink-0 border border-gray-100" />
+              <img src={product.image_url} alt={product.display_name ?? product.name} className="w-14 h-14 rounded-xl object-cover shrink-0 border border-gray-100" />
             )}
             <div className="flex-1 min-w-0">
-              <h3 className="font-black text-gray-900 text-base leading-tight">{product.name}</h3>
+              <h3 className="font-black text-gray-900 text-base leading-tight">{product.display_name ?? product.name}</h3>
               <p className="text-orange-600 font-bold text-sm mt-0.5">{fmtBRL(basePrice)}</p>
             </div>
             <button onClick={onClose} className="shrink-0 p-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">
@@ -1069,7 +1069,7 @@ export default function CustomerApp({ slug }) {
   const filteredCategories = (menuData?.categories ?? []).map((cat) => ({
     ...cat,
     items: cat.items.filter((p) =>
-      !searchLower || p.name.toLowerCase().includes(searchLower) || (p.description ?? '').toLowerCase().includes(searchLower)
+      !searchLower || (p.display_name ?? p.name).toLowerCase().includes(searchLower) || (p.description ?? '').toLowerCase().includes(searchLower)
     ),
   })).filter((cat) => cat.items.length > 0);
 
@@ -1158,7 +1158,7 @@ export default function CustomerApp({ slug }) {
                 return (
                   <div key={p.id} className="flex justify-between items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                      <p className="text-sm font-semibold text-gray-800 truncate">{p.display_name ?? p.name}</p>
                       <p className="text-xs text-gray-400">
                         {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(2)} kg × ${fmtBRL(p.sale_price)}/kg` : `${qty} × ${fmtBRL(p.sale_price)}`}
                       </p>
@@ -1617,7 +1617,7 @@ export default function CustomerApp({ slug }) {
                     {inCart && <div className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow">{inCart.qty}</div>}
                   </div>
                   <div className="p-2.5 flex-1 flex flex-col justify-between">
-                    <p className="text-xs font-bold text-zinc-100 leading-tight line-clamp-2">{product.name}</p>
+                    <p className="text-xs font-bold text-zinc-100 leading-tight line-clamp-2">{product.display_name ?? product.name}</p>
                     <div className="flex items-center justify-between mt-1.5">
                       <span className="text-amber-400 font-black text-sm">{fmtBRL(product.sale_price)}</span>
                       {!inCart ? <span className="text-amber-400 text-lg font-black">+</span> : <span className="text-green-400 text-xs font-bold">✓</span>}
@@ -1667,7 +1667,7 @@ export default function CustomerApp({ slug }) {
                           {outOfStock && <span className="text-[10px] bg-red-500/15 text-red-400 font-bold px-2 py-0.5 rounded-full">Esgotado</span>}
                           {hasAddons && <span className="text-[10px] bg-orange-500/15 text-orange-300 font-bold px-1.5 py-0.5 rounded-full">🍟 Personalizável</span>}
                         </div>
-                        <p className="font-bold text-zinc-100 text-sm leading-tight">{product.name}</p>
+                        <p className="font-bold text-zinc-100 text-sm leading-tight">{product.display_name ?? product.name}</p>
                         {product.description && <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">{product.description}</p>}
                         {inCart?.addons?.length > 0 && (
                           <p className="text-xs text-amber-400/80 mt-1">+ {inCart.addons.map(a => `${a.addon_name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(', ')}</p>
@@ -1751,9 +1751,9 @@ export default function CustomerApp({ slug }) {
                 const lineExtras = addonLinePrice(addons) * (p.sale_type === 'kg' ? 1 : qty);
                 return (
                   <div key={p.id} className="flex items-start gap-3 py-1">
-                    {p.image_url && <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 shrink-0"><img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /></div>}
+                    {p.image_url && <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 shrink-0"><img src={p.image_url} alt={p.display_name ?? p.name} className="w-full h-full object-cover" /></div>}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                      <p className="text-sm font-semibold text-gray-800 truncate">{p.display_name ?? p.name}</p>
                       <p className="text-xs text-gray-400">
                         {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(3)} kg × ${fmtBRL(p.sale_price)}/kg` : `${qty} × ${fmtBRL(p.sale_price)}`}
                       </p>

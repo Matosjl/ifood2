@@ -166,19 +166,48 @@ const createBatch = async (tenantId, userId, { insumo_id, raw_quantity, cooked_q
   if (!cookedQty || cookedQty <= 0) throw new AppError('Quantidade preparada deve ser maior que zero.', 400);
 
   const { rows: [insumo] } = await db.query(
-    `SELECT id, name, qty_in_stock FROM insumos WHERE id = $1 AND tenant_id = $2`,
+    `SELECT id, name, unit, qty_in_stock FROM insumos WHERE id = $1 AND tenant_id = $2`,
     [insumo_id, tenantId]
   );
   if (!insumo) throw new AppError('Insumo não encontrado.', 404);
 
+  // Valida estoque antes de debitar — bloqueia com erro claro
+  if (parseFloat(insumo.qty_in_stock) < rawQty) {
+    throw new AppError(
+      `Estoque insuficiente de "${insumo.name}". ` +
+      `Disponível: ${parseFloat(insumo.qty_in_stock).toFixed(3)} ${insumo.unit} — ` +
+      `Solicitado: ${rawQty} ${insumo.unit}.`,
+      422
+    );
+  }
+
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
+    // UPDATE sem GREATEST — estoque já validado acima (sem silenciar divergência)
+    // Captura qty_before antes do UPDATE para o movement audit trail
+    const qtyBefore = parseFloat(insumo.qty_in_stock);
+    const qtyAfter  = parseFloat((qtyBefore - rawQty).toFixed(3));
+
     await client.query(
-      `UPDATE insumos SET qty_in_stock = GREATEST(0, qty_in_stock - $2), updated_at = NOW()
+      `UPDATE insumos SET qty_in_stock = qty_in_stock - $2, updated_at = NOW()
        WHERE id = $1 AND tenant_id = $3`,
       [insumo_id, rawQty, tenantId]
     );
+
+    // Fix 1: registrar movement de produção (antes não existia)
+    await client.query(
+      `INSERT INTO insumo_movements
+         (tenant_id, insumo_id, type, qty, qty_before, qty_after,
+          reason, reference_type, created_by)
+       VALUES ($1, $2, 'production', $3, $4, $5, $6, 'production_batch', $7)`,
+      [
+        tenantId, insumo_id, -rawQty, qtyBefore, qtyAfter,
+        `Lote de produção — ${parseFloat(cooked_quantity).toFixed(3)} ${insumo.unit} preparados`,
+        userId || null,
+      ]
+    );
+
     const date = produced_at || new Date().toISOString().split('T')[0];
     const { rows } = await client.query(
       `INSERT INTO production_batches
@@ -571,6 +600,22 @@ const deductForOrder = async (tenantId, orderId) => {
       }
     }
 
+    // Adiciona produtos escolhidos nos grupos de opção (Combo V2)
+    // Cada escolha desce para os insumos do produto escolhido (via sua ficha técnica)
+    const { rows: optionChoices } = await client.query(
+      `SELECT oicc.product_id, oi.quantity
+       FROM   order_item_combo_choices oicc
+       JOIN   order_items oi ON oi.id = oicc.order_item_id
+       WHERE  oi.order_id = $1`,
+      [orderId]
+    );
+    for (const choice of optionChoices) {
+      effectiveItemsRaw.push({
+        product_id:  choice.product_id,
+        effectiveQty: parseFloat(choice.quantity ?? 1),
+      });
+    }
+
     // Mescla quantidades do mesmo product_id (ex: mesmo filho em dois combos)
     const mergedMap = {};
     for (const ei of effectiveItemsRaw) {
@@ -665,6 +710,142 @@ const deductForOrder = async (tenantId, orderId) => {
   }
 };
 
+// ── Reversão de insumos ao cancelar pedido ────────────────────
+
+/**
+ * Espelho exato de deductForOrder — devolve os insumos ao estoque bruto.
+ *
+ * Idempotência: guard em insumos_deducted (FOR UPDATE).
+ * Expande combos usando a mesma lógica de product_combos.
+ * Usa a mesma matemática de qty_per_unit × effectiveQty × wasteMult.
+ * Devolve sempre para insumos.qty_in_stock (raw stock).
+ */
+const revertForOrder = async (tenantId, orderId) => {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [order] } = await client.query(
+      `SELECT id, insumos_deducted FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [orderId, tenantId]
+    );
+    if (!order || !order.insumos_deducted) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const { rows: items } = await client.query(
+      `SELECT product_id, quantity, weight_kg FROM order_items WHERE order_id = $1`,
+      [orderId]
+    );
+    const productIds = items.map((i) => i.product_id).filter(Boolean);
+    if (productIds.length === 0) { await client.query('ROLLBACK'); return; }
+
+    // Expansão de combos — idêntica à de deductForOrder
+    const { rows: productTypes } = await client.query(
+      `SELECT id, is_combo FROM products WHERE id = ANY($1) AND tenant_id = $2`,
+      [productIds, tenantId]
+    );
+    const isComboMap = Object.fromEntries(productTypes.map((p) => [p.id, p.is_combo]));
+
+    const effectiveItemsRaw = [];
+    for (const item of items) {
+      if (!item.product_id) continue;
+      const qty = parseFloat(item.quantity ?? 1);
+      if (!isComboMap[item.product_id]) {
+        effectiveItemsRaw.push({ product_id: item.product_id, effectiveQty: qty });
+      } else {
+        const { rows: children } = await client.query(
+          `SELECT child_product_id, qty FROM product_combos
+           WHERE combo_product_id = $1 AND tenant_id = $2`,
+          [item.product_id, tenantId]
+        );
+        for (const child of children) {
+          effectiveItemsRaw.push({
+            product_id:  child.child_product_id,
+            effectiveQty: parseFloat((parseFloat(child.qty) * qty).toFixed(3)),
+          });
+        }
+      }
+    }
+
+    // Inclui produtos escolhidos nos grupos de opção (Combo V2)
+    const { rows: optionChoices } = await client.query(
+      `SELECT oicc.product_id, oi.quantity
+       FROM   order_item_combo_choices oicc
+       JOIN   order_items oi ON oi.id = oicc.order_item_id
+       WHERE  oi.order_id = $1`,
+      [orderId]
+    );
+    for (const choice of optionChoices) {
+      effectiveItemsRaw.push({
+        product_id:  choice.product_id,
+        effectiveQty: parseFloat(choice.quantity ?? 1),
+      });
+    }
+
+    const mergedMap = {};
+    for (const ei of effectiveItemsRaw) {
+      mergedMap[ei.product_id] = (mergedMap[ei.product_id] || 0) + ei.effectiveQty;
+    }
+    const effectiveItems    = Object.entries(mergedMap).map(([product_id, effectiveQty]) => ({ product_id, effectiveQty }));
+    const effectiveProductIds = effectiveItems.map((ei) => ei.product_id);
+    if (effectiveProductIds.length === 0) { await client.query('ROLLBACK'); return; }
+
+    const { rows: recipes } = await client.query(
+      `SELECT pi.product_id, pi.insumo_id, pi.qty_per_unit, i.waste_factor
+       FROM product_insumos pi
+       JOIN insumos i ON i.id = pi.insumo_id
+       WHERE pi.product_id = ANY($1) AND pi.tenant_id = $2`,
+      [effectiveProductIds, tenantId]
+    );
+    if (recipes.length === 0) { await client.query('ROLLBACK'); return; }
+
+    const returns = {};
+    for (const ei of effectiveItems) {
+      for (const recipe of recipes) {
+        if (recipe.product_id !== ei.product_id) continue;
+        const wasteMult = 1 + (parseFloat(recipe.waste_factor) || 0) / 100;
+        returns[recipe.insumo_id] = (returns[recipe.insumo_id] || 0)
+          + recipe.qty_per_unit * ei.effectiveQty * wasteMult;
+      }
+    }
+
+    for (const [insumoId, qty] of Object.entries(returns)) {
+      const { rows: [updated] } = await client.query(
+        `UPDATE insumos
+         SET qty_in_stock = qty_in_stock + $3, updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $2
+         RETURNING qty_in_stock AS qty_after, qty_in_stock - $3 AS qty_before`,
+        [insumoId, tenantId, qty]
+      );
+      if (!updated) continue;
+
+      await client.query(
+        `INSERT INTO insumo_movements
+           (tenant_id, insumo_id, type, qty, qty_before, qty_after, reason, reference_type)
+         VALUES ($1, $2, 'adjustment', $3, $4, $5, $6, 'order_cancellation')`,
+        [tenantId, insumoId, qty,
+         parseFloat(updated.qty_before), parseFloat(updated.qty_after),
+         `Cancelamento de pedido — devolução de insumo`]
+      );
+    }
+
+    await client.query(
+      `UPDATE orders SET insumos_deducted = false, insumos_deducted_at = NULL
+       WHERE id = $1 AND tenant_id = $2`,
+      [orderId, tenantId]
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   listInsumos, getInsumo, createInsumo, updateInsumo, deleteInsumo, adjustStock,
   getProductInsumos, setProductInsumos,
@@ -674,4 +855,5 @@ module.exports = {
   simulateProduction,
   getProductProfitRanking,
   deductForOrder,
+  revertForOrder,
 };

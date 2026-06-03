@@ -605,17 +605,18 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
   const isEdit = !!product;
 
   const [form, setForm] = useState({
-    name:           product?.name           ?? '',
-    categoryId:     product?.category_id    ?? '',
-    saleType:       product?.sale_type      ?? 'unit',
-    costPrice:      product?.cost_price     ?? '',
-    salePrice:      product?.sale_price     ?? '',
+    name:           product?.name            ?? '',
+    displayName:    product?.display_name    ?? '',
+    categoryId:     product?.category_id     ?? '',
+    saleType:       product?.sale_type       ?? 'unit',
+    costPrice:      product?.cost_price      ?? '',
+    salePrice:      product?.sale_price      ?? '',
     stockQty:       '',          // only on create
     alertThreshold: product?.alert_threshold ?? '',
-    description:    product?.description    ?? '',
-    active:         product?.active         ?? true,
-    featured:       product?.featured       ?? false,
-    isCombo:        product?.is_combo       ?? false,
+    description:    product?.description     ?? '',
+    active:         product?.active          ?? true,
+    featured:       product?.featured        ?? false,
+    isCombo:        product?.is_combo        ?? false,
   });
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState(null);
@@ -642,6 +643,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
     try {
       const payload = {
         name:           form.name.trim(),
+        displayName:    form.displayName?.trim() || undefined,
         categoryId:     form.categoryId  || undefined,
         saleType:       form.saleType,
         costPrice:      parseFloat(form.costPrice)      || 0,
@@ -698,9 +700,9 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto max-h-[80vh]">
 
-          {/* Nome */}
+          {/* Nome interno */}
           <div>
-            <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome *</label>
+            <label className="text-xs text-gray-400 font-semibold mb-1 block">Nome interno *</label>
             <input
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
@@ -708,6 +710,26 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
               placeholder="Ex: Hambúrguer Clássico"
               autoFocus
             />
+            <p className="text-[11px] text-gray-600 mt-1">
+              Usado no estoque, relatórios e financeiro.
+            </p>
+          </div>
+
+          {/* Nome no cardápio (display_name) */}
+          <div>
+            <label className="text-xs text-gray-400 font-semibold mb-1 block">
+              Nome no cardápio digital
+              <span className="ml-1 text-gray-600 font-normal">(opcional)</span>
+            </label>
+            <input
+              value={form.displayName}
+              onChange={(e) => set('displayName', e.target.value)}
+              className="input w-full"
+              placeholder={form.name || 'Igual ao nome interno se vazio'}
+            />
+            <p className="text-[11px] text-gray-600 mt-1">
+              O que o cliente vê. Se vazio, usa o nome interno.
+            </p>
           </div>
 
           {/* Categoria + Tipo */}

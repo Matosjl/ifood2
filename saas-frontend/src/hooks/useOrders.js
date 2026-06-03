@@ -290,6 +290,22 @@ export default function useOrders() {
     return () => clearInterval(id);
   }, [fetchToday]);
 
+  // ── Cleanup no unmount ────────────────────────────────────────
+  // Garante que alert interval e timers de auto-confirmação não vazem
+  // quando o componente desmonta (ex: logout, navegação, reload).
+  useEffect(() => {
+    return () => {
+      // Para o alerta sonoro
+      if (alertRef.current) {
+        clearInterval(alertRef.current);
+        alertRef.current = null;
+      }
+      // Cancela todos os timers de auto-confirmação pendentes
+      autoConfirmTimersRef.current.forEach((tid) => clearTimeout(tid));
+      autoConfirmTimersRef.current.clear();
+    };
+  }, []);
+
   // ── Actions (optimistic) ────────────────────────────────────
 
   const changeStatus = useCallback(async (id, status) => {

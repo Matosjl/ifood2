@@ -4,18 +4,48 @@ const AppError     = require('../../utils/AppError');
 
 // ── GET /api/caixa/current ────────────────────────────────────
 const getCurrent = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+
   const { rows } = await db.query(
     `SELECT cr.*,
-            u.name AS opened_by_name
+            u.name AS opened_by_name,
+            (cr.opened_at::date < CURRENT_DATE)        AS stale,
+            (CURRENT_DATE - cr.opened_at::date)::int   AS days_open
      FROM   cash_registers cr
      LEFT   JOIN users u ON u.id = cr.opened_by
      WHERE  cr.tenant_id = $1 AND cr.status = 'open'
      ORDER  BY cr.opened_at DESC
      LIMIT  1`,
-    [req.user.tenantId]
+    [tenantId]
   );
+
+  const caixa = rows[0] ?? null;
+
+  // Incidente fire-and-forget — um por dia, não bloqueia a resposta
+  if (caixa?.stale) {
+    const incidentSvc = require('../incidents/incidents.service');
+    db.query(
+      `SELECT 1 FROM operational_incidents
+       WHERE tenant_id = $1 AND type = 'stale_cash_register'
+         AND DATE(created_at AT TIME ZONE 'America/Sao_Paulo')
+             = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Sao_Paulo')::date
+         AND resolved = FALSE
+       LIMIT 1`,
+      [tenantId]
+    ).then(({ rows: existing }) => {
+      if (!existing[0]) {
+        incidentSvc.createIncident(tenantId, {
+          type:        'stale_cash_register',
+          cost:        0,
+          description: `Caixa aberto há ${caixa.days_open} dia(s) (desde ${new Date(caixa.opened_at).toLocaleDateString('pt-BR')}) — não foi fechado no dia anterior.`,
+          source:      'auto',
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
   res.set('Cache-Control', 'no-store');
-  res.json({ success: true, data: rows[0] ?? null });
+  res.json({ success: true, data: caixa });
 });
 
 // ── POST /api/caixa/open ──────────────────────────────────────
@@ -266,14 +296,61 @@ const sangria = asyncHandler(async (req, res) => {
   const { amount, reason } = req.body;
   if (!amount || parseFloat(amount) <= 0) throw new AppError('Valor da sangria deve ser maior que zero.', 400);
 
-  const caixa = await getOpenCaixa(req.user.tenantId);
+  const tenantId = req.user.tenantId;
+  const caixa    = await getOpenCaixa(tenantId);
 
   const { rows } = await db.query(
     `INSERT INTO caixa_movements (tenant_id, cash_register_id, type, amount, reason, created_by)
      VALUES ($1, $2, 'sangria', $3, $4, $5) RETURNING *`,
-    [req.user.tenantId, caixa.id, parseFloat(amount), reason ?? null, req.user.userId]
+    [tenantId, caixa.id, parseFloat(amount), reason ?? null, req.user.userId]
   );
-  res.status(201).json({ success: true, data: rows[0] });
+
+  // Fix 2: registrar no banco_transactions para aparecer no DRE
+  try {
+    await db.query(
+      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
+       VALUES ($1, 'debit', $2, $3, 'sangria', $4)`,
+      [
+        tenantId,
+        parseFloat(amount),
+        `Sangria: ${reason ?? 'Retirada de caixa'}`,
+        rows[0].id,
+      ]
+    );
+  } catch { /* não bloqueia se banco_transactions falhar */ }
+
+  // ── Verificação de limite diário (alerta, não bloqueio) ───────
+  let warning = null;
+  try {
+    const { rows: [info] } = await db.query(
+      `SELECT t.sangria_daily_limit,
+              COALESCE((
+                SELECT SUM(m.amount)
+                FROM caixa_movements m
+                WHERE m.cash_register_id = $1 AND m.tenant_id = $2 AND m.type = 'sangria'
+                  AND DATE(m.created_at AT TIME ZONE 'America/Sao_Paulo')
+                      = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Sao_Paulo')::date
+              ), 0)::float AS total_today
+       FROM tenants t WHERE t.id = $2`,
+      [caixa.id, tenantId]
+    );
+    if (info?.sangria_daily_limit != null) {
+      const limit     = parseFloat(info.sangria_daily_limit);
+      const totalHoje = parseFloat(info.total_today);
+      if (totalHoje > limit) {
+        warning = { limitExceeded: true, totalHoje, limit };
+        const incidentSvc = require('../incidents/incidents.service');
+        incidentSvc.createIncident(tenantId, {
+          type:        'sangria_excessiva',
+          cost:        parseFloat((totalHoje - limit).toFixed(2)),
+          description: `Sangrias do dia: R$${totalHoje.toFixed(2)} (limite configurado: R$${limit.toFixed(2)}).`,
+          source:      'auto',
+        }).catch(() => {});
+      }
+    }
+  } catch { /* não bloqueia a resposta */ }
+
+  res.status(201).json({ success: true, data: rows[0], warning });
 });
 
 // ── POST /api/caixa/suprimento ────────────────────────────────
@@ -288,6 +365,21 @@ const suprimento = asyncHandler(async (req, res) => {
      VALUES ($1, $2, 'suprimento', $3, $4, $5) RETURNING *`,
     [req.user.tenantId, caixa.id, parseFloat(amount), reason ?? null, req.user.userId]
   );
+
+  // Fix 2: registrar no banco_transactions (entrada de dinheiro no caixa)
+  try {
+    await db.query(
+      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
+       VALUES ($1, 'credit', $2, $3, 'suprimento', $4)`,
+      [
+        req.user.tenantId,
+        parseFloat(amount),
+        `Suprimento: ${reason ?? 'Reforço de caixa'}`,
+        rows[0].id,
+      ]
+    );
+  } catch { /* não bloqueia se banco_transactions falhar */ }
+
   res.status(201).json({ success: true, data: rows[0] });
 });
 

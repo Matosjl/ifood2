@@ -453,7 +453,8 @@ const getResult = asyncHandler(async (req, res) => {
 
   const monthStr          = req.query.month || new Date().toISOString().slice(0, 7);
   const grossProfit       = rev.revenue - rev.total_cmv;
-  const netProfit         = rev.revenue - exp.total_expenses;
+  // netProfit parte do lucro bruto (já com CMV deduzido), não da receita bruta
+  const netProfit         = grossProfit - exp.total_expenses;
   const marginPct         = rev.revenue > 0 ? Math.round((grossProfit / rev.revenue) * 100) : null;
   const driverFees        = parseFloat(logist.total_driver_fees || 0);
   const deliveryFees      = parseFloat(rev.delivery_fees_charged || 0);
@@ -471,7 +472,8 @@ const getResult = asyncHandler(async (req, res) => {
       paid_expenses:      exp.paid_expenses,
       pending_expenses:   exp.pending_expenses,
       profit:             netProfit,
-      profit_after_paid:  rev.revenue - exp.paid_expenses,
+      // Resultado real = lucro bruto − gastos pagos (não receita bruta − gastos)
+      profit_after_paid:  grossProfit - exp.paid_expenses,
       // Breakdown de logística (campos novos)
       products_revenue:      parseFloat((rev.products_revenue      || 0).toFixed(2)),
       delivery_fees_charged: parseFloat((rev.delivery_fees_charged || 0).toFixed(2)),
@@ -548,6 +550,27 @@ const getCmvByProduct = asyncHandler(async (req, res) => {
   });
 });
 
+
+// ── GET /api/financeiro/audit-log ─────────────────────────────
+// Fix 3: expõe o finance_logs que antes era gravado mas nunca lido
+const getAuditLog = asyncHandler(async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const { rows } = await db.query(
+    `SELECT fl.id, fl.action, fl.table_name, fl.record_id,
+            fl.before_data, fl.after_data, fl.amount, fl.created_at,
+            u.name AS user_name
+     FROM finance_logs fl
+     LEFT JOIN users u ON u.id = fl.user_id
+     WHERE fl.tenant_id = $1
+     ORDER BY fl.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [tenantId, limit, offset]
+  );
+  res.json({ success: true, data: rows });
+});
+
 module.exports = {
   summary,
   listExpenses,
@@ -558,4 +581,5 @@ module.exports = {
   deleteExpense,
   getResult,
   getCmvByProduct,
+  getAuditLog,
 };

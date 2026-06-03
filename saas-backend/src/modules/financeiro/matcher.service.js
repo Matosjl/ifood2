@@ -74,52 +74,114 @@ async function searchProducts(tenantId, normalized) {
 }
 
 /**
+ * Passo 1 — comparação direta (sem normalizar): captura nomes quase idênticos
+ * como "Nata Friolack 280g" ↔ "Nata Friolack 280g" que a normalização prejudica
+ * ao remover os números.
+ */
+async function searchDirect(tenantId, rawName) {
+  if (!rawName) return { insumo: null, product: null };
+  const lower = rawName.toLowerCase().trim();
+
+  const [ins, prod] = await Promise.all([
+    db.query(
+      `SELECT id, name, unit, qty_in_stock, cost_per_unit,
+              similarity(LOWER(name), $1) AS score
+       FROM insumos
+       WHERE tenant_id = $2
+         AND similarity(LOWER(name), $1) >= 0.55
+       ORDER BY score DESC LIMIT 1`,
+      [lower, tenantId]
+    ),
+    db.query(
+      `SELECT id, name, sale_type AS unit, stock_qty, cost_price,
+              similarity(LOWER(name), $1) AS score
+       FROM products
+       WHERE tenant_id = $2
+         AND active = TRUE
+         AND similarity(LOWER(name), $1) >= 0.55
+       ORDER BY score DESC LIMIT 1`,
+      [lower, tenantId]
+    ),
+  ]);
+
+  return {
+    insumo:  ins.rows[0]  ? { ...ins.rows[0],  score: parseFloat(ins.rows[0].score)  } : null,
+    product: prod.rows[0] ? { ...prod.rows[0], score: parseFloat(prod.rows[0].score) } : null,
+  };
+}
+
+/**
  * Encontra o melhor match pra um item da nota.
- * @param {string} tenantId
- * @param {string} itemName  — descrição crua vinda da IA
- * @returns {Promise<{
- *   action: 'auto'|'ask'|'create_new',
- *   match: object|null,
- *   match_type: 'insumo'|'product'|null,
- *   score: number,
- *   suggestions: Array
- * }>}
+ *
+ * Estratégia de dois passes:
+ *   Passo 1 — comparação direta (nome cru): detecta nomes quase idênticos
+ *   Passo 2 — comparação normalizada (sem números/unidades): detecta matches semânticos
+ *
+ * Thresholds finais:
+ *   score >= 0.7 → auto  (alta confiança)
+ *   score >= 0.3 → ask   (pede revisão)
+ *   score <  0.3 → create_new
  */
 async function findMatch(tenantId, itemName) {
   const normalized = normalize(itemName);
 
+  // ── Passo 1: comparação direta ────────────────────────────────
+  const direct = await searchDirect(tenantId, itemName);
+  const dirBest     = direct.insumo && (!direct.product || direct.insumo.score >= direct.product.score)
+    ? { match: direct.insumo, type: 'insumo' }
+    : direct.product
+      ? { match: direct.product, type: 'product' }
+      : null;
+
+  // Se o passo direto deu score alto, usa como auto_match sem custo do fuzzy
+  if (dirBest && dirBest.match.score >= AUTO_MATCH_THRESHOLD) {
+    const [insumos, products] = await Promise.all([
+      searchInsumos(tenantId, normalized),
+      searchProducts(tenantId, normalized),
+    ]);
+    return {
+      action:      'auto',
+      match:       dirBest.match,
+      match_type:  dirBest.type,
+      score:       dirBest.match.score,
+      suggestions: [...insumos.slice(0, 3), ...products.slice(0, 2)].slice(0, 3),
+      normalized,
+    };
+  }
+
+  // ── Passo 2: comparação normalizada (fuzzy) ───────────────────
   const [insumos, products] = await Promise.all([
     searchInsumos(tenantId, normalized),
     searchProducts(tenantId, normalized),
   ]);
 
-  // Escolhe o melhor score entre insumos e produtos.
-  // Se scores iguais, insumo tem prioridade (nota fiscal de fornecedor abastece insumos).
   const insBest  = insumos[0]  || null;
   const prodBest = products[0] || null;
-  let best, best_type;
-  if (!insBest && !prodBest) {
-    best = null; best_type = null;
-  } else if (!insBest) {
-    best = prodBest; best_type = 'product';
-  } else if (!prodBest) {
-    best = insBest; best_type = 'insumo';
-  } else if (insBest.score >= prodBest.score) {
-    best = insBest; best_type = 'insumo';
-  } else {
-    best = prodBest; best_type = 'product';
-  }
-  const score = best?.score || 0;
 
+  // Combina melhor resultado direto (passo1) com fuzzy (passo2)
+  const candidates = [
+    dirBest  ? { m: dirBest.match,  t: dirBest.type }   : null,
+    insBest  ? { m: insBest,         t: 'insumo' }       : null,
+    prodBest ? { m: prodBest,        t: 'product' }       : null,
+  ].filter(Boolean);
+
+  let best = null, best_type = null;
+  for (const c of candidates) {
+    if (!best || c.m.score > best.score) { best = c.m; best_type = c.t; }
+    // Insumo tem prioridade em empate
+    if (c.m.score === best.score && c.t === 'insumo') { best = c.m; best_type = 'insumo'; }
+  }
+
+  const score = best?.score || 0;
   let action;
-  if (score >= AUTO_MATCH_THRESHOLD)      action = 'auto';
-  else if (score >= ASK_THRESHOLD)        action = 'ask';
-  else                                    action = 'create_new';
+  if (score >= AUTO_MATCH_THRESHOLD)  action = 'auto';
+  else if (score >= ASK_THRESHOLD)    action = 'ask';
+  else                                action = 'create_new';
 
   return {
     action,
-    match: best,
-    match_type: best_type,
+    match:       best,
+    match_type:  best_type,
     score,
     suggestions: [...insumos.slice(0, 3), ...products.slice(0, 2)].slice(0, 3),
     normalized,

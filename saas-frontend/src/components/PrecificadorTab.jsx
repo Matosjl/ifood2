@@ -253,25 +253,30 @@ export default function PrecificadorTab() {
 
   // Load initial data
   useEffect(() => {
-    Promise.all([
-      getOverhead(),
-      listProducts({ active: true, limit: 200 }),
-      listHistory(50),
-    ]).then(([ohRes, pRes, hRes]) => {
-      const oh = ohRes.data.data;
-      setOverhead({
-        embalagem:       oh.embalagem       ?? 0,
-        gas:             oh.gas             ?? 0,
-        energia:         oh.energia         ?? 0,
-        taxa_app:        oh.taxa_app        ?? 0,
-        taxa_pagamento:  oh.taxa_pagamento  ?? 0,
-        mao_obra:        oh.mao_obra        ?? 0,
-        margem_minima:   oh.margem_minima   ?? 30,
-        margem_desejada: oh.margem_desejada ?? 40,
-      });
-      setProducts(pRes.data.data ?? []);
-      setHistory(hRes.data.data ?? []);
-    }).catch(() => {});
+    // Carrega cada parte independentemente — falha em overhead/history não impede os produtos
+    listProducts({ active: true, limit: 200 })
+      .then((r) => setProducts(r.data.data ?? []))
+      .catch(() => {});
+
+    getOverhead()
+      .then((r) => {
+        const oh = r.data.data ?? {};
+        setOverhead({
+          embalagem:       oh.embalagem       ?? 0,
+          gas:             oh.gas             ?? 0,
+          energia:         oh.energia         ?? 0,
+          taxa_app:        oh.taxa_app        ?? 0,
+          taxa_pagamento:  oh.taxa_pagamento  ?? 0,
+          mao_obra:        oh.mao_obra        ?? 0,
+          margem_minima:   oh.margem_minima   ?? 30,
+          margem_desejada: oh.margem_desejada ?? 40,
+        });
+      })
+      .catch(() => {});
+
+    listHistory(50)
+      .then((r) => setHistory(r.data.data ?? []))
+      .catch(() => {});
   }, []);
 
   const handleOverheadChange = useCallback((key, val) => {

@@ -17,4 +17,15 @@ const confiabilidade = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
-module.exports = { fechamentoHoje, confiabilidade };
+// GET /api/operacao/fechamento-mensal?month=YYYY-MM
+const fechamentoMensal = asyncHandler(async (req, res) => {
+  const month = req.query.month;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ success: false, message: 'Parâmetro month obrigatório (YYYY-MM).' });
+  }
+  const data = await svc.getFechamentoMensal(req.user.tenantId, month);
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, data });
+});
+
+module.exports = { fechamentoHoje, confiabilidade, fechamentoMensal };
