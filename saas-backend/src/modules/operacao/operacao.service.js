@@ -14,9 +14,11 @@
  */
 const db  = require('../../config/database');
 const TZ  = 'America/Sao_Paulo';
+const { brazilToday } = require('../../utils/financeDate');
 
 const getFechamentoHoje = async (tenantId) => {
-  const today = `CURRENT_DATE AT TIME ZONE '${TZ}'`;
+  // Data explícita em horário de Brasília — evita CURRENT_DATE do servidor (UTC)
+  const todayBR = brazilToday(); // "YYYY-MM-DD" no fuso de São Paulo
 
   // ── 1. Vendas ──────────────────────────────────────────────────
   const { rows: [vendas] } = await db.query(
@@ -30,12 +32,13 @@ const getFechamentoHoje = async (tenantId) => {
        COUNT(*) FILTER (WHERE o.delivery_type='delivery')::int               AS pedidos_entrega,
        COUNT(*) FILTER (WHERE o.delivery_type='pickup')::int                 AS pedidos_retirada,
        COUNT(*) FILTER (WHERE o.delivery_type='table')::int                  AS pedidos_mesa,
-       COUNT(*) FILTER (WHERE o.status='cancelled')::int                     AS pedidos_cancelados
+       COUNT(*) FILTER (WHERE o.status='cancelled')::int                     AS pedidos_cancelados,
+       COALESCE(SUM(o.total) FILTER (WHERE o.payment_method = 'fiado'), 0)::float AS total_fiado
      FROM orders o
      WHERE o.tenant_id = $1
        AND o.status IN ('ready','delivered','cancelled')
-       AND (o.created_at AT TIME ZONE $2)::date = CURRENT_DATE`,
-    [tenantId, TZ]
+       AND (o.created_at AT TIME ZONE $2)::date = $3::date`,
+    [tenantId, TZ, todayBR]
   );
 
   // ── 2. Logística (repasse motoboy) ─────────────────────────────
@@ -45,8 +48,8 @@ const getFechamentoHoje = async (tenantId) => {
      JOIN orders o ON o.id = d.order_id
      WHERE d.tenant_id = $1
        AND d.status = 'delivered'
-       AND (o.created_at AT TIME ZONE $2)::date = CURRENT_DATE`,
-    [tenantId, TZ]
+       AND (o.created_at AT TIME ZONE $2)::date = $3::date`,
+    [tenantId, TZ, todayBR]
   );
   const repasse         = parseFloat(logist.repasse_motoboy || 0);
   const taxasEntrega    = parseFloat(vendas.taxas_entrega || 0);
@@ -67,10 +70,10 @@ const getFechamentoHoje = async (tenantId) => {
        cr.payment_summary
      FROM cash_registers cr
      WHERE cr.tenant_id = $1
-       AND (cr.opened_at AT TIME ZONE $2)::date = CURRENT_DATE
+       AND (cr.opened_at AT TIME ZONE $2)::date = $3::date
      ORDER BY cr.opened_at DESC
      LIMIT 1`,
-    [tenantId, TZ]
+    [tenantId, TZ, todayBR]
   );
 
   // ── 4. Despesas do dia ─────────────────────────────────────────
@@ -81,15 +84,11 @@ const getFechamentoHoje = async (tenantId) => {
        COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0)::float            AS pendentes
      FROM expenses
      WHERE tenant_id = $1
-       AND (due_date AT TIME ZONE $2)::date = CURRENT_DATE`,
-    [tenantId, TZ]
+       AND (due_date AT TIME ZONE $2)::date = $3::date`,
+    [tenantId, TZ, todayBR]
   );
 
   // ── 5. CMV ─────────────────────────────────────────────────────
-  // Agrupa por pedido primeiro para classificar custo como COMPLETO / PARCIAL / SEM_CUSTO.
-  // "Completo" = todos os itens do pedido têm total_cost > 0.
-  // "Parcial"  = ao menos 1 item sem custo, mas ao menos 1 com custo.
-  // "Sem custo"= nenhum item tem custo (ou pedido sem itens).
   const { rows: [cmv] } = await db.query(
     `WITH pedido_custo AS (
        SELECT
@@ -104,7 +103,7 @@ const getFechamentoHoje = async (tenantId) => {
        LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE o.tenant_id = $1
          AND o.status IN ('ready','delivered')
-         AND (o.created_at AT TIME ZONE $2)::date = CURRENT_DATE
+         AND (o.created_at AT TIME ZONE $2)::date = $3::date
        GROUP BY o.id, o.total, o.delivery_fee
      )
      SELECT
@@ -115,7 +114,7 @@ const getFechamentoHoje = async (tenantId) => {
        COALESCE(SUM(custo_total_pedido), 0)::float                                                  AS custo_total,
        COALESCE(SUM(total - COALESCE(delivery_fee, 0)), 0)::float                                   AS receita_produtos
      FROM pedido_custo`,
-    [tenantId, TZ]
+    [tenantId, TZ, todayBR]
   );
   const cmvPct    = cmv.receita_produtos > 0
     ? parseFloat((cmv.custo_total / cmv.receita_produtos * 100).toFixed(1))
@@ -141,8 +140,8 @@ const getFechamentoHoje = async (tenantId) => {
        COUNT(*) FILTER (WHERE type='inventory_deduction_failed')::int AS deducao_falhou
      FROM operational_incidents
      WHERE tenant_id = $1
-       AND (created_at AT TIME ZONE $2)::date = CURRENT_DATE`,
-    [tenantId, TZ]
+       AND (created_at AT TIME ZONE $2)::date = $3::date`,
+    [tenantId, TZ, todayBR]
   );
 
   // ── 7. Estoque baixo ───────────────────────────────────────────
@@ -168,9 +167,9 @@ const getFechamentoHoje = async (tenantId) => {
      JOIN order_items oi ON oi.order_id = o.id
      WHERE o.tenant_id = $1
        AND o.status IN ('ready','delivered')
-       AND (o.created_at AT TIME ZONE $2)::date = CURRENT_DATE
+       AND (o.created_at AT TIME ZONE $2)::date = $3::date
        AND oi.total_cost = 0`,
-    [tenantId, TZ]
+    [tenantId, TZ, todayBR]
   );
   const todosComCusto = parseInt(semCusto.count) === 0;
 
@@ -184,8 +183,8 @@ const getFechamentoHoje = async (tenantId) => {
      WHERE tenant_id = $1
        AND status IN ('delivered','ready')
        AND insumos_deducted = false
-       AND (created_at AT TIME ZONE $2)::date = CURRENT_DATE`,
-    [tenantId, TZ]
+       AND (created_at AT TIME ZONE $2)::date = $3::date`,
+    [tenantId, TZ, todayBR]
   );
   const todosDeduziram = parseInt(semDeducao.count) === 0;
 
@@ -213,6 +212,9 @@ const getFechamentoHoje = async (tenantId) => {
       receita_produtos:   parseFloat((vendas.receita_produtos || 0).toFixed(2)),
       ticket_medio:       parseFloat((vendas.ticket_medio || 0).toFixed(2)),
       pedidos_cancelados: vendas.pedidos_cancelados,
+      // Fiado: valor vendido a prazo ainda não recebido em caixa
+      total_fiado:        parseFloat((vendas.total_fiado || 0).toFixed(2)),
+      receita_efetiva:    parseFloat(((vendas.faturamento || 0) - (vendas.total_fiado || 0)).toFixed(2)),
       por_canal: {
         entrega:  vendas.pedidos_entrega,
         retirada: vendas.pedidos_retirada,

@@ -94,7 +94,13 @@ function FechamentoDiario() {
       <Bloco titulo="💰 Vendas">
         <Linha label="Pedidos" valor={vendas.total_pedidos} />
         <Linha label="Faturamento (c/ entrega)" valor={fmt(vendas.faturamento)} />
-        <Linha label="Receita produtos" valor={fmt(vendas.receita_produtos)} destaque cor="verde" />
+        {(vendas.total_fiado > 0) && (
+          <Linha label="🤝 Fiado (a receber)" valor={`-${fmt(vendas.total_fiado)}`} cor="amarelo" destaque />
+        )}
+        {(vendas.total_fiado > 0) && (
+          <Linha label="✅ Receita efetiva" valor={fmt(vendas.receita_efetiva)} destaque cor="verde" />
+        )}
+        <Linha label="Receita produtos" valor={fmt(vendas.receita_produtos)} destaque={!vendas.total_fiado} cor="verde" />
         <Linha label="Ticket médio" valor={fmt(vendas.ticket_medio)} />
         <Linha label="Cancelados" valor={vendas.pedidos_cancelados} cor="vermelho" destaque={vendas.pedidos_cancelados > 0} />
         <div className="flex gap-3 pt-1 border-t border-white/[0.04]">
