@@ -82,9 +82,10 @@ const applyManualOrderCashback = async (
     );
 
     // 5. Atualiza saldo e estatísticas do loyalty customer
+    // GREATEST(0, ...) previne saldo negativo em caso de race condition
     await db.query(
       `UPDATE loyalty_customers
-       SET cashback_balance = cashback_balance + $2 - $3,
+       SET cashback_balance = GREATEST(0, cashback_balance + $2 - $3),
            total_orders     = total_orders + 1,
            total_spent      = total_spent + $4,
            updated_at       = NOW()
@@ -222,9 +223,10 @@ const createOrder = async (tenantId, {
     const comboIds = [...new Set(
       resolvedItems.filter(i => i.product.is_combo).map(i => i.product.id)
     )];
-    const comboItemsMap = {};
+    const comboItemsMap    = {};
+    const comboOptionGrpMap = {}; // grupos de escolha por combo_product_id
     if (comboIds.length > 0) {
-      const { getComboItems } = require('../combos/combos.service');
+      const { getComboItems, getOptionGroups } = require('../combos/combos.service');
       for (const cid of comboIds) {
         const children = await getComboItems(tenantId, cid);
         if (children.length === 0) {
@@ -235,22 +237,65 @@ const createOrder = async (tenantId, {
           );
         }
         comboItemsMap[cid] = children;
+        comboOptionGrpMap[cid] = await getOptionGroups(tenantId, cid);
       }
     }
 
-    // Desconto atomico de estoque — UPDATE ... WHERE stock_qty >= qty
+    // Valida escolhas dos grupos de opção e acumula extra_price
+    for (const item of resolvedItems) {
+      if (!item.product.is_combo) continue;
+      const groups  = comboOptionGrpMap[item.product.id] ?? [];
+      const choices = item.choices ?? [];   // [{ group_id, product_id }]
+
+      for (const group of groups) {
+        const groupChoices = choices.filter((c) => c.group_id === group.id);
+        if (groupChoices.length < group.min_select) {
+          throw new AppError(
+            `Grupo "${group.name}" exige no mínimo ${group.min_select} escolha(s) (selecionado: ${groupChoices.length}).`,
+            400
+          );
+        }
+        if (groupChoices.length > group.max_select) {
+          throw new AppError(
+            `Grupo "${group.name}" permite no máximo ${group.max_select} escolha(s) (selecionado: ${groupChoices.length}).`,
+            400
+          );
+        }
+        // Valida que cada produto escolhido existe no grupo
+        for (const choice of groupChoices) {
+          const validItem = group.items.find((i) => i.product_id === choice.product_id);
+          if (!validItem) {
+            throw new AppError(`Produto escolhido não pertence ao grupo "${group.name}".`, 400);
+          }
+          // Acumula extra_price no lineTotal do item
+          const extra = parseFloat(validItem.extra_price) || 0;
+          if (extra > 0) {
+            item.lineTotal   += extra * item.qty;
+            orderTotal        += extra * item.qty;
+          }
+          // Salva referência para uso posterior (stock + choices record)
+          choice._validItem = validItem;
+        }
+      }
+    }
+
+    // Desconto atômico de estoque
     // Produtos normais: comportamento atual.
-    // Combos: baixar estoque de cada filho × quantidade do combo pedido.
+    // Combos: baixar filhos fixos + produtos das escolhas (option groups).
     for (const item of resolvedItems) {
       if (!item.product.is_combo) {
         await Product.deductStock(item.product.id, tenantId, item.qty, client);
       } else {
+        // Filhos fixos
         const children = comboItemsMap[item.product.id];
         for (const child of children) {
           const childQty = parseFloat((parseFloat(child.qty) * item.qty).toFixed(3));
           await Product.deductStock(child.child_product_id, tenantId, childQty, client);
         }
-        // Não desconta estoque do combo em si
+        // Produtos escolhidos nos grupos de opção
+        for (const choice of (item.choices ?? [])) {
+          await Product.deductStock(choice.product_id, tenantId, item.qty, client);
+        }
       }
     }
 
@@ -273,8 +318,8 @@ const createOrder = async (tenantId, {
 
     for (const item of resolvedItems) {
       // Custo unitário:
-      //   Produto normal → cost_price do produto (snapshot no momento da venda)
-      //   Combo → soma dos custos dos filhos × quantidade de cada filho
+      //   Produto normal → cost_price do produto
+      //   Combo → filhos fixos + custo dos produtos escolhidos nos grupos de opção
       let unitCost;
       if (!item.product.is_combo) {
         unitCost = parseFloat(item.product.cost_price) || 0;
@@ -283,6 +328,11 @@ const createOrder = async (tenantId, {
         unitCost = children.reduce((s, c) => {
           return s + (parseFloat(c.cost_price) || 0) * parseFloat(c.qty);
         }, 0);
+        // Soma custo dos produtos escolhidos (option groups)
+        for (const choice of (item.choices ?? [])) {
+          const vi = choice._validItem;
+          if (vi) unitCost += parseFloat(vi.cost_price) || 0;
+        }
         unitCost = parseFloat(unitCost.toFixed(4));
       }
 
@@ -299,6 +349,19 @@ const createOrder = async (tenantId, {
         unitCost,
         totalCost:   parseFloat((unitCost * soldQty).toFixed(2)),
       }, client);
+
+      // Grava escolhas dos grupos de opção (necessário para reverter insumos no cancelamento)
+      if (orderItem?.id && item.product.is_combo && (item.choices ?? []).length > 0) {
+        for (const choice of item.choices) {
+          const vi = choice._validItem;
+          if (!vi) continue;
+          await client.query(
+            `INSERT INTO order_item_combo_choices (order_item_id, group_id, product_id, extra_price)
+             VALUES ($1, $2, $3, $4)`,
+            [orderItem.id, choice.group_id, choice.product_id, parseFloat(vi.extra_price) || 0]
+          );
+        }
+      }
 
       // Salva complementos selecionados para este item
       if (item.addons?.length && orderItem?.id) {
@@ -354,6 +417,30 @@ const createOrder = async (tenantId, {
           source:      'auto',
         }).catch(() => {}); // incidente é melhor-esforço, não pode quebrar o fluxo
       });
+    }
+
+    // Fase 2 — Aprende endereço do cliente após cada pedido (fire-and-forget)
+    // Faz UPSERT em tenant_clients: cria se novo, atualiza address/coords se existir.
+    // Condição: delivery com telefone e pelo menos endereço textual ou GPS.
+    if (customerPhone && deliveryType === 'delivery' && (customerAddress || (deliveryLat && deliveryLng))) {
+      const normPhone = normalizePhone(customerPhone);
+      const newCoords = (deliveryLat && deliveryLng)
+        ? JSON.stringify({ lat: parseFloat(deliveryLat), lng: parseFloat(deliveryLng) })
+        : null;
+      // UPDATE apenas — compara por dígitos para lidar com qualquer formatação armazenada.
+      // Não faz INSERT: clientes novos são criados pelo modal (createCustomer).
+      // COALESCE preserva valor existente quando novo é null.
+      db.query(
+        `UPDATE tenant_clients
+         SET address    = COALESCE($3, address),
+             coords     = COALESCE($4::jsonb, coords),
+             name       = COALESCE($2, name),
+             updated_at = NOW()
+         WHERE tenant_id = $1
+           AND regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g') = $5
+           AND $5 <> ''`,
+        [tenantId, customerName || null, customerAddress || null, newCoords, normPhone]
+      ).catch(() => {});
     }
 
     // Aplica cashback para pedidos manuais (fire-and-forget)
@@ -446,16 +533,44 @@ const createExternalOrder = async (tenantId, {
       [order.id, externalId]
     );
 
+    // Pré-carrega catálogo para tentar match de custo por nome
+    // Normaliza: minúsculas, sem acentos, sem espaços duplos
+    const { rows: catalog } = await client.query(
+      `SELECT id, name, cost_price FROM products
+       WHERE tenant_id = $1 AND active = true AND cost_price > 0`,
+      [tenantId]
+    );
+    const normalize = (s) => (s ?? '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, ' ').trim();
+
+    const findCost = (itemName) => {
+      const needle = normalize(itemName);
+      // 1. Match exato
+      let p = catalog.find((c) => normalize(c.name) === needle);
+      // 2. Match por inclusão (nome do catálogo contido no item ou vice-versa)
+      if (!p) p = catalog.find((c) => {
+        const cn = normalize(c.name);
+        return needle.includes(cn) || cn.includes(needle);
+      });
+      return p ? parseFloat(p.cost_price) : 0;
+    };
+
     for (const item of items) {
+      const qty      = parseInt(item.quantity, 10) || 1;
+      const unitCost = findCost(item.name ?? '');
       await Order.createItem({
         orderId:     order.id,
         productId:   null,
         productName: String(item.name ?? 'Item').substring(0, 200),
-        quantity:    parseInt(item.quantity, 10) || 1,
+        quantity:    qty,
         weightKg:    null,
         unitPrice:   parseFloat(item.unitPrice) || 0,
-        total:       parseFloat(item.total ?? item.unitPrice * (item.quantity || 1)) || 0,
+        total:       parseFloat(item.total ?? item.unitPrice * qty) || 0,
         notes:       item.notes ?? null,
+        unitCost,
+        totalCost:   parseFloat((unitCost * qty).toFixed(2)),
       }, client);
     }
 
@@ -535,12 +650,14 @@ const updateStatus = async (id, tenantId, status) => {
 
 /**
  * Cancela o pedido e devolve estoque se ja estava em producao.
+ * Se insumos_deducted = true, reverte também os insumos (inclui filhos de combos).
+ * @param {string|null} reason - Motivo do cancelamento (armazenado em orders.cancel_reason)
  */
-const cancelOrder = async (id, tenantId) => {
+const cancelOrder = async (id, tenantId, reason = null) => {
   const order = await Order.findById(id, tenantId);
   if (!order) throw new AppError('Pedido nao encontrado.', 404);
 
-  const updated = await Order.updateStatus(id, tenantId, 'cancelled');
+  const updated = await Order.updateStatus(id, tenantId, 'cancelled', reason);
 
   if (['confirmed', 'preparing', 'ready'].includes(order.status)) {
     const client = await db.getClient();
@@ -566,6 +683,13 @@ const cancelOrder = async (id, tenantId) => {
       throw err;
     } finally {
       client.release();
+    }
+
+    // Reverte insumos se foram debitados — essencial para combos cujos filhos
+    // debitam insumos.qty_in_stock, não products.stock_qty
+    if (order.insumos_deducted) {
+      const { revertForOrder } = require('../insumos/insumos.service');
+      await revertForOrder(tenantId, id);
     }
   }
 

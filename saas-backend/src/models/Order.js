@@ -185,7 +185,7 @@ class Order {
    * Atualiza o status do pedido validando a máquina de estados.
    * Lança AppError 400 se a transição for inválida.
    */
-  static async updateStatus(id, tenantId, newStatus, dbClient = db) {
+  static async updateStatus(id, tenantId, newStatus, cancelReason = null, dbClient = db) {
     // Busca status atual
     const { rows: current } = await dbClient.query(
       `SELECT status FROM orders WHERE id = $1 AND tenant_id = $2`,
@@ -223,10 +223,12 @@ class Order {
 
     const { rows } = await dbClient.query(
       `UPDATE orders
-       SET status = $3, updated_at = NOW()
+       SET status = $3,
+           cancel_reason = CASE WHEN $3 = 'cancelled' THEN $4 ELSE cancel_reason END,
+           updated_at = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
-      [id, tenantId, newStatus]
+      [id, tenantId, newStatus, cancelReason ?? null]
     );
     return rows[0];
   }

@@ -117,16 +117,106 @@ async function forwardGeocode(query) {
   } catch { return []; }
 }
 
+// ── Autocomplete de endereço ──────────────────────────────────
+// Campo único "Digite seu endereço..." com sugestões do Photon (Komoot).
+// Seleção aplica rua, número, bairro e coords em um clique.
+
+function AddressAutocomplete({ value, onChange, onSelect }) {
+  const [query,       setQuery]       = useState(value ?? '');
+  const [suggestions, setSuggestions] = useState([]);
+  const [open,        setOpen]        = useState(false);
+  const [loading,     setLoading]     = useState(false);
+  const timerRef = useRef(null);
+  const wrapRef  = useRef(null);
+
+  // Sincroniza value externo (quando applySuggestion preenche street)
+  useEffect(() => { setQuery(value ?? ''); }, [value]);
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    const handler = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleChange = (e) => {
+    const val = e.target.value;
+    setQuery(val);
+    onChange(val);
+    clearTimeout(timerRef.current);
+    if (val.trim().length < 4) { setSuggestions([]); setOpen(false); return; }
+    setLoading(true);
+    timerRef.current = setTimeout(async () => {
+      const results = await forwardGeocode(val);
+      setSuggestions(results.slice(0, 5));
+      setOpen(results.length > 0);
+      setLoading(false);
+    }, 400);
+  };
+
+  const handleSelect = (s) => {
+    setQuery(s.road ? [s.road, s.number].filter(Boolean).join(', ') : s.display);
+    onChange(s.road || s.display || '');
+    setSuggestions([]);
+    setOpen(false);
+    onSelect(s);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none">
+          {loading ? '⏳' : '🔍'}
+        </span>
+        <input
+          type="text"
+          placeholder="Digite o endereço... Ex: Rua Picoral 123"
+          value={query}
+          onChange={handleChange}
+          onFocus={() => suggestions.length > 0 && setOpen(true)}
+          className="input w-full pl-8 text-sm"
+          autoComplete="off"
+        />
+        {query && (
+          <button type="button" onClick={() => { setQuery(''); onChange(''); setSuggestions([]); setOpen(false); }}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs">✕</button>
+        )}
+      </div>
+      {open && suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-gray-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              type="button"
+              onMouseDown={() => handleSelect(s)}
+              className="w-full text-left px-3 py-2.5 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
+            >
+              <p className="text-sm text-white font-medium truncate">
+                {s.road ? [s.road, s.number].filter(Boolean).join(', ') : s.display}
+              </p>
+              {s.suburb && (
+                <p className="text-xs text-gray-500 truncate">{s.suburb}</p>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Map address picker (overlay dentro do modal) ──────────────
 
 // Fallback seguro: Porto Alegre — usado apenas se o restaurante não configurou sua localização
 // e o navegador negou geolocalização. Nunca deve ser um endereço pessoal.
 const MAP_FALLBACK_CENTER = [-51.2177, -30.0346]; // Porto Alegre, RS
 
-function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter }) {
-  const initialCenter = restaurantCenter ?? MAP_FALLBACK_CENTER;
-  const [mapCenter,    setMapCenter]    = useState(initialCenter);
-  const [markerPos,    setMarkerPos]    = useState(initialCenter);
+// clientCenter: [lng, lat] das coords salvas do cliente — tem prioridade sobre restaurantCenter
+function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter, clientCenter }) {
+  // Prioridade: coords salvas do cliente > restaurante > fallback Porto Alegre
+  const bestCenter   = clientCenter ?? restaurantCenter ?? MAP_FALLBACK_CENTER;
+  const [mapCenter,    setMapCenter]    = useState(bestCenter);
+  const [markerPos,    setMarkerPos]    = useState(bestCenter);
   const [loading,      setLoading]      = useState(false);
   const [previewRoad,  setPreviewRoad]  = useState(initialStreet || '');
   const [previewNum,   setPreviewNum]   = useState('');
@@ -142,9 +232,9 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
   const mapRef     = useRef(null);
   const searchTimer = useRef(null);
 
-  // Se não há centro do restaurante, tenta geolocalização do navegador
+  // Se não há centro do restaurante nem do cliente, tenta geolocalização do navegador
   useEffect(() => {
-    if (restaurantCenter) return;
+    if (restaurantCenter || clientCenter) return;
     navigator.geolocation?.getCurrentPosition(
       ({ coords: geo }) => {
         const pos = [geo.longitude, geo.latitude];
@@ -153,7 +243,7 @@ function MapAddressPicker({ initialStreet, onConfirm, onClose, restaurantCenter 
       },
       () => {} // fallback mantém Porto Alegre
     );
-  }, [restaurantCenter]);
+  }, [restaurantCenter, clientCenter]);
 
   const doGeocode = useCallback(async (lng, lat) => {
     setLoading(true);
@@ -489,9 +579,11 @@ function StepCustomer({
                         {c.name ?? c.customer_name}
                       </p>
                       {isVip && <span className="text-[8px] text-yellow-400">★</span>}
+                      {c.saved_coords && <span title="Localização GPS salva" className="text-[8px] text-green-400">📍</span>}
                     </div>
                     <p className="text-[10px] text-gray-600 leading-none mt-0.5">
                       {orders} pedido{orders !== 1 ? 's' : ''}
+                      {c.saved_coords && <span className="text-green-600"> · GPS</span>}
                     </p>
                   </div>
                 </button>
@@ -575,8 +667,14 @@ function StepCustomer({
                 {suggestions.map((s, i) => (
                   <button key={i} onMouseDown={() => applySuggestion(s)}
                     className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors">
-                    <p className="text-sm text-gray-200 font-medium">{s.name ?? s.customer_name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm text-gray-200 font-medium">{s.name ?? s.customer_name}</p>
+                      {s.saved_coords && (
+                        <span title="Localização GPS salva" className="text-[10px] text-green-400 bg-green-500/15 border border-green-500/25 px-1 py-0.5 rounded font-bold">📍GPS</span>
+                      )}
+                    </div>
                     {(s.phone ?? s.customer_phone) && <p className="text-xs text-gray-500">{s.phone ?? s.customer_phone}</p>}
+                    {s.address && <p className="text-xs text-gray-600 truncate">{s.address}</p>}
                   </button>
                 ))}
               </motion.div>
@@ -1097,18 +1195,46 @@ function StepPayment({
                 </div>
               )}
 
+              {/* ── Autocomplete de endereço — busca enquanto digita ── */}
+              <AddressAutocomplete
+                value={street}
+                onChange={(val) => setStreet(val)}
+                onSelect={({ road, number, suburb, allSuburbs, lat, lng }) => {
+                  setStreet(road);
+                  if (number) setStreetNumber(number);
+                  // Centra o mapa nas coordenadas encontradas
+                  if (lat && lng) {
+                    const coords = [lng, lat];
+                    setDeliveryCoords(coords);
+                    setClientMapCenter(coords);
+                  }
+                  // Match de bairro nas zonas
+                  const candidates = [...(allSuburbs || []), suburb].filter(Boolean);
+                  const normed = (s) => s?.toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '') ?? '';
+                  const zones  = tenantZones?.length > 0 ? tenantZones.map((z) => ({ bairro: z.name, taxa: z.fee })) : NEIGHBORHOODS;
+                  let matched = null;
+                  for (const cand of candidates) {
+                    matched = zones.find((z) => normed(z.bairro) === normed(cand));
+                    if (matched) break;
+                  }
+                  if (matched) {
+                    setNeighborhood(matched.bairro);
+                    setDeliveryFee(String(matched.taxa));
+                  } else if (suburb) {
+                    setNeighborhood(suburb);
+                  }
+                }}
+              />
+
               {/* CTA de endereço no mapa — iFood-style */}
               {!street ? (
                 <button type="button" onClick={() => setShowMapPicker(true)}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 border-dashed border-orange-500/40 bg-orange-500/5 hover:bg-orange-500/10 hover:border-orange-500/60 transition-all active:scale-[0.98] group">
-                  <span className="text-2xl shrink-0">📍</span>
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border border-dashed border-white/10 bg-gray-800/40 hover:bg-gray-800/70 hover:border-white/20 transition-all active:scale-[0.98] group">
+                  <span className="text-xl shrink-0">🗺️</span>
                   <div className="text-left min-w-0">
-                    <p className="text-sm font-bold text-orange-400 group-hover:text-orange-300">Escolher endereço no mapa</p>
-                    <p className="text-xs text-gray-500">Arraste o alfinete para o local exato</p>
+                    <p className="text-sm font-bold text-gray-300 group-hover:text-white">Usar o mapa</p>
+                    <p className="text-xs text-gray-600">Arraste o alfinete para o local exato</p>
                   </div>
-                  <svg className="w-4 h-4 text-orange-400/60 shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
                 </button>
               ) : (
                 /* Endereço já selecionado — chip resumo */
@@ -1542,6 +1668,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
   const [tenantZones,        setTenantZones]        = useState(null);  // null = usa NEIGHBORHOODS
   const [tenantZoneType,     setTenantZoneType]     = useState('named');
   const [restaurantCenter,   setRestaurantCenter]   = useState(null);  // [lng, lat]
+  const [clientMapCenter,    setClientMapCenter]    = useState(null);  // [lng, lat] coords salvas do cliente selecionado
   // Cupom
   const [couponCode,         setCouponCode]         = useState('');
   const [couponResult,       setCouponResult]       = useState(null);  // { discount, code, ... }
@@ -1754,6 +1881,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
     const bal = parseFloat(s.cashback_balance ?? 0);
     setCashbackBalance(bal);
     if (bal <= 0) setUseCashback(false);
+
     if (s.address ?? s.customer_address) {
       const s_address = s.address ?? s.customer_address;
       // Tenta separar "Rua X, 123, Complemento" em partes
@@ -1762,11 +1890,22 @@ export default function NewOrderModal({ onClose, onCreated }) {
       setStreetNumber(parts[1] ?? '');
       setComplement(parts.slice(2).join(', '));
     }
+
     // Restaura bairro e taxa do último pedido do cliente
     if (s.neighborhood) {
       setNeighborhood(s.neighborhood);
       if (s.delivery_fee != null) setDeliveryFee(String(s.delivery_fee));
     }
+
+    // ── Fase 1: aplica GPS salvo do cliente ───────────────────────
+    // saved_coords: { lat, lng } — converte para [lng, lat] (formato GeoJSON/Mapbox)
+    const sc = s.saved_coords;
+    if (sc?.lat && sc?.lng) {
+      const coords = [parseFloat(sc.lng), parseFloat(sc.lat)];
+      setDeliveryCoords(coords);        // pré-preenche pin do mapa
+      setClientMapCenter(coords);       // centra o mapa nas coords do cliente
+    }
+
     setShowSug(false);
     setSuggestions([]);
   };
@@ -1966,6 +2105,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
           <MapAddressPicker
             initialStreet={street}
             restaurantCenter={restaurantCenter}
+            clientCenter={clientMapCenter}
             onClose={() => setShowMapPicker(false)}
             onConfirm={({ street: s, streetNumber: sn, suburb, allSuburbs = [], coords: mapCoords }) => {
               // Salva coordenadas do pin para persistir no pedido

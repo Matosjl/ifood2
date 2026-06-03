@@ -114,6 +114,7 @@ async function searchDirect(tenantId, rawName) {
  * Encontra o melhor match pra um item da nota.
  *
  * Estratégia de dois passes:
+ *   Passo 0 — alias salvo pelo usuário (score 1.0, sem perguntar)
  *   Passo 1 — comparação direta (nome cru): detecta nomes quase idênticos
  *   Passo 2 — comparação normalizada (sem números/unidades): detecta matches semânticos
  *
@@ -124,6 +125,33 @@ async function searchDirect(tenantId, rawName) {
  */
 async function findMatch(tenantId, itemName) {
   const normalized = normalize(itemName);
+
+  // ── Passo 0: alias salvo (match imediato, score 1.0) ─────────
+  // Se o usuário já casou esse nome antes, reutiliza sem perguntar.
+  if (normalized) {
+    const { rows: [alias] } = await db.query(
+      `SELECT match_type, match_id, match_name FROM ocr_aliases
+       WHERE tenant_id = $1 AND ocr_raw = $2 LIMIT 1`,
+      [tenantId, normalized]
+    );
+    if (alias) {
+      // Incrementa contador de uso (fire-and-forget)
+      db.query(
+        `UPDATE ocr_aliases SET used_count = used_count + 1, updated_at = NOW()
+         WHERE tenant_id = $1 AND ocr_raw = $2`,
+        [tenantId, normalized]
+      ).catch(() => {});
+      return {
+        action:      'auto',
+        match:       { id: alias.match_id, name: alias.match_name },
+        match_type:  alias.match_type,
+        score:       1.0,
+        suggestions: [],
+        normalized,
+        from_alias:  true,
+      };
+    }
+  }
 
   // ── Passo 1: comparação direta ────────────────────────────────
   const direct = await searchDirect(tenantId, itemName);

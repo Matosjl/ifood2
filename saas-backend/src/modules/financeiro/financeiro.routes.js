@@ -22,4 +22,6 @@ router.put('/expenses/:id',       ctrl.updateExpense);
 router.patch('/expenses/:id/pay', ctrl.payExpense);
 router.delete('/expenses/:id',    ctrl.deleteExpense);
 
+router.get('/audit-log', ctrl.getAuditLog);
+
 module.exports = router;

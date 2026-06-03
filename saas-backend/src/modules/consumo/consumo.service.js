@@ -245,6 +245,10 @@ const getHistorico = async (tenantId, { mes, page = 1, limit = 50 } = {}) => {
  * - Perdas de insumos (waste_logs)
  * - Cancelamentos (orders WHERE status='cancelled')
  * - Diferença de caixa (cash_registers WHERE discrepancy != 0)
+ * - CMV Teórico vs Real (desvio operacional)
+ * - Produtos vendidos sem custo cadastrado
+ * - Taxas de cartão estimadas (crédito/débito)
+ * - Fiado em aberto > 30 dias
  */
 const getVazamentos = async (tenantId, mes) => {
   // mes = 'YYYY-MM', padrão = mês atual
@@ -364,13 +368,102 @@ const getVazamentos = async (tenantId, mes) => {
 
   const faturamento = parseFloat(fat.faturamento) || 1; // evita divisão por zero
 
+  // ── CMV Teórico vs Real ────────────────────────────────────
+  // CMV Teórico = o que deveria ter sido consumido (ficha técnica × qtd vendida)
+  // CMV Real    = o que foi registrado nos order_items (total_cost snapshot)
+  // Desvio      = Real − Teórico  (positivo = perdas não capturadas)
+  const { rows: [cmvRows] } = await db.query(
+    `SELECT
+       -- CMV Real: snapshot gravado nos itens no momento da venda
+       COALESCE(SUM(oi.total_cost), 0)::float AS cmv_real,
+       -- CMV Teórico: qty_per_unit × quantidade_vendida × cost_per_unit atual do insumo
+       COALESCE(SUM(
+         CASE WHEN oi.weight_kg IS NOT NULL
+              THEN oi.weight_kg * pi.qty_per_unit * i.cost_per_unit
+              ELSE oi.quantity  * pi.qty_per_unit * i.cost_per_unit
+         END
+       ), 0)::float AS cmv_teorico
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     LEFT JOIN product_insumos pi
+       ON pi.product_id = oi.product_id AND pi.tenant_id = o.tenant_id
+     LEFT JOIN insumos i ON i.id = pi.insumo_id
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready','delivered')
+       AND o.created_at >= $2::date
+       AND o.created_at < ($2::date + INTERVAL '1 month')`,
+    [tenantId, inicio]
+  );
+
+  const cmvReal    = parseFloat(cmvRows.cmv_real    || 0);
+  const cmvTeorico = parseFloat(cmvRows.cmv_teorico || 0);
+  // Desvio: quanto consumiu a mais que o previsto pelas fichas técnicas
+  const desvio_cmv = parseFloat(Math.max(0, cmvReal - cmvTeorico).toFixed(2));
+
+  // ── Produtos vendidos sem custo cadastrado ────────────────
+  // Receita gerada por produtos com cost_price = 0 e sem ficha técnica
+  // = lucro potencialmente inflado (CMV = 0, mas real é desconhecido)
+  const { rows: [semCusto] } = await db.query(
+    `SELECT
+       COUNT(DISTINCT oi.product_id)::int  AS produtos,
+       COALESCE(SUM(oi.total), 0)::float   AS receita
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     JOIN products p ON p.id = oi.product_id AND p.tenant_id = o.tenant_id
+     WHERE o.tenant_id = $1
+       AND o.status IN ('ready','delivered')
+       AND o.created_at >= $2::date
+       AND o.created_at < ($2::date + INTERVAL '1 month')
+       AND p.cost_price = 0
+       AND NOT EXISTS (
+         SELECT 1 FROM product_insumos pi2
+         WHERE pi2.product_id = oi.product_id AND pi2.tenant_id = o.tenant_id
+       )`,
+    [tenantId, inicio]
+  );
+
+  // ── Taxas de cartão estimadas ─────────────────────────────
+  // Crédito ≈ 2.99%, Débito ≈ 1.49%, Voucher ≈ 1.99% — usamos 2.5% como estimativa conservadora
+  const TAXA_CARTAO = 0.025;
+  const { rows: [cartao] } = await db.query(
+    `SELECT
+       COALESCE(SUM(CASE WHEN payment_method = 'credit'  THEN total ELSE 0 END), 0)::float AS credito,
+       COALESCE(SUM(CASE WHEN payment_method = 'debit'   THEN total ELSE 0 END), 0)::float AS debito,
+       COALESCE(SUM(CASE WHEN payment_method = 'voucher' THEN total ELSE 0 END), 0)::float AS voucher
+     FROM orders
+     WHERE tenant_id = $1
+       AND status IN ('ready','delivered')
+       AND created_at >= $2::date
+       AND created_at < ($2::date + INTERVAL '1 month')`,
+    [tenantId, inicio]
+  );
+
+  const baseCartao   = parseFloat(cartao.credito) + parseFloat(cartao.debito) + parseFloat(cartao.voucher);
+  const taxaCartao   = parseFloat((baseCartao * TAXA_CARTAO).toFixed(2));
+
+  // ── Fiado em aberto > 30 dias ─────────────────────────────
+  const { rows: [fiado] } = await db.query(
+    `SELECT
+       COALESCE(SUM(fc.valor), 0)::float AS total,
+       COUNT(*)::int                      AS registros
+     FROM fiado_compras fc
+     WHERE fc.tenant_id = $1
+       AND fc.status = 'pendente'
+       AND fc.created_at < NOW() - INTERVAL '30 days'`,
+    [tenantId]
+  );
+
   const totalCI      = parseFloat(ci.total);
   const totalPerdas  = parseFloat(perdas.total);
   const totalCancel  = parseFloat(cancel.total);
   const totalCaixa   = parseFloat(caixa.total);
-  const totalGeral   = parseFloat((totalCI + totalPerdas + totalCancel + totalCaixa).toFixed(2));
+  const totalFiado   = parseFloat(fiado.total || 0);
+  const totalSemCusto = 0; // não é perda direta, é risco — informativo
+  const totalGeral   = parseFloat((
+    totalCI + totalPerdas + totalCancel + totalCaixa + desvio_cmv + taxaCartao
+  ).toFixed(2));
 
-  const pct = (v) => parseFloat(((v / faturamento) * 100).toFixed(1));
+  const pct   = (v) => parseFloat(((v / faturamento) * 100).toFixed(1));
   const delta = (atual, anterior) => parseFloat((atual - anterior).toFixed(2));
 
   return {
@@ -378,8 +471,50 @@ const getVazamentos = async (tenantId, mes) => {
     faturamento: parseFloat(faturamento.toFixed(2)),
     total: totalGeral,
     total_pct: pct(totalGeral),
-    delta_anterior: delta(totalGeral, parseFloat(ciAnterior.total) + parseFloat(perdasAnterior.total) + parseFloat(cancelAnterior.total) + parseFloat(caixaAnterior.total)),
+    delta_anterior: delta(
+      totalGeral,
+      parseFloat(ciAnterior.total) + parseFloat(perdasAnterior.total) +
+      parseFloat(cancelAnterior.total) + parseFloat(caixaAnterior.total)
+    ),
     categorias: {
+      // ── Desvio CMV (Teórico vs Real) ─────────────────────
+      desvio_cmv: {
+        total:       desvio_cmv,
+        pct:         pct(desvio_cmv),
+        delta:       0,
+        registros:   0,
+        cmv_real:    parseFloat(cmvReal.toFixed(2)),
+        cmv_teorico: parseFloat(cmvTeorico.toFixed(2)),
+        // Negativo = sistema está mais barato que ficha técnica (fichas desatualizadas)
+        // Positivo = está consumindo mais que o esperado (desvio real)
+      },
+      // ── Produtos sem custo ────────────────────────────────
+      produtos_sem_custo: {
+        total:     0, // risco, não perda calculável diretamente
+        pct:       0,
+        delta:     0,
+        registros: parseInt(semCusto.produtos || 0),
+        receita_afetada: parseFloat((semCusto.receita || 0).toFixed(2)),
+        // Quanto de receita tem CMV desconhecido (pode estar vendendo no prejuízo)
+      },
+      // ── Taxas de cartão ──────────────────────────────────
+      taxas_cartao: {
+        total:     taxaCartao,
+        pct:       pct(taxaCartao),
+        delta:     0,
+        registros: 0,
+        base_cartao: parseFloat(baseCartao.toFixed(2)),
+        taxa_pct:  2.5,
+      },
+      // ── Fiado vencido > 30 dias ──────────────────────────
+      fiado_vencido: {
+        total:     totalFiado,
+        pct:       pct(totalFiado),
+        delta:     0,
+        registros: parseInt(fiado.registros || 0),
+        // Não entra no totalGeral (não é perda ainda, é risco de inadimplência)
+      },
+      // ── Vazamentos operacionais existentes ───────────────
       consumo_interno: {
         total:      parseFloat(totalCI.toFixed(2)),
         pct:        pct(totalCI),

@@ -228,15 +228,54 @@ async function confirm(tenantId, id, userId = null) {
         insumoId = item.match_id;
         productName = item.match_name;
 
-        // UPDATE insumos.qty_in_stock + cost_per_unit (média ponderada simples se quiser)
+        const novoUnitCost = parseFloat(r.valor_unit || 0);
+
+        // UPDATE insumos: estoque + custo unitário
         await client.query(
           `UPDATE insumos
-           SET qty_in_stock = qty_in_stock + $1,
+           SET qty_in_stock  = qty_in_stock + $1,
                cost_per_unit = CASE WHEN $2 > 0 THEN $2 ELSE cost_per_unit END,
-               updated_at = NOW()
+               updated_at    = NOW()
            WHERE id = $3 AND tenant_id = $4`,
-          [qty, parseFloat(r.valor_unit || 0), insumoId, tenantId]
+          [qty, novoUnitCost, insumoId, tenantId]
         );
+
+        // Propagação de custo: recalcula cost_price dos produtos que usam este insumo.
+        // Soma cost_per_unit × qty_per_unit de todos os insumos da ficha técnica.
+        // Só atualiza se o produto tem ficha técnica completa (todos os insumos com custo > 0).
+        // Fire-and-forget: falha aqui não desfaz o estoque.
+        if (novoUnitCost > 0) {
+          db.query(
+            `UPDATE products p
+             SET cost_price        = subq.novo_custo,
+                 cost_price_source = 'auto_propagation',
+                 updated_at        = NOW()
+             FROM (
+               SELECT pi.product_id,
+                      ROUND(SUM(pi.qty_per_unit * i.cost_per_unit)::numeric, 4) AS novo_custo
+               FROM product_insumos pi
+               JOIN insumos i ON i.id = pi.insumo_id
+               WHERE pi.tenant_id = $2
+                 AND pi.insumo_id = $1
+                 -- Só propaga se nenhum insumo da ficha tem custo = 0
+                 AND NOT EXISTS (
+                   SELECT 1 FROM product_insumos pi2
+                   JOIN insumos i2 ON i2.id = pi2.insumo_id
+                   WHERE pi2.product_id = pi.product_id
+                     AND pi2.tenant_id = $2
+                     AND i2.cost_per_unit = 0
+                 )
+               GROUP BY pi.product_id
+             ) subq
+             -- GUARD: nunca sobrescreve custo definido manualmente pelo dono.
+             -- 'manual' = digitado na UI | 'precificador' = aprovado consciente
+             -- Só atualiza se o custo foi definido por propagação anterior ou nunca definido (= 0)
+             WHERE p.id = subq.product_id
+               AND p.tenant_id = $2
+               AND p.cost_price_source NOT IN ('manual', 'precificador')`,
+            [insumoId, tenantId]
+          ).catch(() => {});
+        }
       } else if (item.match_type === 'product' && item.match_id) {
         productId = item.match_id;
         productName = item.match_name;
@@ -309,6 +348,44 @@ async function confirm(tenantId, id, userId = null) {
       eventService.emit?.(tenantId, 'receipt:confirmed', sanitize(updatedPending));
       eventService.emit?.(tenantId, 'expense:created', expense);
     } catch {}
+
+    // ── OCR Aliases: aprende o match para futuras notas ───────────
+    // Salva alias APENAS para itens que o USUÁRIO aprovou (action='auto' E from_alias !== true).
+    // Itens que já vieram de alias (from_alias=true) não recriam — já existem.
+    // Itens que o fuzzy casou automaticamente E o usuário confirmou a nota = aprender.
+    // Itens 'ask' que não foram resolvidos = não salvar (não chegam aqui, são bloqueados pelo P2).
+    // Fire-and-forget — nunca bloqueia o retorno da confirmação.
+    const { normalize: normFn } = require('./matcher.service');
+    if (normFn) {
+      const aliasInserts = matched
+        .filter((m) =>
+          m.match_id && m.match_type && m.raw?.descricao &&
+          m.action === 'auto' &&        // só itens com match confirmado
+          !m.from_alias                 // não recriar aliases que já existem
+        )
+        .map((m) => ({
+          ocr_raw:    normFn(m.raw.descricao),
+          match_type: m.match_type,
+          match_id:   m.match_id,
+          match_name: m.match_name || '',
+        }))
+        .filter((a) => a.ocr_raw.length > 0);
+
+      if (aliasInserts.length > 0) {
+        db.query(
+          `INSERT INTO ocr_aliases (tenant_id, ocr_raw, match_type, match_id, match_name, used_count)
+           SELECT $1, a.ocr_raw, a.match_type, a.match_id::uuid, a.match_name, 1
+           FROM jsonb_to_recordset($2::jsonb) AS a(ocr_raw text, match_type text, match_id text, match_name text)
+           ON CONFLICT (tenant_id, ocr_raw)
+           DO UPDATE SET
+             match_id   = EXCLUDED.match_id,
+             match_name = EXCLUDED.match_name,
+             used_count = ocr_aliases.used_count + 1,
+             updated_at = NOW()`,
+          [tenantId, JSON.stringify(aliasInserts)]
+        ).catch(() => {});
+      }
+    }
 
     logger.info('nota confirmada', {
       tenantId, pendingId: id, expenseId: expense.id,

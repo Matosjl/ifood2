@@ -643,180 +643,245 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
     await onPay(deliveryId, method);
   };
 
+  // Timeline de status para entrega ativa
+  const statusSteps = [
+    { key: 'accepted',  label: 'Aceito',   icon: '✓' },
+    { key: 'picked_up', label: 'Coletado', icon: '📦' },
+    { key: 'delivered', label: 'Entregue', icon: '🏠' },
+  ];
+  const stepIndex = dstatus === 'delivered' ? 2 : dstatus === 'picked_up' ? 1 : 0;
+
   return (
     <>
-      {/* Pay Modal */}
       {showPayModal && (
-        <PayModal
-          delivery={delivery}
-          onConfirm={handlePayConfirm}
-          onClose={() => setShowPayModal(false)}
-        />
+        <PayModal delivery={delivery} onConfirm={handlePayConfirm} onClose={() => setShowPayModal(false)} />
       )}
 
-      <div className="bg-white rounded-2xl shadow-sm border overflow-hidden mb-3">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b bg-gray-50">
-          <div className="flex items-center gap-2">
-            {delivery.order_number ? (
-              <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded-full">
-                #{delivery.order_number}
-              </span>
-            ) : (
-              <span className="bg-gray-400 text-white text-xs font-black px-2 py-0.5 rounded-full">#—</span>
-            )}
-            <span className="text-xs text-gray-500">{delivery.restaurant_name}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {type === 'active' && !isPaid && (
-              <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Icon d={ICONS.alert} size={12} /> COBRAR
-              </span>
-            )}
-            {type === 'active' && isPaid && (
-              <span className="text-xs font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Icon d={ICONS.check} size={12} /> PAGO
-              </span>
-            )}
-          </div>
-        </div>
+      <div className="bg-white rounded-2xl shadow-[0_2px_16px_rgba(0,0,0,0.08)] overflow-hidden mb-3 border border-gray-100">
 
-        <div className="px-4 py-3 space-y-2">
-          {/* Cliente */}
-          <div>
-            <p className="font-semibold text-gray-800 text-sm">{delivery.customer_name || 'Cliente'}</p>
+        {/* ── Topo do card ─────────────────────────── */}
+        <div className="px-4 pt-4 pb-3">
+          <div className="flex items-start justify-between gap-2">
+            {/* Ícone + identificação */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-violet-100 flex items-center justify-center text-xl shrink-0">
+                🛵
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-gray-900 text-sm leading-tight">
+                  {delivery.customer_name || 'Cliente'}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  #{delivery.order_number || '—'} · {delivery.restaurant_name}
+                </p>
+              </div>
+            </div>
+
+            {/* Badge de pagamento */}
+            <div className="shrink-0">
+              {type === 'active' && !isPaid && (
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">
+                  A cobrar
+                </span>
+              )}
+              {type === 'active' && isPaid && (
+                <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-full">
+                  ✓ Pago
+                </span>
+              )}
+              {type === 'available' && delivery.driver_fee > 0 && (
+                <span className="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-1 rounded-full">
+                  {fmt(delivery.driver_fee)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ── Rota: restaurante → cliente ────────── */}
+          <div className="mt-3 flex items-stretch gap-2">
+            <div className="flex flex-col items-center pt-1">
+              <div className="w-2 h-2 rounded-full bg-violet-500" />
+              <div className="w-px flex-1 bg-violet-200 my-1" />
+              <div className="w-2 h-2 rounded-full bg-gray-400" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <div>
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Origem</p>
+                <p className="text-xs font-medium text-gray-700">{delivery.restaurant_name || '—'}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Destino</p>
+                <p className="text-xs font-medium text-gray-700">
+                  {delivery.customer_address || 'Endereço não informado'}
+                  {delivery.neighborhood ? ` · ${delivery.neighborhood}` : ''}
+                </p>
+              </div>
+            </div>
+            {/* Telefone */}
             {delivery.customer_phone && (
               <a href={`tel:${delivery.customer_phone}`}
-                className="flex items-center gap-1 text-xs text-blue-600">
-                <Icon d={ICONS.phone} size={12} /> {delivery.customer_phone}
+                className="shrink-0 w-9 h-9 rounded-full bg-violet-50 border border-violet-200 flex items-center justify-center text-violet-600 self-center">
+                <Icon d={ICONS.phone} size={16} />
               </a>
             )}
           </div>
 
-          {/* Endereço */}
-          {delivery.customer_address && (
-            <div className="flex items-start gap-1.5 bg-blue-50 rounded-xl px-3 py-2">
-              <Icon d={ICONS.map} size={14} cls="text-blue-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs font-medium text-blue-800">{delivery.customer_address}</p>
-                {delivery.neighborhood && (
-                  <p className="text-xs text-blue-600">{delivery.neighborhood}</p>
-                )}
-              </div>
+          {/* ── Timeline de status (entrega ativa) ─── */}
+          {type === 'active' && (
+            <div className="mt-4 flex items-center justify-between">
+              {statusSteps.map((step, i) => {
+                const done    = i <= stepIndex;
+                const current = i === stepIndex;
+                return (
+                  <div key={step.key} className="flex items-center flex-1 last:flex-none">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-all
+                        ${current ? 'bg-violet-600 text-white shadow-[0_0_0_3px_rgba(124,58,237,0.2)]' :
+                          done    ? 'bg-violet-600 text-white' :
+                                    'bg-gray-100 text-gray-400'}`}>
+                        {done ? (current ? step.icon : '✓') : step.icon}
+                      </div>
+                      <span className={`text-[9px] font-semibold leading-none ${
+                        done ? 'text-violet-600' : 'text-gray-400'
+                      }`}>{step.label}</span>
+                    </div>
+                    {i < statusSteps.length - 1 && (
+                      <div className={`flex-1 h-0.5 mx-1 mb-4 rounded-full ${
+                        i < stepIndex ? 'bg-violet-600' : 'bg-gray-200'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {/* Valores */}
-          <div className="flex items-center justify-between">
-            {type === 'active' && delivery.driver_fee > 0 && (
-              <span className="text-green-700 font-black text-base">
-                Seu ganho: {fmt(delivery.driver_fee)}
-              </span>
-            )}
-            <span className="text-gray-500 text-sm ml-auto">
-              Total: {fmt(delivery.total)}
-            </span>
+          {/* ── Status label ─────────────────────── */}
+          <div className="mt-3 flex items-center gap-1.5">
+            <div className={`w-2 h-2 rounded-full animate-pulse ${
+              dstatus === 'picked_up' ? 'bg-orange-500' :
+              dstatus === 'accepted'  ? 'bg-violet-500' :
+              type === 'available'    ? 'bg-blue-500' : 'bg-green-500'
+            }`} />
+            <p className="text-xs text-gray-500">
+              {type === 'available'    ? 'Disponível para aceitar' :
+               dstatus === 'accepted'  ? 'Vá ao restaurante retirar o pedido' :
+               dstatus === 'picked_up' ? 'A caminho do cliente' : 'Entregue'}
+            </p>
           </div>
-
-          {/* Pagamento */}
-          <p className="text-xs text-gray-500">
-            Pagamento: {PAY_LABELS[delivery.payment_method] || delivery.payment_method || '—'}
-            {delivery.paid_at ? ' · pago ✓' : ' · a cobrar'}
-          </p>
 
           {/* Obs */}
           {delivery.notes && (
-            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1">
+            <p className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
               💬 {delivery.notes}
             </p>
-          )}
-
-          {/* Mini mapa (entregas ativas) */}
-          {type === 'active' && (dstatus === 'accepted' || dstatus === 'picked_up') && (
-            <MiniMap delivery={delivery} />
           )}
 
           {/* Itens */}
           {delivery.items?.length > 0 && (
             <button onClick={() => setExpanded((e) => !e)}
-              className="text-xs text-blue-600 underline">
-              {expanded ? 'Ocultar itens' : `Ver ${delivery.items.length} iten(s)`}
+              className="mt-2 text-xs text-violet-600 font-semibold">
+              {expanded ? '▲ Ocultar itens' : `▼ ${delivery.items.length} iten(s)`}
             </button>
           )}
           {expanded && (
-            <ul className="text-xs text-gray-600 space-y-0.5 pl-2 border-l-2 border-blue-200">
+            <ul className="mt-1 text-xs text-gray-600 space-y-0.5 pl-3 border-l-2 border-violet-200">
               {delivery.items.map((it, i) => (
                 <li key={i}>{it.quantity}× {it.productName} — {fmt(it.total)}</li>
               ))}
             </ul>
           )}
+
+          {/* Mini mapa */}
+          {type === 'active' && (dstatus === 'accepted' || dstatus === 'picked_up') && (
+            <div className="mt-3 rounded-xl overflow-hidden">
+              <MiniMap delivery={delivery} />
+            </div>
+          )}
         </div>
 
-        {/* Ações */}
-        <div className="px-4 pb-4 flex gap-2 flex-wrap border-t pt-3">
-          {type === 'available' && (
-            <>
-              <button
-                onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-blue-300 text-blue-700 hover:bg-blue-50"
-              >
-                🗺 Ver rota
-              </button>
-              <button
-                onClick={() => onAccept(delivery.id)}
-                disabled={loading}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-purple-700 text-white disabled:opacity-60"
-              >
-                ✅ Aceitar
-              </button>
-            </>
-          )}
-
-          {type === 'active' && dstatus === 'accepted' && (
-            <>
-              <button
-                onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700"
-              >
-                🏪 Ir ao restaurante
-              </button>
-              <button
-                onClick={() => onPickup(delivery.delivery_id)}
-                disabled={loading}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-blue-600 text-white disabled:opacity-60"
-              >
-                📦 Coletei
-              </button>
-            </>
-          )}
-
-          {type === 'active' && dstatus === 'picked_up' && (
-            <>
-              <button
-                onClick={() => openMaps((delivery.customer_address || '') + ', Torres RS')}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700"
-              >
-                🗺 Ir ao cliente
-              </button>
-
-              {!isPaid && (
-                <button
-                  onClick={() => setShowPayModal(true)}
-                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-yellow-500 to-orange-500 text-white"
-                >
-                  💰 Cobrar
-                </button>
+        {/* ── Barra de valor + ações ────────────────── */}
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
+          {/* Valores */}
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-gray-500">
+              {PAY_LABELS[delivery.payment_method] || delivery.payment_method || '—'}
+              {delivery.paid_at ? ' · pago ✓' : ''}
+            </p>
+            <div className="flex items-center gap-3">
+              {type === 'active' && delivery.driver_fee > 0 && (
+                <span className="text-sm font-black text-violet-700">
+                  +{fmt(delivery.driver_fee)}
+                </span>
               )}
+              <span className="text-xs text-gray-500">Total: {fmt(delivery.total)}</span>
+            </div>
+          </div>
 
-              <button
-                onClick={() => onComplete(delivery.delivery_id)}
-                disabled={loading}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-60"
-              >
-                ✅ Entregue!
-              </button>
-            </>
-          )}
+          {/* Botões de ação */}
+          <div className="flex gap-2">
+            {type === 'available' && (
+              <>
+                <button
+                  onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
+                >
+                  🗺 Ver rota
+                </button>
+                <button
+                  onClick={() => onAccept(delivery.id)}
+                  disabled={loading}
+                  className="flex-[2] py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white disabled:opacity-50 active:scale-95 transition-transform shadow-[0_4px_12px_rgba(124,58,237,0.35)]"
+                >
+                  Aceitar pedido
+                </button>
+              </>
+            )}
+
+            {type === 'active' && dstatus === 'accepted' && (
+              <>
+                <button
+                  onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
+                >
+                  🏪 Ir lá
+                </button>
+                <button
+                  onClick={() => onPickup(delivery.delivery_id)}
+                  disabled={loading}
+                  className="flex-[2] py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white disabled:opacity-50 active:scale-95 transition-transform shadow-[0_4px_12px_rgba(124,58,237,0.35)]"
+                >
+                  📦 Coletei o pedido
+                </button>
+              </>
+            )}
+
+            {type === 'active' && dstatus === 'picked_up' && (
+              <>
+                <button
+                  onClick={() => openMaps((delivery.customer_address || '') + ', Torres RS')}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
+                >
+                  🗺 Rota
+                </button>
+                {!isPaid && (
+                  <button
+                    onClick={() => setShowPayModal(true)}
+                    className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-amber-500 text-white active:scale-95 transition-transform"
+                  >
+                    💰 Cobrar
+                  </button>
+                )}
+                <button
+                  onClick={() => onComplete(delivery.delivery_id)}
+                  disabled={loading}
+                  className="flex-[2] py-2.5 rounded-xl text-sm font-bold bg-emerald-500 text-white disabled:opacity-50 active:scale-95 transition-transform shadow-[0_4px_12px_rgba(16,185,129,0.35)]"
+                >
+                  ✅ Entregue!
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -1069,14 +1134,16 @@ export default function DriverApp() {
       <div className={`fixed left-0 top-0 h-full w-72 bg-white z-50 shadow-2xl transition-transform duration-300 ${
         sideMenu ? 'translate-x-0' : '-translate-x-full'
       }`}>
-        <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-5 py-6">
-          <div className="text-3xl mb-1">🛵</div>
+        <div className="bg-violet-600 px-5 py-6">
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl mb-2">
+            {user.name?.[0]?.toUpperCase() ?? '🛵'}
+          </div>
           <p className="text-white font-bold">{user.name}</p>
-          <p className="text-blue-200 text-sm">{user.email}</p>
+          <p className="text-violet-200 text-sm">{user.email}</p>
         </div>
         <div className="p-4 space-y-2">
           <button onClick={() => { setConnectModal(true); setSideMenu(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-semibold text-sm hover:bg-blue-100">
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-violet-50 text-violet-700 font-semibold text-sm hover:bg-violet-100">
             <Icon d={ICONS.qr} size={18} /> Conectar Restaurante
           </button>
           <button onClick={handleLogout}
@@ -1112,7 +1179,7 @@ export default function DriverApp() {
                 }`}>{connectMsg}</p>
               )}
               <button type="submit"
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-700 text-white font-bold py-3 rounded-xl">
+                className="w-full bg-violet-600 text-white font-bold py-3 rounded-xl shadow-[0_4px_12px_rgba(124,58,237,0.35)]">
                 Conectar
               </button>
             </form>
@@ -1121,37 +1188,62 @@ export default function DriverApp() {
       )}
 
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-700 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setSideMenu(true)} className="text-white">
-            <Icon d={ICONS.menu} size={22} />
+      <div className="bg-violet-600 px-4 pt-4 pb-3 sticky top-0 z-30">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSideMenu(true)}
+              className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-white active:bg-white/25">
+              <Icon d={ICONS.menu} size={20} />
+            </button>
+            <div>
+              <p className="text-violet-200 text-[10px] font-semibold uppercase tracking-wide">Bem-vindo</p>
+              <p className="text-white font-bold text-sm leading-tight">{user.name?.split(' ')[0] ?? 'Entregador'}</p>
+            </div>
+          </div>
+          <button onClick={toggleOnline}
+            className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs font-bold transition-all active:scale-95 ${
+              online
+                ? 'bg-green-400 text-green-900 shadow-[0_2px_8px_rgba(74,222,128,0.4)]'
+                : 'bg-white/15 text-white border border-white/30'
+            }`}>
+            <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-800 animate-pulse' : 'bg-white/60'}`} />
+            {online ? 'Online' : 'Offline'}
           </button>
-          <span className="text-white font-black text-lg">🛵 Driver</span>
         </div>
-        <button onClick={toggleOnline}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-            online
-              ? 'bg-green-400 text-green-900'
-              : 'bg-white/20 text-white border border-white/40'
-          }`}>
-          <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-700 animate-pulse' : 'bg-gray-400'}`} />
-          {online ? 'Online' : 'Offline'}
-        </button>
+
+        {/* Stats rápidos quando online */}
+        {online && stats && (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[
+              { label: 'Hoje', value: fmt(stats.today_earnings ?? 0) },
+              { label: 'Entregas', value: stats.today_count ?? 0 },
+              { label: 'Ativas', value: active.length },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-white/10 rounded-xl px-3 py-2 text-center">
+                <p className="text-white font-black text-sm">{value}</p>
+                <p className="text-violet-200 text-[10px]">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Error banner */}
       {error && (
-        <div className="bg-red-100 border-b border-red-200 px-4 py-2 text-xs text-red-700 flex justify-between">
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-xs text-red-700 flex justify-between items-center">
           <span>{error}</span>
-          <button onClick={() => setError('')} className="font-bold">×</button>
+          <button onClick={() => setError('')} className="font-bold text-red-400 ml-2">×</button>
         </div>
       )}
 
       {/* Offline notice */}
       {!online && tab === 'deliveries' && (
-        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3 text-center">
-          <p className="text-sm text-yellow-800 font-medium">Você está offline</p>
-          <p className="text-xs text-yellow-600">Toque em "Offline" para ficar disponível</p>
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center gap-3">
+          <span className="text-xl shrink-0">⏸️</span>
+          <div>
+            <p className="text-sm text-amber-800 font-semibold">Você está offline</p>
+            <p className="text-xs text-amber-600">Toque em "Offline" acima para ficar disponível</p>
+          </div>
         </div>
       )}
 
@@ -1163,45 +1255,46 @@ export default function DriverApp() {
           <div>
             {/* Restaurantes conectados */}
             {profile?.restaurants?.length > 0 && (
-              <div className="px-3 pt-3 pb-1 flex flex-wrap gap-1.5">
+              <div className="px-4 pt-3 pb-1 flex flex-wrap gap-1.5">
                 {profile.restaurants.map((r) => (
                   <span key={r.id}
-                    className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full">
+                    className="inline-flex items-center gap-1 text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full">
                     🏪 {r.name}
                   </span>
                 ))}
               </div>
             )}
             {!profile?.restaurants?.length && (
-              <div className="mx-3 mt-3 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-xs text-yellow-800">
-                ⚠️ Nenhum restaurante conectado. Use o menu lateral para conectar.
+              <div className="mx-4 mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2 text-xs text-amber-800">
+                <span className="shrink-0">⚠️</span>
+                Nenhum restaurante conectado.{' '}
+                <button onClick={() => setConnectModal(true)} className="font-bold underline">Conectar agora</button>
               </div>
             )}
 
             {/* Sub-tabs */}
-            <div className="flex border-b bg-white sticky top-0 z-10">
+            <div className="flex bg-white border-b border-gray-100 sticky top-0 z-10">
               {[
                 { k: 'available', label: 'Disponíveis', count: available.length },
-                { k: 'active',    label: 'Ativas',      count: active.length },
+                { k: 'active',    label: 'Em rota',     count: active.length },
               ].map(({ k, label, count }) => (
                 <button key={k} onClick={() => { setSubTab(k); localStorage.setItem('driverSubTab', k); }}
                   className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${
                     subTab === k
-                      ? 'border-b-2 border-blue-600 text-blue-600'
-                      : 'text-gray-500'
+                      ? 'border-b-2 border-violet-600 text-violet-600'
+                      : 'text-gray-400'
                   }`}>
                   {label}
                   {count > 0 && (
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
-                      subTab === k ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                    <span className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center ${
+                      subTab === k ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-500'
                     }`}>{count}</span>
                   )}
                 </button>
               ))}
-              {/* Botão mapa */}
               <button
                 onClick={() => setShowMapModal(true)}
-                className="px-3 py-3 text-blue-600 flex flex-col items-center justify-center gap-0.5 border-l border-gray-100"
+                className="px-4 py-3 text-violet-600 flex flex-col items-center justify-center gap-0.5 border-l border-gray-100"
               >
                 <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <path d={ICONS.mapTab} />
@@ -1352,19 +1445,20 @@ export default function DriverApp() {
         {/* ── Perfil ── */}
         {tab === 'profile' && (
           <div className="p-4 space-y-4">
-            <div className="bg-white rounded-2xl shadow-sm p-5 flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-black">
+            {/* Card de perfil */}
+            <div className="bg-violet-600 rounded-2xl p-5 flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-white/20 border-2 border-white/40 flex items-center justify-center text-white text-2xl font-black shrink-0">
                 {user.name?.[0]?.toUpperCase()}
               </div>
-              <div>
-                <p className="font-bold text-gray-800 text-lg">{user.name}</p>
-                <p className="text-sm text-gray-500">{user.email}</p>
-                {user.phone && <p className="text-sm text-gray-500">{user.phone}</p>}
+              <div className="min-w-0">
+                <p className="font-bold text-white text-lg truncate">{user.name}</p>
+                <p className="text-sm text-violet-200 truncate">{user.email}</p>
+                {user.phone && <p className="text-xs text-violet-300 mt-0.5">{user.phone}</p>}
               </div>
             </div>
 
             <button onClick={() => setConnectModal(true)}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+              className="w-full bg-violet-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(124,58,237,0.35)] active:scale-[0.98] transition-transform">
               <Icon d={ICONS.qr} size={18} /> Conectar Restaurante
             </button>
 
@@ -1373,8 +1467,8 @@ export default function DriverApp() {
                 <h3 className="text-sm font-bold text-gray-700 mb-2">Restaurantes conectados</h3>
                 <div className="space-y-2">
                   {profile.restaurants.map((r) => (
-                    <div key={r.id} className="bg-white rounded-xl px-4 py-3 shadow-sm flex items-center gap-3">
-                      <span className="text-2xl">🏪</span>
+                    <div key={r.id} className="bg-white rounded-xl px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)] flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center text-xl shrink-0">🏪</div>
                       <div>
                         <p className="font-semibold text-gray-800 text-sm">{r.name}</p>
                         <p className="text-xs text-gray-400">
@@ -1388,7 +1482,7 @@ export default function DriverApp() {
             )}
 
             <button onClick={handleLogout}
-              className="w-full border border-red-300 text-red-600 font-semibold py-3 rounded-xl hover:bg-red-50">
+              className="w-full border border-red-200 text-red-500 font-semibold py-3 rounded-xl active:bg-red-50">
               Sair da conta
             </button>
           </div>
@@ -1396,26 +1490,34 @@ export default function DriverApp() {
       </div>
 
       {/* Bottom nav */}
-      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t shadow-lg flex z-30">
+      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] flex z-30 pb-safe">
         {[
-          { k: 'deliveries', icon: ICONS.pkg,    label: 'Entregas', badge: totalBadge },
-          { k: 'map',        icon: ICONS.mapTab,  label: 'Mapa',     badge: active.length },
-          { k: 'earnings',   icon: ICONS.money,  label: 'Ganhos' },
-          { k: 'profile',    icon: ICONS.user,   label: 'Perfil' },
+          { k: 'deliveries', icon: ICONS.pkg,   label: 'Entregas', badge: totalBadge },
+          { k: 'map',        icon: ICONS.mapTab, label: 'Mapa',     badge: active.length },
+          { k: 'earnings',   icon: ICONS.money, label: 'Ganhos' },
+          { k: 'profile',    icon: ICONS.user,  label: 'Perfil' },
         ].map(({ k, icon, label, badge }) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 flex flex-col items-center py-3 gap-0.5 transition-colors ${
-              tab === k ? 'text-blue-600' : 'text-gray-400'
+            className={`flex-1 flex flex-col items-center py-3 gap-0.5 transition-colors active:scale-90 ${
+              tab === k ? 'text-violet-600' : 'text-gray-400'
             }`}>
             <div className="relative">
-              <Icon d={icon} size={22} />
+              {tab === k ? (
+                <div className="w-10 h-6 rounded-full bg-violet-100 flex items-center justify-center -mx-1">
+                  <Icon d={icon} size={18} />
+                </div>
+              ) : (
+                <Icon d={icon} size={22} />
+              )}
               {badge > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
                   {badge > 9 ? '9+' : badge}
                 </span>
               )}
             </div>
-            <span className="text-[10px] font-semibold">{label}</span>
+            <span className={`text-[10px] font-semibold ${tab === k ? 'text-violet-600' : 'text-gray-400'}`}>
+              {label}
+            </span>
           </button>
         ))}
       </div>

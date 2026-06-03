@@ -55,6 +55,9 @@ router.get('/full-settings', ctrl.getFullSettings);
 // PATCH /api/tenant/settings — zonas, formas de pagamento, coords
 router.patch('/settings', authorize('owner'), ctrl.updateSettings);
 
+// PATCH /api/tenant/sangria-limit — define ou limpa o limite diário de sangria
+router.patch('/sangria-limit', authorize('owner', 'manager'), ctrl.setSangriaLimit);
+
 // POST /api/tenant/leads — criar/upsert lead manual
 router.post('/leads', authorize('owner', 'manager'), ctrl.createLead);
 

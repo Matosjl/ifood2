@@ -1143,3 +1143,24 @@ CREATE TABLE IF NOT EXISTS internal_consumptions (
 CREATE INDEX IF NOT EXISTS idx_internal_cons_tenant ON internal_consumptions(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_internal_cons_insumo ON internal_consumptions(insumo_id);
 CREATE INDEX IF NOT EXISTS idx_internal_cons_product ON internal_consumptions(product_id);
+
+-- display_name: nome exibido no cardápio digital (NULL = usa name como fallback)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS display_name  VARCHAR(200) DEFAULT NULL;
+
+-- ── OCR ALIASES ───────────────────────────────────────────────
+-- Memória de matches manuais aprovados pelo usuário.
+-- "Requeijão Elegê 200g" → insumo_id X  (salvo após aprovação)
+-- ocr_raw = normalize(descricao_da_nota) via matcher.service.js
+CREATE TABLE IF NOT EXISTS ocr_aliases (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  ocr_raw     TEXT         NOT NULL,
+  match_type  VARCHAR(20)  NOT NULL CHECK (match_type IN ('insumo','product')),
+  match_id    UUID         NOT NULL,
+  match_name  TEXT         NOT NULL,
+  used_count  INTEGER      NOT NULL DEFAULT 1,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, ocr_raw)
+);
+CREATE INDEX IF NOT EXISTS idx_ocr_aliases_lookup ON ocr_aliases(tenant_id, ocr_raw);

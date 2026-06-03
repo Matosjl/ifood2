@@ -440,4 +440,20 @@ const updateCRMCustomer = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows[0] });
 });
 
-module.exports = { getMe, updatePlan, updateProfile, setChatbot, getCashbackConfig, setCashbackConfig, getLoyaltyCustomers, getRatings, getWhatsappStatus, connectWhatsapp, disconnectWhatsapp, updateSettings, getFullSettings, createLead, importLeads, listCRMCustomers, getCRMCustomer, updateCRMCustomer };
+/** PATCH /api/tenant/sangria-limit — define ou limpa o limite diário de sangria */
+const setSangriaLimit = asyncHandler(async (req, res) => {
+  const raw = req.body.limit;
+  const limit = raw !== undefined && raw !== '' && parseFloat(raw) > 0
+    ? parseFloat(raw)
+    : null;
+
+  const { rows } = await db.query(
+    `UPDATE tenants SET sangria_daily_limit = $2, updated_at = NOW()
+     WHERE id = $1 RETURNING sangria_daily_limit`,
+    [req.user.tenantId, limit]
+  );
+  if (!rows[0]) throw new AppError('Restaurante não encontrado.', 404);
+  res.json({ success: true, data: { sangria_daily_limit: rows[0].sangria_daily_limit } });
+});
+
+module.exports = { getMe, updatePlan, updateProfile, setChatbot, getCashbackConfig, setCashbackConfig, getLoyaltyCustomers, getRatings, getWhatsappStatus, connectWhatsapp, disconnectWhatsapp, updateSettings, getFullSettings, createLead, importLeads, listCRMCustomers, getCRMCustomer, updateCRMCustomer, setSangriaLimit };

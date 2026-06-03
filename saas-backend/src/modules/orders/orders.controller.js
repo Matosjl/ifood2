@@ -96,9 +96,11 @@ const updateStatus = asyncHandler(async (req, res) => {
 
   // Cancelamento ainda precisa da fila (devolve estoque)
   if (status === 'cancelled') {
+    const { cancelReason } = req.body;
     const order = await enqueueAndWait('cancel', {
-      orderId:  req.params.id,
-      tenantId: req.user.tenantId,
+      orderId:      req.params.id,
+      tenantId:     req.user.tenantId,
+      cancelReason: cancelReason ?? null,
     });
     return res.json({ success: true, data: order });
   }
@@ -174,7 +176,7 @@ const searchCustomers = asyncHandler(async (req, res) => {
   const sql = `
     WITH ranked_orders AS (
       SELECT customer_name, customer_phone, customer_address, neighborhood, delivery_fee, total, created_at,
-             -- normaliza telefone: remove não-dígitos para agrupar variações de formato
+             delivery_lat, delivery_lng,
              regexp_replace(COALESCE(customer_phone,''), '[^0-9]', '', 'g') AS phone_norm,
              ROW_NUMBER() OVER (
                PARTITION BY lower(customer_name), regexp_replace(COALESCE(customer_phone,''), '[^0-9]', '', 'g')
@@ -192,10 +194,13 @@ const searchCustomers = asyncHandler(async (req, res) => {
              MAX(CASE WHEN rn = 1 THEN customer_address END) AS address,
              MAX(CASE WHEN rn = 1 THEN neighborhood END)     AS neighborhood,
              MAX(CASE WHEN rn = 1 THEN delivery_fee END)     AS delivery_fee,
+             MAX(CASE WHEN rn = 1 THEN delivery_lat END)     AS delivery_lat,
+             MAX(CASE WHEN rn = 1 THEN delivery_lng END)     AS delivery_lng,
              COUNT(*)::int        AS order_count,
              MAX(created_at)      AS last_order_date,
              SUM(total)::numeric  AS total_spent,
-             NULL::uuid           AS client_id
+             NULL::uuid           AS client_id,
+             NULL::jsonb          AS coords
       FROM   ranked_orders
       GROUP  BY lower(customer_name), phone_norm
     ),
@@ -203,10 +208,13 @@ const searchCustomers = asyncHandler(async (req, res) => {
       SELECT tc.name, tc.phone, tc.address,
              NULL::text          AS neighborhood,
              NULL::numeric       AS delivery_fee,
+             NULL::numeric       AS delivery_lat,
+             NULL::numeric       AS delivery_lng,
              0::int              AS order_count,
              NULL::timestamptz   AS last_order_date,
              0::numeric          AS total_spent,
-             tc.id               AS client_id
+             tc.id               AS client_id,
+             tc.coords
       FROM   tenant_clients tc
       WHERE  tc.tenant_id = $1
         ${manualFilter}
@@ -218,7 +226,21 @@ const searchCustomers = asyncHandler(async (req, res) => {
                  AND lower(oa.name) = lower(tc.name))
         )
     )
-    SELECT ua.*, COALESCE(lc.cashback_balance, 0)::numeric AS cashback_balance
+    SELECT ua.*,
+           COALESCE(lc.cashback_balance, 0)::numeric AS cashback_balance,
+           -- saved_coords: coords salvas do cliente (tenant_clients) ou GPS do último pedido.
+           -- Subquery com LIMIT 1 evita multiplicação de linhas por variações de formato de phone.
+           COALESCE(
+             ua.coords,
+             (SELECT tc2.coords FROM tenant_clients tc2
+              WHERE tc2.tenant_id = $1
+                AND ua.phone IS NOT NULL AND ua.phone <> ''
+                AND regexp_replace(COALESCE(tc2.phone,''), '[^0-9]', '', 'g') = ua.phone
+              LIMIT 1),
+             CASE WHEN ua.delivery_lat IS NOT NULL AND ua.delivery_lng IS NOT NULL
+                  THEN jsonb_build_object('lat', ua.delivery_lat, 'lng', ua.delivery_lng)
+                  ELSE NULL END
+           ) AS saved_coords
     FROM (
       SELECT * FROM order_agg
       UNION ALL

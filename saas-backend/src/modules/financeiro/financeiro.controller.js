@@ -413,7 +413,7 @@ const getResult = asyncHandler(async (req, res) => {
   const tenantId = req.user.tenantId;
   const { startDate, endDate, year, month } = getMonthDates(req.query.month);
 
-  const [{ rows: [rev] }, { rows: [exp] }, { rows: [logist] }] = await Promise.all([
+  const [{ rows: [rev] }, { rows: [exp] }, { rows: [logist] }, { rows: [cmvTeo] }, { rows: [consumo] }] = await Promise.all([
     db.query(
       `SELECT
          COALESCE(SUM(o.total),0)::float                                                      AS revenue,
@@ -449,36 +449,97 @@ const getResult = asyncHandler(async (req, res) => {
          AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
       [tenantId, startDate, endDate, TZ]
     ),
+    // CMV Teórico: o que deveria ter sido consumido (ficha técnica × qtd vendida)
+    db.query(
+      `SELECT COALESCE(SUM(
+         CASE WHEN oi.weight_kg IS NOT NULL
+              THEN oi.weight_kg * pi.qty_per_unit * i.cost_per_unit
+              ELSE oi.quantity  * pi.qty_per_unit * i.cost_per_unit
+         END
+       ), 0)::float AS cmv_teorico
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       JOIN product_insumos pi
+         ON pi.product_id = oi.product_id AND pi.tenant_id = o.tenant_id
+       JOIN insumos i ON i.id = pi.insumo_id
+       WHERE o.tenant_id = $1
+         AND o.status IN ('ready','delivered')
+         AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
+      [tenantId, startDate, endDate, TZ]
+    ),
+    // Consumo interno do mês (funcionários, família, brindes, degustação, perdas)
+    db.query(
+      `SELECT
+         COALESCE(SUM(total_cost), 0)::float                                           AS total,
+         COALESCE(SUM(total_cost) FILTER (WHERE consumption_type='funcionario'),0)::float AS funcionario,
+         COALESCE(SUM(total_cost) FILTER (WHERE consumption_type='familia'),0)::float     AS familia,
+         COALESCE(SUM(total_cost) FILTER (WHERE consumption_type='brinde'),0)::float      AS brinde,
+         COALESCE(SUM(total_cost) FILTER (WHERE consumption_type='degustacao'),0)::float  AS degustacao,
+         COALESCE(SUM(total_cost) FILTER (WHERE consumption_type='perda'),0)::float       AS perda,
+         COUNT(*)::int                                                                    AS registros
+       FROM internal_consumptions
+       WHERE tenant_id = $1
+         AND created_at >= $2::date
+         AND created_at < ($3::date + INTERVAL '1 day')`,
+      [tenantId, startDate, endDate]
+    ),
   ]);
 
-  const monthStr          = req.query.month || new Date().toISOString().slice(0, 7);
-  const grossProfit       = rev.revenue - rev.total_cmv;
-  // netProfit parte do lucro bruto (já com CMV deduzido), não da receita bruta
-  const netProfit         = grossProfit - exp.total_expenses;
-  const marginPct         = rev.revenue > 0 ? Math.round((grossProfit / rev.revenue) * 100) : null;
-  const driverFees        = parseFloat(logist.total_driver_fees || 0);
-  const deliveryFees      = parseFloat(rev.delivery_fees_charged || 0);
-  const logisticsResult   = parseFloat((deliveryFees - driverFees).toFixed(2));
+  const monthStr        = req.query.month || new Date().toISOString().slice(0, 7);
+  const grossProfit     = rev.revenue - rev.total_cmv;
+  const netProfit       = grossProfit - exp.total_expenses;
+  const marginPct       = rev.revenue > 0 ? Math.round((grossProfit / rev.revenue) * 100) : null;
+  const driverFees      = parseFloat(logist.total_driver_fees || 0);
+  const deliveryFees    = parseFloat(rev.delivery_fees_charged || 0);
+  const logisticsResult = parseFloat((deliveryFees - driverFees).toFixed(2));
+
+  // CMV Teórico: baseado em fichas técnicas. Só considera produtos com ficha cadastrada.
+  const cmvTeorico      = parseFloat((cmvTeo[0]?.cmv_teorico || 0).toFixed(2));
+  const cmvReal         = parseFloat((rev.total_cmv || 0).toFixed(2));
+  // Desvio positivo = consumiu mais que o esperado (perdas não capturadas, desvio, desperdício)
+  // Desvio negativo = fichas técnicas desatualizadas ou produtos sem ficha não computados
+  const desvio_cmv      = parseFloat((cmvReal - cmvTeorico).toFixed(2));
 
   res.json({
     success: true,
     data: {
       month:              monthStr,
-      revenue:            rev.revenue,             // mantido — compatibilidade com frontend
-      total_cmv:          rev.total_cmv,
+      revenue:            rev.revenue,
+      total_cmv:          cmvReal,
       gross_profit:       grossProfit,
       gross_margin_pct:   marginPct,
       total_expenses:     exp.total_expenses,
       paid_expenses:      exp.paid_expenses,
       pending_expenses:   exp.pending_expenses,
       profit:             netProfit,
-      // Resultado real = lucro bruto − gastos pagos (não receita bruta − gastos)
       profit_after_paid:  grossProfit - exp.paid_expenses,
-      // Breakdown de logística (campos novos)
       products_revenue:      parseFloat((rev.products_revenue      || 0).toFixed(2)),
       delivery_fees_charged: parseFloat((rev.delivery_fees_charged || 0).toFixed(2)),
       total_driver_fees:     driverFees,
       logistics_result:      logisticsResult,
+      // ── CMV Teórico vs Real ─────────────────────────────
+      // cmv_teorico: o que deveria ter sido consumido (ficha técnica × vendas)
+      // total_cmv:   o que foi realmente registrado nos pedidos
+      // desvio_cmv:  diferença — positivo = desperdício/desvio não capturado
+      cmv_teorico:  cmvTeorico,
+      desvio_cmv:   desvio_cmv,
+      gross_margin_teorico_pct: cmvTeorico > 0 && rev.revenue > 0
+        ? Math.round(((rev.revenue - cmvTeorico) / rev.revenue) * 100)
+        : null,
+      // ── Consumo interno do mês ───────────────────────────
+      // Custo real dos itens consumidos internamente (fora das vendas)
+      // Deve ser considerado no lucro real do período
+      consumo_interno: {
+        total:       parseFloat((consumo[0]?.total      || 0).toFixed(2)),
+        registros:   parseInt (consumo[0]?.registros    || 0),
+        funcionario: parseFloat((consumo[0]?.funcionario || 0).toFixed(2)),
+        familia:     parseFloat((consumo[0]?.familia     || 0).toFixed(2)),
+        brinde:      parseFloat((consumo[0]?.brinde      || 0).toFixed(2)),
+        degustacao:  parseFloat((consumo[0]?.degustacao  || 0).toFixed(2)),
+        perda:       parseFloat((consumo[0]?.perda       || 0).toFixed(2)),
+      },
+      // Lucro real = lucro operacional - consumo interno (custo não refletido no CMV de vendas)
+      profit_real: parseFloat((netProfit - parseFloat(consumo[0]?.total || 0)).toFixed(2)),
     },
   });
 });
