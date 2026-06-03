@@ -226,7 +226,9 @@ export default function OrdersBoard({
   if (viewMode === 'default') {
     return (
       <>
-        <div className="flex-1 grid grid-cols-4 gap-3 p-4 min-h-0 overflow-hidden">
+        <div className="flex-1 flex gap-3 p-4 min-h-0 overflow-x-auto">
+          {/* mobile: scroll horizontal com colunas de largura mínima */}
+          <div className="flex gap-3 min-w-max w-full md:grid md:grid-cols-4 md:min-w-0">
           {COLUMNS.map((col) => (
             <KanbanColumn
               key={col.id}
@@ -240,6 +242,7 @@ export default function OrdersBoard({
               onAssign={onAssign}
             />
           ))}
+          </div>
         </div>
         {editingOrder && (
           <EditOrderModal

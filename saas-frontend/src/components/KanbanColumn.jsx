@@ -13,7 +13,7 @@ export default function KanbanColumn({ column, orders, onStatusChange, onAcknowl
   const borderCls   = header.split(' ').find((c) => c.startsWith('border-')) ?? 'border-white/10';
 
   return (
-    <div className="flex flex-col min-w-0 h-full min-h-0">
+    <div className="flex flex-col min-w-[260px] md:min-w-0 h-full min-h-0">
       {/* Column header */}
       <div className={`flex items-center justify-between px-3 py-2.5 rounded-t-xl border border-b-0 ${header} shrink-0`}>
         <div className="flex items-center gap-2">

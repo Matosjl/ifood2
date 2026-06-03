@@ -41,9 +41,8 @@ async function getActiveTenants() {
         t.id,
         t.name,
         t.slug,
-        COALESCE(t.owner_whatsapp, u.phone) AS owner_phone
+        t.owner_whatsapp AS owner_phone
       FROM tenants t
-      LEFT JOIN users u ON u.tenant_id = t.id AND u.role = 'owner'
       WHERE t.status = 'active'
         -- Só tenants com atividade recente (últimos 30 dias)
         AND EXISTS (
