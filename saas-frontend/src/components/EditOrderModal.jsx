@@ -3,9 +3,10 @@ import { getProducts } from '../api/orders';
 import { updateOrderInfo, markOrderPaid as markOrderPaidApi } from '../api/orders';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
+import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 
-// PAY_OPTIONS sem "fiado" para edição (fiado não é alterável post-criação)
-const EDIT_PAY_OPTIONS = PAY_OPTIONS.filter((p) => p.value !== 'fiado');
+// Inclui fiado nas opções de edição
+const EDIT_PAY_OPTIONS = PAY_OPTIONS;
 
 // ── Monta o cart inicial a partir dos itens do pedido existente ─
 
@@ -41,9 +42,20 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
   const [address,       setAddress]       = useState(order.customerAddress ?? '');
   const [deliveryFee,   setDeliveryFee]   = useState(String(order.deliveryFee ?? 0));
   const [payMethod,     setPayMethod]     = useState(order.paymentMethod ?? 'cash');
+  const [fiadoClienteId,  setFiadoClienteId]  = useState('');
+  const [fiadoClientes,   setFiadoClientes]   = useState([]);
+  const [fiadoSearch,     setFiadoSearch]     = useState('');
   const [adjType,       setAdjType]       = useState('discount');
   const [adjValue,      setAdjValue]      = useState('');
   const [adjReason,     setAdjReason]     = useState('');
+
+  // Carrega clientes fiado quando fiado é selecionado
+  useEffect(() => {
+    if (payMethod !== 'fiado') return;
+    listFiadoClientes({})
+      .then(({ data }) => setFiadoClientes((data.data ?? []).filter((c) => !c.bloqueado)))
+      .catch(() => setFiadoClientes([]));
+  }, [payMethod]);
 
   // Lazy-load produtos só quando aba "itens" é visitada pela primeira vez
   const [itemsTabVisited, setItemsTabVisited] = useState(false);
@@ -114,6 +126,15 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
       // 1. Atualiza forma de pagamento se mudou
       if (payMethod !== order.paymentMethod) {
         await markOrderPaidApi(order.id, payMethod);
+        // Se mudou para fiado, cria registro no fiado
+        if (payMethod === 'fiado' && fiadoClienteId) {
+          await createFiadoCompra({
+            cliente_id: fiadoClienteId,
+            order_id:   order.id,
+            descricao:  `Pedido #${order.orderNumber}`,
+            valor:      order.total,
+          }).catch(() => {});
+        }
       }
 
       // 2. Atualiza entrega + aplica ajuste de valor via API
@@ -221,10 +242,49 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                 {EDIT_PAY_OPTIONS.map(({ value, label }) => (
                   <button key={value} type="button" onClick={() => setPayMethod(value)}
                     className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
-                      payMethod === value ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40' : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                      payMethod === value
+                        ? value === 'fiado'
+                          ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                          : 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
+                        : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
                     }`}>{label}</button>
                 ))}
               </div>
+
+              {/* Picker de cliente fiado */}
+              {payMethod === 'fiado' && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[11px] text-purple-400 font-semibold">Selecione o cliente do fiado:</p>
+                  <input
+                    type="text"
+                    placeholder="Buscar cliente..."
+                    value={fiadoSearch}
+                    onChange={(e) => setFiadoSearch(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50"
+                  />
+                  <div className="max-h-28 overflow-y-auto rounded-lg border border-white/[0.06] bg-gray-800/60 divide-y divide-white/[0.04]">
+                    {fiadoClientes
+                      .filter((c) => !fiadoSearch || c.name.toLowerCase().includes(fiadoSearch.toLowerCase()))
+                      .map((c) => (
+                        <button key={c.id} type="button"
+                          onClick={() => setFiadoClienteId(c.id)}
+                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                            fiadoClienteId === c.id ? 'bg-purple-500/20 text-purple-300' : 'text-gray-300 hover:bg-gray-700'
+                          }`}>
+                          {c.name}
+                          {parseFloat(c.total_aberto) > 0 && (
+                            <span className="ml-2 text-yellow-400 text-[10px]">
+                              Deve R${parseFloat(c.total_aberto).toFixed(2)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    {fiadoClientes.length === 0 && (
+                      <p className="text-xs text-gray-600 italic px-3 py-2">Nenhum cliente cadastrado.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Desconto / Acréscimo */}

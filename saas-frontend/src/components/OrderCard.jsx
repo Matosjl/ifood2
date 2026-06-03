@@ -3,6 +3,7 @@ import { printOrder, printKitchen } from '../utils/print';
 import { PAY_ICONS, PAY_LABELS } from '../constants/orders';
 import PixQrModal from './PixQrModal';
 import api from '../api/axios';
+import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 
 // ── Status config ─────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ const PAY_OPTIONS = [
   { value: 'debit',   label: '💳 Débito'   },
   { value: 'voucher', label: '🎫 Vale'      },
   { value: 'other',   label: '🔖 Outro'    },
+  { value: 'fiado',   label: '🤝 Fiado'    },
 ];
 
 
@@ -70,6 +72,11 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
   const [showPayPick,     setShowPayPick]      = useState(false);  // picker de forma de pgto
   const [showPixModal,    setShowPixModal]     = useState(false);  // QR PIX
   const [payLoading,      setPayLoading]       = useState(false);
+  const [fiadoMode,       setFiadoMode]        = useState(false);  // picker fiado
+  const [fiadoClientes,   setFiadoClientes]    = useState([]);
+  const [fiadoClienteId,  setFiadoClienteId]  = useState('');
+  const [fiadoSearch,     setFiadoSearch]      = useState('');
+  const [fiadoError,      setFiadoError]       = useState('');
   const [showDriverPick,  setShowDriverPick]   = useState(false);  // picker de motoboy
   const [assigning,       setAssigning]        = useState(false);
   const [changeConfirmed, setChangeConfirmed]  = useState(
@@ -100,6 +107,18 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
   };
 
   const handleReceivePay = async (method) => {
+    if (method === 'fiado') {
+      // Carrega clientes e abre picker
+      setFiadoError('');
+      setFiadoClienteId('');
+      setFiadoSearch('');
+      try {
+        const { data } = await listFiadoClientes({});
+        setFiadoClientes((data.data ?? []).filter((c) => !c.bloqueado));
+      } catch { setFiadoClientes([]); }
+      setFiadoMode(true);
+      return;
+    }
     setPayLoading(true);
     try {
       await onMarkPaid?.(order.id, method);
@@ -107,6 +126,24 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
     } finally {
       setPayLoading(false);
     }
+  };
+
+  const handleConfirmFiado = async () => {
+    if (!fiadoClienteId) { setFiadoError('Selecione o cliente do fiado.'); return; }
+    setPayLoading(true);
+    setFiadoError('');
+    try {
+      await onMarkPaid?.(order.id, 'fiado');
+      await createFiadoCompra({
+        cliente_id: fiadoClienteId,
+        order_id:   order.id,
+        descricao:  `Pedido #${order.orderNumber}`,
+        valor:      order.total,
+      });
+      setFiadoMode(false);
+      setShowPayPick(false);
+    } catch { setFiadoError('Erro ao lançar fiado. Tente novamente.'); }
+    finally { setPayLoading(false); }
   };
 
   // Botões de ação dinâmicos (variam pelo status + estado de pagamento)
@@ -376,29 +413,78 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       {/* Picker inline de forma de pagamento */}
       {showPayPick && (
         <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-2">
-          <p className="text-xs text-gray-400 font-semibold">✓ Confirmar pagamento recebido:</p>
-          <div className="grid grid-cols-3 gap-1">
-            {PAY_OPTIONS.filter(o => !['pending','fiado'].includes(o.value)).map(({ value, label }) => (
-              <button
-                key={value}
-                disabled={payLoading}
-                onClick={() => handleReceivePay(value)}
-                className={`py-1.5 px-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
-                  order.paymentMethod === value
-                    ? 'bg-green-600/40 text-green-200 border border-green-500/50'
-                    : 'bg-gray-700/80 hover:bg-green-600/30 hover:text-green-300 text-gray-300'
-                }`}
-              >
-                {label}
+          {!fiadoMode ? (
+            <>
+              <p className="text-xs text-gray-400 font-semibold">✓ Confirmar pagamento recebido:</p>
+              <div className="grid grid-cols-3 gap-1">
+                {PAY_OPTIONS.filter(o => o.value !== 'pending').map(({ value, label }) => (
+                  <button
+                    key={value}
+                    disabled={payLoading}
+                    onClick={() => handleReceivePay(value)}
+                    className={`py-1.5 px-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+                      value === 'fiado'
+                        ? 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-300'
+                        : order.paymentMethod === value
+                          ? 'bg-green-600/40 text-green-200 border border-green-500/50'
+                          : 'bg-gray-700/80 hover:bg-green-600/30 hover:text-green-300 text-gray-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setShowPayPick(false)}
+                className="w-full text-xs text-gray-500 hover:text-gray-300 transition-colors py-1">
+                Cancelar
               </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setShowPayPick(false)}
-            className="w-full text-xs text-gray-500 hover:text-gray-300 transition-colors py-1"
-          >
-            Cancelar
-          </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-purple-400 font-semibold">🤝 Lançar no Fiado — selecione o cliente:</p>
+              <input
+                type="text"
+                placeholder="Buscar cliente..."
+                value={fiadoSearch}
+                onChange={(e) => setFiadoSearch(e.target.value)}
+                className="w-full bg-gray-800 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50"
+              />
+              <div className="max-h-32 overflow-y-auto space-y-0.5 rounded-lg border border-white/[0.06] bg-gray-800/60">
+                {fiadoClientes
+                  .filter((c) => !fiadoSearch || c.name.toLowerCase().includes(fiadoSearch.toLowerCase()))
+                  .map((c) => (
+                    <button key={c.id} type="button"
+                      onClick={() => setFiadoClienteId(c.id)}
+                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                        fiadoClienteId === c.id
+                          ? 'bg-purple-500/20 text-purple-300'
+                          : 'text-gray-300 hover:bg-gray-700'
+                      }`}>
+                      {c.name}
+                      {parseFloat(c.total_aberto) > 0 && (
+                        <span className="ml-2 text-yellow-400 text-[10px]">
+                          Deve R${parseFloat(c.total_aberto).toFixed(2)}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                {fiadoClientes.length === 0 && (
+                  <p className="text-xs text-gray-600 italic px-3 py-2">Nenhum cliente de fiado cadastrado.</p>
+                )}
+              </div>
+              {fiadoError && <p className="text-xs text-red-400">{fiadoError}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleConfirmFiado} disabled={payLoading || !fiadoClienteId}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-40 transition-colors">
+                  {payLoading ? 'Lançando...' : '✓ Confirmar Fiado'}
+                </button>
+                <button onClick={() => setFiadoMode(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white bg-gray-700/60 transition-colors">
+                  Voltar
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

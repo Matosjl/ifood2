@@ -182,6 +182,16 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
     onUpdate();
     onClose();
   };
+  const handleDelete = async () => {
+    if (!confirm(`Apagar o cliente "${cliente.name}" e todo o histórico de fiado? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await deleteFiadoCliente(cliente.id);
+      onUpdate();
+      onClose();
+    } catch (err) {
+      alert(err?.response?.data?.message ?? 'Erro ao apagar cliente.');
+    }
+  };
   const handleNovaCompra = async () => {
     if (!novoValor) return;
     setSaving(true);
@@ -214,8 +224,11 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setEditando(true)} className="px-3 py-1.5 text-sm rounded-lg border border-white/10 text-gray-400 hover:text-white transition-colors">Editar</button>
-            <button onClick={handleToggle} className={`px-3 py-1.5 text-sm rounded-lg font-semibold transition-colors ${cliente.bloqueado ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}>
+            <button onClick={handleToggle} className={`px-3 py-1.5 text-sm rounded-lg font-semibold transition-colors ${cliente.bloqueado ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30' : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'}`}>
               {cliente.bloqueado ? '✓ Desbloquear' : '✗ Bloquear'}
+            </button>
+            <button onClick={handleDelete} className="px-3 py-1.5 text-sm rounded-lg font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors" title="Apagar cliente permanentemente">
+              🗑 Apagar
             </button>
             <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg border border-white/10 text-gray-400 hover:text-white transition-colors">✕ Fechar</button>
           </div>
