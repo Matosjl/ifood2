@@ -224,7 +224,7 @@ class Order {
     const { rows } = await dbClient.query(
       `UPDATE orders
        SET status = $3,
-           cancel_reason = CASE WHEN $3 = 'cancelled' THEN $4 ELSE cancel_reason END,
+           cancel_reason = CASE WHEN $3::text = 'cancelled' THEN $4::text ELSE cancel_reason END,
            updated_at = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
