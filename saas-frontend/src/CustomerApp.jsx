@@ -996,6 +996,36 @@ export default function CustomerApp({ slug }) {
   const setWeight = useCallback((id, w) => setCart((c) => ({ ...c, [id]: { ...c[id], weightKg: w } })), []);
   const setQty    = useCallback((id, qty) => setCart((c) => ({ ...c, [id]: { ...c[id], qty: Math.max(1, parseInt(qty) || 1) } })), []);
 
+  // ── D4: reset completo de estado de entrega entre pedidos ─────
+  // Chamado sempre que o usuário inicia um novo pedido.
+  // customerName e customerPhone são mantidos (perfil do usuário).
+  // paymentMethod é mantido (conveniência — usuário raramente troca).
+  const resetNewOrderState = useCallback(() => {
+    // Coordenadas e mapa
+    setDeliveryLat(null);
+    setDeliveryLng(null);
+    setDeliveryFeeMap(null);
+    setDeliveryEtaMap(null);
+    setOutsideZone(false);
+    setMapConfirmed(false);
+    // Endereço
+    setCustomerAddress('');
+    setCep('');
+    setCepStreet('');
+    setCepNeighborhood('');
+    setCepCity('');
+    setCepFound(false);
+    setAddressNumber('');
+    setAddressComplement('');
+    // Tipo e observações
+    setDeliveryType(tableParam ? 'local' : 'pickup');
+    setNotes('');
+    setTrocoValue('');
+    // UI
+    setCheckoutError(null);
+    setGpsError(null);
+  }, [tableParam]);
+
   const cartEntries = Object.values(cart);
   const total       = cartTotal(cart);
   const count       = cartCount(cart);
@@ -1119,7 +1149,7 @@ export default function CustomerApp({ slug }) {
         tenant={tenant}
         slug={slug}
         onBackToMenu={() => setPage('menu')}
-        onNewOrder={() => { setPage('menu'); setOrder(null); }}
+        onNewOrder={() => { resetNewOrderState(); setCart(emptyCart()); setOrder(null); setPage('menu'); }}
         onRefresh={refreshOrder}
       />
     );
