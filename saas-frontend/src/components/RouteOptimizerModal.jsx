@@ -11,8 +11,8 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 
 async function geocode(address) {
   if (!address) return null;
-  const hasCity = /torres|rs\b/i.test(address);
-  const query   = hasCity ? address : `${address}, Torres RS`;
+  // D6: endereço do mapa já inclui cidade — sem injeção de cidade hardcoded
+  const query = address;
   try {
     const res  = await fetch(
       `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=br`,

@@ -36,8 +36,8 @@ const SOCKET_URL = baseApi.defaults.baseURL?.replace('/api', '') || '';
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 async function geocode(address) {
   if (!address) return null;
-  const hasCity = /torres|rs\b/i.test(address);
-  const query   = hasCity ? address : `${address}, Torres RS`;
+  // D6: endereço do mapa já inclui cidade — sem injeção de cidade hardcoded
+  const query = address;
   try {
     const res  = await fetch(
       `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=br`,
@@ -568,7 +568,8 @@ function MiniMap({ delivery }) {
     fetchRoute(restaurantCoords, customerCoords).then((r) => { if (r) setRoute(r); });
   }, [showMap, customerCoords]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const destQuery = (delivery.customer_address || delivery.restaurant_name || '') + ', Torres RS';
+  // D6: endereço já inclui cidade — sem sufixo hardcoded
+  const destQuery = delivery.customer_address || delivery.restaurant_name || '';
   const mapsUrl   = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}`;
   const wazeUrl   = `https://waze.com/ul?q=${encodeURIComponent(destQuery)}&navigate=yes`;
 
@@ -823,7 +824,7 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
             {type === 'available' && (
               <>
                 <button
-                  onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                  onClick={() => openMaps(delivery.restaurant_name)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
                 >
                   🗺 Ver rota
@@ -841,7 +842,7 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
             {type === 'active' && dstatus === 'accepted' && (
               <>
                 <button
-                  onClick={() => openMaps(delivery.restaurant_name + ' Torres RS')}
+                  onClick={() => openMaps(delivery.restaurant_name)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
                 >
                   🏪 Ir lá
@@ -859,7 +860,7 @@ function DeliveryCard({ delivery, type, onAccept, onPickup, onPay, onComplete, l
             {type === 'active' && dstatus === 'picked_up' && (
               <>
                 <button
-                  onClick={() => openMaps((delivery.customer_address || '') + ', Torres RS')}
+                  onClick={() => openMaps(delivery.customer_address || '')}
                   className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 text-gray-600 bg-white active:scale-95 transition-transform"
                 >
                   🗺 Rota

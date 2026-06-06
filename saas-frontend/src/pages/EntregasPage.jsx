@@ -48,20 +48,15 @@ const STATUS_LABELS = {
   delivered:  'Entregue',
 };
 
-// Torres RS bounding box (viewbox para Nominatim priorizar resultados locais)
-const TORRES_VIEWBOX = '-49.80,-29.45,-49.65,-29.28';
-
 // Geocode an address string → [lng, lat] or null
-// Sempre injeta "Torres RS" se o endereço não mencionar a cidade
-async function geocodeAddress(address, neighborhood = '') {
+// D6: sem viewbox hardcoded (era restrito a Torres RS) e sem injeção de cidade.
+// O endereço do mapa já inclui a cidade via Nominatim reverse geocode.
+// cityHint: passado apenas se o endereço for claramente incompleto (sem cidade).
+async function geocodeAddress(address, neighborhood = '', cityHint = '') {
   if (!address) return null;
-  const hasCity = /torres|rs\b/i.test(address);
-  const query   = hasCity
-    ? address
-    : [address, neighborhood, 'Torres RS'].filter(Boolean).join(', ');
+  const query = [address, neighborhood, cityHint].filter(Boolean).join(', ');
   try {
-    const url = `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1` +
-                `&countrycodes=br&viewbox=${TORRES_VIEWBOX}&bounded=0`;
+    const url = `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=br`;
     const res  = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } });
     const data = await res.json();
     if (data?.[0]) return [parseFloat(data[0].lon), parseFloat(data[0].lat)];
@@ -368,6 +363,8 @@ export default function EntregasPage() {
   const [loading,        setLoading]        = useState(true);
   const [driverPos,      setDriverPos]      = useState(null);   // [lng, lat]
   const [geoError,       setGeoError]       = useState(null);
+  // D6: coordenadas do restaurante — substitui CITY_FALLBACK hardcoded
+  const [restaurantPos,  setRestaurantPos]  = useState(null);  // [lng, lat] ou null
   const [coords,         setCoords]         = useState({});     // orderId → [lng, lat]
   const [activeOrder,    setActiveOrder]    = useState(null);
   const [route,          setRoute]          = useState([]);     // [[lng,lat],...]
@@ -414,6 +411,18 @@ export default function EntregasPage() {
     } catch { /* non-fatal */ }
   }, []);
 
+  // D6: carrega coordenadas do restaurante uma vez — substitui CITY_FALLBACK hardcoded
+  useEffect(() => {
+    api.get('/tenant/settings')
+      .then(({ data }) => {
+        const s = data.data ?? data;
+        if (s?.restaurant_lat && s?.restaurant_lng) {
+          setRestaurantPos([parseFloat(s.restaurant_lng), parseFloat(s.restaurant_lat)]);
+        }
+      })
+      .catch(() => { /* non-fatal — fallback = centro do Brasil */ });
+  }, []);
+
   useEffect(() => {
     loadDrivers();
     const id = setInterval(loadDrivers, 30_000);
@@ -421,14 +430,12 @@ export default function EntregasPage() {
   }, [loadDrivers]);
 
   // ── GPS tracking ──────────────────────────────────────────
-  // Coordenadas fixas do estabelecimento (fallback quando GPS bloqueado — ex: HTTP sem HTTPS)
-  // Estrada dos Cunhas 1203, Sala N2, Itapeva, Torres RS
-  const CITY_FALLBACK = [-49.77948745767169, -29.38731801148806]; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
-
   useEffect(() => {
+    // D6: usa coordenadas do restaurante como fallback (sem endereço hardcoded)
+    const fallbackPos = restaurantPos ?? BRAZIL_CENTER;
     const useFallback = (msg) => {
-      setGeoError(`${msg} — usando localização da cidade`);
-      setDriverPos(CITY_FALLBACK);
+      setGeoError(`${msg} — usando localização do restaurante`);
+      setDriverPos(fallbackPos);
     };
 
     if (!('geolocation' in navigator)) { useFallback('GPS não disponível'); return; }
@@ -445,7 +452,7 @@ export default function EntregasPage() {
     return () => {
       if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     };
-  }, []);
+  }, [restaurantPos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Center map on driver position once we get it
   useEffect(() => {

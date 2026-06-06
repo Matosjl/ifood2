@@ -480,6 +480,9 @@ function ControlButton({ onClick, label, children, disabled = false }) {
 export function MapControls({
   position = 'bottom-right',
   showZoom = true, showCompass = false, showLocate = false, showFullscreen = false,
+  // D6: fallbackCenter substituiu CITY_FALLBACK hardcoded — passa restaurantPos do tenant
+  // Formato: { longitude, latitude }. Padrão: centro do Brasil.
+  fallbackCenter = { longitude: -47.9292, latitude: -15.7801 },
   className, onLocate,
 }) {
   const { map } = useMap();
@@ -489,12 +492,10 @@ export function MapControls({
   const zoomOut   = useCallback(() => map?.zoomTo(map.getZoom() - 1, { duration: 300 }), [map]);
   const resetNorth= useCallback(() => map?.resetNorthPitch({ duration: 300 }), [map]);
   const locate    = useCallback(() => {
-    // Estrada dos Cunhas 1203, Sala N2, Itapeva, Torres RS — fallback sem HTTPS
-    const CITY_FALLBACK = { longitude: -49.77948745767169, latitude: -29.38731801148806 }; // Estrada dos Cunhas 1203, Sala 2, Itapeva, Torres RS
     setWaiting(true);
     if (!navigator.geolocation) {
-      map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 14, duration: 1500 });
-      onLocate?.(CITY_FALLBACK);
+      map?.flyTo({ center: [fallbackCenter.longitude, fallbackCenter.latitude], zoom: 14, duration: 1500 });
+      onLocate?.(fallbackCenter);
       setWaiting(false);
       return;
     }
@@ -506,13 +507,13 @@ export function MapControls({
         setWaiting(false);
       },
       () => {
-        // GPS bloqueado (HTTP) — apenas centraliza o mapa, NÃO move o alfinete
-        map?.flyTo({ center: [CITY_FALLBACK.longitude, CITY_FALLBACK.latitude], zoom: 13, duration: 1500 });
-        // onLocate NÃO é chamado: fallback de cidade não é localização real do usuário
+        // GPS bloqueado — centraliza no restaurante, NÃO move o alfinete
+        map?.flyTo({ center: [fallbackCenter.longitude, fallbackCenter.latitude], zoom: 13, duration: 1500 });
+        // onLocate NÃO é chamado: fallback não é localização real do usuário
         setWaiting(false);
       },
     );
-  }, [map, onLocate]);
+  }, [map, onLocate, fallbackCenter]);
   const fullscreen = useCallback(() => {
     const c = map?.getContainer();
     if (!c) return;
