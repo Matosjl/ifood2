@@ -166,7 +166,7 @@ const getCustomer = asyncHandler(async (req, res) => {
 // ── POST /api/public/:slug/orders  — criar pedido ─────────────
 const createOrder = asyncHandler(async (req, res) => {
   const { rows: tenants } = await db.query(
-    `SELECT id, cashback_enabled, cashback_rate, cashback_min_order
+    `SELECT id, cashback_enabled, cashback_rate, cashback_min_order, delivery_zones
      FROM tenants WHERE slug = $1 AND active = true`,
     [req.params.slug]
   );
@@ -185,6 +185,32 @@ const createOrder = asyncHandler(async (req, res) => {
   if (!customerName)  throw new AppError('Informe seu nome.', 400);
   if (deliveryType === 'delivery' && !customerAddress)
     throw new AppError('Informe o endereço de entrega.', 400);
+
+  // ── Validação de zona/taxa de entrega (canal público) ──────────
+  // Fecha o bypass via API: nunca confiar cegamente na deliveryFee do frontend.
+  // Só vale para delivery — pickup/local não dependem de zona.
+  if (deliveryType === 'delivery') {
+    // delivery_zones é JSONB (normalmente já vem como array); parse defensivo se vier string.
+    let zones = tenant.delivery_zones;
+    if (typeof zones === 'string') {
+      try { zones = JSON.parse(zones); } catch { zones = null; }
+    }
+    if (!Array.isArray(zones) || zones.length === 0) {
+      console.warn(`[public] delivery bloqueado: tenant sem zonas configuradas (slug=${req.params.slug})`);
+      throw new AppError('Entrega indisponível: o restaurante ainda não configurou as zonas de entrega.', 400);
+    }
+
+    const fee = parseFloat(deliveryFee);
+    if (deliveryFee === null || deliveryFee === undefined || Number.isNaN(fee) || fee < 0) {
+      throw new AppError('Taxa de entrega inválida.', 400);
+    }
+
+    // Frete grátis (fee = 0) só é aceito se existir zona configurada com fee 0.
+    if (fee === 0 && !zones.some((z) => parseFloat(z?.fee) === 0)) {
+      console.warn(`[public] delivery bloqueado: fee=0 sem zona gratuita (slug=${req.params.slug})`);
+      throw new AppError('Taxa de entrega não calculada. Selecione o endereço para calcular o frete.', 400);
+    }
+  }
 
   // ── Fidelidade: busca/cria cliente pelo telefone ──────────
   let loyaltyCustomer = null;

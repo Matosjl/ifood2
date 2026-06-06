@@ -119,6 +119,13 @@ const syncTenant = async (tenant) => {
         ? `${addr.streetName ?? ''}, ${addr.streetNumber ?? ''} — ${addr.neighborhood ?? ''}, ${addr.city ?? ''}`
         : null;
 
+      // Guard: se o pedido iFood não tem itens, não cria pedido no ZapFome.
+      const mappedItems = mapItems(ifoodOrder.items);
+      if (mappedItems.length === 0) {
+        console.warn(`[iFood] Pedido externo ignorado: sem itens (orderId=${orderId}, tenant=${tenantId})`);
+        continue;
+      }
+
       await createExternalOrder(tenantId, {
         externalId:      orderId,
         channel:         'ifood',
@@ -131,7 +138,7 @@ const syncTenant = async (tenant) => {
         deliveryFee:     parseFloat(ifoodOrder.deliveryFee ?? 0),
         total:           parseFloat(ifoodOrder.totalPrice  ?? 0),
         notes:           ifoodOrder.observations ?? null,
-        items:           mapItems(ifoodOrder.items),
+        items:           mappedItems,
       });
 
       // Confirma recebimento ao iFood

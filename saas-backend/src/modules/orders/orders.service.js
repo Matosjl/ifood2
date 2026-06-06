@@ -526,6 +526,15 @@ const createExternalOrder = async (tenantId, {
   notes, items, deliveryType = 'delivery', paymentMethod = 'pix',
   deliveryFee = 0, total,
 }) => {
+  // Guard: nenhum pedido externo pode ser criado sem itens válidos.
+  // Item válido = objeto com nome não-vazio. Rejeita [], undefined, [null], [{}].
+  const validItems = Array.isArray(items)
+    ? items.filter((it) => it && String(it.name ?? '').trim() !== '')
+    : [];
+  if (validItems.length === 0) {
+    throw new AppError('Pedido externo ignorado: sem itens válidos.', 400);
+  }
+
   // Idempotência: se já existe, retorna existente
   const { rows: existing } = await db.query(
     `SELECT id FROM orders WHERE external_id = $1 AND tenant_id = $2`,
@@ -581,7 +590,7 @@ const createExternalOrder = async (tenantId, {
       return p ? parseFloat(p.cost_price) : 0;
     };
 
-    for (const item of items) {
+    for (const item of validItems) {
       const qty      = parseInt(item.quantity, 10) || 1;
       const unitCost = findCost(item.name ?? '');
       await Order.createItem({
