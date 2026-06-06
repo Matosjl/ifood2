@@ -176,7 +176,8 @@ const createOrder = asyncHandler(async (req, res) => {
   const {
     customerName, customerPhone, customerAddress,
     deliveryType, notes, items, paymentMethod,
-    deliveryFee,  // D1: taxa enviada pelo cardápio digital
+    deliveryFee,    // D1: taxa enviada pelo cardápio digital
+    neighborhood,   // D5: bairro para validação de zona no backend (D2)
     useCashback, tableNumber,
     deliveryLat, deliveryLng,
   } = req.body;
@@ -248,7 +249,9 @@ const createOrder = asyncHandler(async (req, res) => {
         notes,
         items,
         // D1: repassa taxa recebida do frontend; 0 se não for delivery
-        deliveryFee: deliveryType === 'delivery' ? (parseFloat(deliveryFee) || 0) : 0,
+        deliveryFee:  deliveryType === 'delivery' ? (parseFloat(deliveryFee) || 0) : 0,
+        // D5: repassa bairro para que o guard D2 (orders.service) valide a taxa contra as zonas
+        neighborhood: deliveryType === 'delivery' ? (neighborhood?.trim() || null) : null,
         loyaltyCustomerId: loyaltyCustomer?.id ?? null,
         cashbackUsed,
         tableNumber: tableNumber || null,

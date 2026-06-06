@@ -1075,6 +1075,8 @@ export default function CustomerApp({ slug }) {
         items,
         // D1: envia deliveryFee ao backend para que seja gravada corretamente
         deliveryFee: deliveryType === 'delivery' ? (deliveryFeeMap ?? 0) : 0,
+        // D5: envia bairro para que o backend (D2) possa validar a taxa contra as zonas configuradas
+        neighborhood: deliveryType === 'delivery' ? (cepNeighborhood.trim() || undefined) : undefined,
         useCashback: useCashback && !!loyaltyData,
         tableNumber: tableParam || undefined,
         deliveryLat:  deliveryLat  || undefined,
