@@ -202,19 +202,23 @@ const closeCaixa = asyncHandler(async (req, res) => {
            card_counted    = $9,
            pix_counted     = $10,
            discrepancy     = $11
-       WHERE id = $1
+       -- C3: AND status = 'open' garante idempotência em race conditions concorrentes
+       WHERE id = $1 AND status = 'open'
        RETURNING *`,
       [caixa.id, req.user.userId, s.total_revenue, s.total_orders,
        JSON.stringify(paymentSummary), closingBalance, notes ?? null,
        cashC, cardC, pixC, discrepancy]
     );
+    // C3: se 0 linhas retornadas, outro request fechou o caixa primeiro
+    if (!rows[0]) throw new AppError('Este caixa já foi fechado.', 409);
     closedCaixa = rows[0];
 
-    // Registra no Banco virtual dentro da mesma transação
+    // M2: ON CONFLICT garante que retry ou race não duplica lançamento no banco virtual
     if (s.total_revenue > 0) {
       await dbClient.query(
         `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
-         VALUES ($1, 'credit', $2, $3, 'caixa', $4)`,
+         VALUES ($1, 'credit', $2, $3, 'caixa', $4)
+         ON CONFLICT (reference_id) WHERE source = 'caixa' AND reference_id IS NOT NULL DO NOTHING`,
         [tenantId, s.total_revenue,
          `Fechamento de caixa — ${s.total_orders} pedido(s)`,
          caixa.id]

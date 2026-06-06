@@ -577,8 +577,11 @@ const deductForOrder = async (tenantId, orderId) => {
       const qty = parseFloat(item.quantity ?? 1);
 
       if (!isComboMap[item.product_id]) {
-        // Produto normal — usa diretamente
-        effectiveItemsRaw.push({ product_id: item.product_id, effectiveQty: qty });
+        // Produto normal — A5: usa weight_kg quando produto é vendido por kg
+        const effectiveQty = (item.weight_kg && parseFloat(item.weight_kg) > 0)
+          ? parseFloat(item.weight_kg)
+          : qty;
+        effectiveItemsRaw.push({ product_id: item.product_id, effectiveQty });
       } else {
         // Combo — expandir filhos
         const { rows: children } = await client.query(
@@ -753,7 +756,11 @@ const revertForOrder = async (tenantId, orderId) => {
       if (!item.product_id) continue;
       const qty = parseFloat(item.quantity ?? 1);
       if (!isComboMap[item.product_id]) {
-        effectiveItemsRaw.push({ product_id: item.product_id, effectiveQty: qty });
+        // A5: usa weight_kg quando produto é vendido por kg
+        const effectiveQty = (item.weight_kg && parseFloat(item.weight_kg) > 0)
+          ? parseFloat(item.weight_kg)
+          : qty;
+        effectiveItemsRaw.push({ product_id: item.product_id, effectiveQty });
       } else {
         const { rows: children } = await client.query(
           `SELECT child_product_id, qty FROM product_combos

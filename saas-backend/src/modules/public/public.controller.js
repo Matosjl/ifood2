@@ -176,6 +176,7 @@ const createOrder = asyncHandler(async (req, res) => {
   const {
     customerName, customerPhone, customerAddress,
     deliveryType, notes, items, paymentMethod,
+    deliveryFee,  // D1: taxa enviada pelo cardápio digital
     useCashback, tableNumber,
     deliveryLat, deliveryLng,
   } = req.body;
@@ -220,6 +221,8 @@ const createOrder = asyncHandler(async (req, res) => {
         channel: 'online',
         notes,
         items,
+        // D1: repassa taxa recebida do frontend; 0 se não for delivery
+        deliveryFee: deliveryType === 'delivery' ? (parseFloat(deliveryFee) || 0) : 0,
         loyaltyCustomerId: loyaltyCustomer?.id ?? null,
         cashbackUsed,
         tableNumber: tableNumber || null,

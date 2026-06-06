@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS orders (
   -- status: pending | confirmed | preparing | ready | delivered | cancelled
   total            DECIMAL(10,2) NOT NULL DEFAULT 0,
   notes            TEXT,
-  idempotency_key  VARCHAR(255)  UNIQUE,   -- deduplicacao de pedidos
+  idempotency_key  VARCHAR(255),            -- deduplicacao de pedidos (UNIQUE por tenant — ver idx abaixo)
   created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   UNIQUE(tenant_id, order_number)
@@ -151,10 +151,24 @@ CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders(tenant_id, status, cr
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements   ON stock_movements(product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens    ON refresh_tokens(user_id, expires_at);
-CREATE INDEX IF NOT EXISTS idx_orders_idem       ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL;
+-- B3: idempotency_key única por TENANT (não global) — permite mesmo key em tenants diferentes
+CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idem_per_tenant
+  ON orders(tenant_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 -- ── MIGRACOES INCREMENTAIS (safe para DBs existentes) ─────────
-ALTER TABLE orders  ADD COLUMN IF NOT EXISTS idempotency_key    VARCHAR(255) UNIQUE;
+-- B3: Sprint 0B — idempotency_key por tenant (não global)
+-- Detecção de conflitos antes de aplicar (deve retornar 0 linhas):
+--   SELECT idempotency_key, COUNT(DISTINCT tenant_id) FROM orders
+--   WHERE idempotency_key IS NOT NULL GROUP BY idempotency_key
+--   HAVING COUNT(DISTINCT tenant_id) > 1;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
+-- Remove constraint global se existir (seguro: IF EXISTS)
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_idempotency_key_key;
+-- Índice único por tenant substitui a constraint global
+CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idem_per_tenant
+  ON orders(tenant_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_status  VARCHAR(20)  NOT NULL DEFAULT 'active';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_date    TIMESTAMPTZ;
@@ -274,6 +288,16 @@ ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS cash_counted  DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS card_counted  DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS pix_counted   DECIMAL(10,2);
 ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS discrepancy   DECIMAL(10,2);
+
+-- Sprint 0A — C2: só 1 caixa aberto por tenant (elimina race condition)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_registers_open_tenant
+  ON cash_registers(tenant_id)
+  WHERE status = 'open';
+
+-- Sprint 0A — M2: só 1 banco_transaction por fechamento de caixa
+CREATE UNIQUE INDEX IF NOT EXISTS uq_banco_caixa_reference
+  ON banco_transactions(reference_id)
+  WHERE source = 'caixa' AND reference_id IS NOT NULL;
 
 -- Trial de 14 dias no tenant
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
@@ -940,7 +964,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lng DECIMAL(10,7);
 
 -- Percentual da taxa de entrega repassado ao motoboy (default 70%)
 -- Configura por tenant em Configurações → Entrega
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS driver_fee_pct DECIMAL(5,2) NOT NULL DEFAULT 70;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS driver_fee_pct  DECIMAL(5,2) NOT NULL DEFAULT 70;
+-- D3: piso mínimo de repasse ao motoboy (evita R$ 0 quando delivery_fee = 0)
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS driver_min_fee  DECIMAL(10,2) NOT NULL DEFAULT 0;
 
 -- ── IDEMPOTÊNCIA DE DEDUÇÃO DE INSUMOS ────────────────────────
 -- Garante que deductForOrder nunca execute duas vezes no mesmo pedido.

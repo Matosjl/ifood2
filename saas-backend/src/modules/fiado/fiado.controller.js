@@ -81,10 +81,10 @@ exports.deleteCliente = async (req, res, next) => {
     const { tenantId } = req.user;
     const { id } = req.params;
 
-    // Não permite deletar se tiver compras pendentes
+    // Não permite deletar se tiver compras pendentes (B4: filtra por tenant_id)
     const { rows: pending } = await db.query(
-      `SELECT COUNT(*) FROM fiado_compras WHERE cliente_id=$1 AND status='pendente'`,
-      [id]
+      `SELECT COUNT(*) FROM fiado_compras WHERE cliente_id=$1 AND tenant_id=$2 AND status='pendente'`,
+      [id, tenantId]
     );
     if (parseInt(pending[0].count) > 0)
       throw new AppError('Cliente tem compras pendentes. Quite antes de remover.', 409);

@@ -185,6 +185,30 @@ const createOrder = async (tenantId, {
     );
     const productMap = Object.fromEntries(products.map(p => [p.id, p]));
 
+    // D2: valida deliveryFee contra delivery_zones do tenant (canal online/delivery)
+    // Se o bairro tem zona configurada e a taxa enviada diverge mais de R$0,50 → corrige
+    if (deliveryType === 'delivery' && neighborhood) {
+      const { rows: tenantZones } = await client.query(
+        `SELECT delivery_zones FROM tenants WHERE id = $1`, [tenantId]
+      );
+      const zones = tenantZones[0]?.delivery_zones;
+      if (Array.isArray(zones) && zones.length > 0) {
+        const zone = zones.find(
+          (z) => z.name?.toLowerCase() === neighborhood?.toLowerCase()
+        );
+        if (zone) {
+          const zoneFee = parseFloat(zone.fee) || 0;
+          const sentFee = parseFloat(deliveryFee) || 0;
+          if (Math.abs(sentFee - zoneFee) > 0.50) {
+            logger.warn('D2: delivery_fee diverge da zona — corrigido pelo backend', {
+              tenantId, neighborhood, sent: sentFee, zone: zoneFee,
+            });
+            deliveryFee = zoneFee;
+          }
+        }
+      }
+    }
+
     // Valida e calcula totais
     let orderTotal = parseFloat(deliveryFee) || 0;
     const resolvedItems = [];

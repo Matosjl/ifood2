@@ -96,6 +96,10 @@ const updateStatus = asyncHandler(async (req, res) => {
 
   // Cancelamento ainda precisa da fila (devolve estoque)
   if (status === 'cancelled') {
+    // A6: apenas owner/manager podem cancelar via PATCH /status
+    if (!['owner', 'manager'].includes(req.user.role)) {
+      throw new AppError('Apenas owner ou manager podem cancelar pedidos.', 403);
+    }
     const { cancelReason } = req.body;
     const order = await enqueueAndWait('cancel', {
       orderId:      req.params.id,

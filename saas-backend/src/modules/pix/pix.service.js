@@ -7,6 +7,7 @@ const crypto     = require('crypto');
 const db         = require('../../config/database');
 const AppError   = require('../../utils/AppError');
 const eventService = require('../../socket/eventService');
+const { deductForOrder } = require('../insumos/insumos.service');
 
 const OPENPIX_BASE = 'https://api.openpix.com.br/api/v1';
 
@@ -201,6 +202,13 @@ async function handleWebhook(rawBody, signature, webhookSecret) {
   );
   if (updatedOrder) {
     eventService.orderUpdated(order.tenant_id, updatedOrder);
+  }
+
+  // C6: pedido confirmado via PIX → baixa insumos (idempotente via insumos_deducted)
+  if (newStatus === 'confirmed') {
+    deductForOrder(order.tenant_id, orderId).catch((err) => {
+      console.error('[PIX webhook] deductForOrder falhou (non-critical):', err.message);
+    });
   }
 
   return { processed: true, orderId, newStatus };

@@ -145,7 +145,8 @@ const acceptDelivery = async (driverId, orderId) => {
     // Verifica se o pedido ainda está disponível + busca driver_fee_pct do tenant
     const { rows: orderRows } = await client.query(
       `SELECT o.id, o.tenant_id, o.delivery_fee,
-              COALESCE(t.driver_fee_pct, 70) AS driver_fee_pct
+              COALESCE(t.driver_fee_pct, 70) AS driver_fee_pct,
+              COALESCE(t.driver_min_fee,  0) AS driver_min_fee
        FROM orders o
        JOIN tenants t ON t.id = o.tenant_id
        JOIN driver_tenant_connections dtc
@@ -169,8 +170,10 @@ const acceptDelivery = async (driverId, orderId) => {
       throw new AppError('Pedido já aceito por outro motoboy.', 409);
     }
 
-    const pct      = parseFloat(orderRows[0].driver_fee_pct) / 100;
-    const driverFee = (parseFloat(orderRows[0].delivery_fee) || 0) * pct;
+    const pct       = parseFloat(orderRows[0].driver_fee_pct) / 100;
+    const minFee    = parseFloat(orderRows[0].driver_min_fee) || 0;
+    // D3: Math.max garante piso mínimo — motoboy nunca recebe R$ 0
+    const driverFee = Math.max((parseFloat(orderRows[0].delivery_fee) || 0) * pct, minFee);
 
     const { rows } = await client.query(
       `INSERT INTO deliveries (order_id, driver_id, tenant_id, status, driver_fee, accepted_at)
@@ -360,7 +363,8 @@ const assignDelivery = async (tenantId, orderId, driverId) => {
 
     const { rows: orderRows } = await client.query(
       `SELECT o.id, o.delivery_fee,
-              COALESCE(t.driver_fee_pct, 70) AS driver_fee_pct
+              COALESCE(t.driver_fee_pct, 70) AS driver_fee_pct,
+              COALESCE(t.driver_min_fee,  0) AS driver_min_fee
        FROM orders o
        JOIN tenants t ON t.id = o.tenant_id
        WHERE o.id=$1 AND o.tenant_id=$2 AND o.status='ready' AND o.delivery_type='delivery'`,
@@ -384,7 +388,9 @@ const assignDelivery = async (tenantId, orderId, driverId) => {
       throw new AppError('Este pedido já foi atribuído a um motoboy.', 409);
 
     const pct       = parseFloat(orderRows[0].driver_fee_pct) / 100;
-    const driverFee = (parseFloat(orderRows[0].delivery_fee) || 0) * pct;
+    const minFee    = parseFloat(orderRows[0].driver_min_fee) || 0;
+    // D3: Math.max garante piso mínimo — motoboy nunca recebe R$ 0
+    const driverFee = Math.max((parseFloat(orderRows[0].delivery_fee) || 0) * pct, minFee);
 
     const { rows } = await client.query(
       `INSERT INTO deliveries (order_id, driver_id, tenant_id, status, driver_fee, accepted_at)

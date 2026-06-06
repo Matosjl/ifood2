@@ -1006,6 +1006,9 @@ export default function CustomerApp({ slug }) {
     if (!customerName.trim()) return setCheckoutError('Informe seu nome.');
     if (deliveryType === 'delivery' && !customerAddress.trim())
       return setCheckoutError('Informe o endereço de entrega.');
+    // D1: bloqueia submit sem taxa calculada (endereço digitado manualmente sem confirmar mapa)
+    if (deliveryType === 'delivery' && deliveryFeeMap === null)
+      return setCheckoutError('Confirme o endereço no mapa para calcular a taxa de entrega.');
     if (cartEntries.length === 0) return setCheckoutError('Carrinho vazio.');
 
     // Valida peso para produtos por kg
@@ -1038,6 +1041,8 @@ export default function CustomerApp({ slug }) {
         paymentMethod,
         notes: finalNotes || undefined,
         items,
+        // D1: envia deliveryFee ao backend para que seja gravada corretamente
+        deliveryFee: deliveryType === 'delivery' ? (deliveryFeeMap ?? 0) : 0,
         useCashback: useCashback && !!loyaltyData,
         tableNumber: tableParam || undefined,
         deliveryLat:  deliveryLat  || undefined,

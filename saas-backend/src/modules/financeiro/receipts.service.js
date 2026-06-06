@@ -231,14 +231,33 @@ async function confirm(tenantId, id, userId = null) {
         const novoUnitCost = parseFloat(r.valor_unit || 0);
 
         // UPDATE insumos: estoque + custo unitário
-        await client.query(
+        // M4: RETURNING captura qty_before para gerar insumo_movement
+        const { rows: [updatedInsumo] } = await client.query(
           `UPDATE insumos
            SET qty_in_stock  = qty_in_stock + $1,
                cost_per_unit = CASE WHEN $2 > 0 THEN $2 ELSE cost_per_unit END,
                updated_at    = NOW()
-           WHERE id = $3 AND tenant_id = $4`,
+           WHERE id = $3 AND tenant_id = $4
+           RETURNING qty_in_stock, (qty_in_stock - $1) AS qty_before`,
           [qty, novoUnitCost, insumoId, tenantId]
         );
+
+        // M4: grava movimentação tipo 'purchase' para rastreabilidade e CMV
+        if (updatedInsumo) {
+          await client.query(
+            `INSERT INTO insumo_movements
+               (tenant_id, insumo_id, type, qty, qty_before, qty_after,
+                reason, reference_type, created_by)
+             VALUES ($1, $2, 'purchase', $3, $4, $5, $6, 'receipt', $7)`,
+            [
+              tenantId, insumoId, qty,
+              parseFloat(updatedInsumo.qty_before),
+              parseFloat(updatedInsumo.qty_in_stock),
+              `Nota fiscal — ${productName ?? r.descricao}`,
+              userId,
+            ]
+          );
+        }
 
         // Propagação de custo: recalcula cost_price dos produtos que usam este insumo.
         // Soma cost_per_unit × qty_per_unit de todos os insumos da ficha técnica.

@@ -112,4 +112,73 @@ describe('POST /api/public/:slug/orders', () => {
     expect(res.body.success).toBe(false);
     expect(enqueueAndWait).not.toHaveBeenCalled();
   });
+
+  // ── D1: deliveryFee deve chegar ao worker ─────────────────────
+
+  it('D1 — delivery com deliveryFee=8 repassa taxa ao worker', async () => {
+    const res = await request(app)
+      .post(`/api/public/${slug}/orders`)
+      .send({
+        customerName:    'Cliente Delivery',
+        customerAddress: 'Rua das Flores 123',
+        deliveryType:    'delivery',
+        deliveryFee:     8,
+        items: [{ productId: 'some-product-id', quantity: 1 }],
+      });
+
+    expect(res.status).toBe(201);
+    // Worker deve receber deliveryFee=8 no payload
+    expect(enqueueAndWait).toHaveBeenCalledWith(
+      'create',
+      expect.objectContaining({
+        payload: expect.objectContaining({ deliveryFee: 8 }),
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it('D1 — pickup força deliveryFee=0 mesmo se frontend enviar outro valor', async () => {
+    const res = await request(app)
+      .post(`/api/public/${slug}/orders`)
+      .send({
+        customerName: 'Cliente Retirada',
+        deliveryType: 'pickup',
+        deliveryFee:  99,   // valor malicioso — deve ser ignorado
+        items: [{ productId: 'some-product-id', quantity: 1 }],
+      });
+
+    expect(res.status).toBe(201);
+    // Worker deve receber deliveryFee=0 para pickup independente do que veio
+    expect(enqueueAndWait).toHaveBeenCalledWith(
+      'create',
+      expect.objectContaining({
+        payload: expect.objectContaining({ deliveryFee: 0 }),
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it('D1 — delivery sem deliveryFee no payload grava 0 (comportamento legado documentado)', async () => {
+    // Este teste documenta o comportamento sem o guard do frontend:
+    // se deliveryFee não vier, o backend grava 0.
+    // O guard no CustomerApp.jsx bloqueia este caminho no cardápio digital.
+    const res = await request(app)
+      .post(`/api/public/${slug}/orders`)
+      .send({
+        customerName:    'Cliente Sem Taxa',
+        customerAddress: 'Rua X 1',
+        deliveryType:    'delivery',
+        // deliveryFee omitido intencionalmente
+        items: [{ productId: 'some-product-id', quantity: 1 }],
+      });
+
+    expect(res.status).toBe(201);
+    expect(enqueueAndWait).toHaveBeenCalledWith(
+      'create',
+      expect.objectContaining({
+        payload: expect.objectContaining({ deliveryFee: 0 }),
+      }),
+      expect.any(Object)
+    );
+  });
 });
