@@ -1006,6 +1006,8 @@ export default function CustomerApp({ slug }) {
     if (!customerName.trim()) return setCheckoutError('Informe seu nome.');
     if (deliveryType === 'delivery' && !customerAddress.trim())
       return setCheckoutError('Informe o endereço de entrega.');
+    if (deliveryType === 'delivery' && !hasDeliveryZones)
+      return setCheckoutError('Entrega indisponível — o restaurante não configurou zonas de entrega.');
     // D1: bloqueia submit sem taxa calculada (endereço digitado manualmente sem confirmar mapa)
     if (deliveryType === 'delivery' && deliveryFeeMap === null)
       return setCheckoutError('Confirme o endereço no mapa para calcular a taxa de entrega.');
@@ -1103,8 +1105,10 @@ export default function CustomerApp({ slug }) {
     );
   }
 
-  const tenant     = menuData?.tenant ?? {};
-  const categories = menuData?.categories ?? [];
+  const tenant            = menuData?.tenant ?? {};
+  const categories        = menuData?.categories ?? [];
+  const deliveryZones     = Array.isArray(tenant.delivery_zones) ? tenant.delivery_zones : [];
+  const hasDeliveryZones  = deliveryZones.length > 0;
 
   // ── PAGE: TRACKING ────────────────────────────────────────
 
@@ -1123,15 +1127,14 @@ export default function CustomerApp({ slug }) {
 
   // ── Map picker overlay (renders above checkout/menu) ─────
   if (showMap) {
-    const t = menuData?.tenant ?? {};
     return (
       <DeliveryMapPicker
-        initialLat={deliveryLat || t.restaurant_lat || -15.7942}
-        initialLng={deliveryLng || t.restaurant_lng || -47.8822}
-        deliveryZones={t.delivery_zones ?? []}
-        deliveryZoneType={t.delivery_zone_type ?? 'named'}
-        restaurantLat={t.restaurant_lat}
-        restaurantLng={t.restaurant_lng}
+        initialLat={deliveryLat || tenant.restaurant_lat || -15.7942}
+        initialLng={deliveryLng || tenant.restaurant_lng || -47.8822}
+        deliveryZones={deliveryZones}
+        deliveryZoneType={tenant.delivery_zone_type ?? 'named'}
+        restaurantLat={tenant.restaurant_lat}
+        restaurantLng={tenant.restaurant_lng}
         onConfirm={handleMapConfirm}
         onClose={() => setShowMap(false)}
       />
@@ -1274,13 +1277,25 @@ export default function CustomerApp({ slug }) {
               </div>
               <div className="px-4 py-4 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  {[{ v: 'pickup', icon: '🏪', label: 'Retirar no Local' }, { v: 'delivery', icon: '🛵', label: 'Receber em Casa' }].map(({ v, icon, label }) => (
-                    <button key={v} onClick={() => setDeliveryType(v)}
-                      className={`flex flex-col items-center gap-1.5 py-4 rounded-xl font-bold text-sm border-2 transition-all ${deliveryType === v ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-                      <span className="text-2xl">{icon}</span>{label}
-                    </button>
-                  ))}
+                  {[{ v: 'pickup', icon: '🏪', label: 'Retirar no Local' }, { v: 'delivery', icon: '🛵', label: 'Receber em Casa' }].map(({ v, icon, label }) => {
+                    const isDeliveryUnavailable = v === 'delivery' && !hasDeliveryZones;
+                    return (
+                      <button key={v}
+                        onClick={() => !isDeliveryUnavailable && setDeliveryType(v)}
+                        disabled={isDeliveryUnavailable}
+                        title={isDeliveryUnavailable ? 'Entrega não disponível — restaurante ainda não configurou as zonas de entrega.' : undefined}
+                        className={`flex flex-col items-center gap-1.5 py-4 rounded-xl font-bold text-sm border-2 transition-all ${isDeliveryUnavailable ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed opacity-50' : deliveryType === v ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                        <span className="text-2xl">{icon}</span>{label}
+                        {isDeliveryUnavailable && <span className="text-[10px] font-normal text-gray-400 leading-tight text-center">Indisponível</span>}
+                      </button>
+                    );
+                  })}
                 </div>
+                {!hasDeliveryZones && deliveryType === 'delivery' && (
+                  <p className="text-xs text-amber-600 font-medium px-1">
+                    ⚠️ Entrega online não está disponível. Redefina para retirada.
+                  </p>
+                )}
                 {deliveryType === 'delivery' && (
                   <div className="space-y-2">
 
