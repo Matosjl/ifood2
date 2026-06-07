@@ -168,4 +168,130 @@ const getComboItems = async (tenantId, productId) => {
   return rows;
 };
 
-module.exports = { getCombo, addItem, removeItem, getComboItems };
+// ── Grupos de Escolha (Combo V2) ──────────────────────────────
+
+/**
+ * Lista grupos de escolha de um combo com seus itens.
+ */
+const getOptionGroups = async (tenantId, comboProductId) => {
+  const { rows: groups } = await db.query(
+    `SELECT * FROM combo_option_groups
+     WHERE combo_product_id = $1 AND tenant_id = $2
+     ORDER BY sort_order, created_at`,
+    [comboProductId, tenantId]
+  );
+  if (groups.length === 0) return [];
+
+  const { rows: items } = await db.query(
+    `SELECT coi.id, coi.group_id, coi.product_id, coi.extra_price, coi.sort_order,
+            p.name AS product_name, p.cost_price, p.active, p.sale_price
+     FROM   combo_option_items coi
+     JOIN   products p ON p.id = coi.product_id
+     WHERE  coi.group_id = ANY($1::uuid[]) AND coi.tenant_id = $2
+     ORDER  BY coi.sort_order, coi.created_at`,
+    [groups.map((g) => g.id), tenantId]
+  );
+
+  return groups.map((g) => ({ ...g, items: items.filter((i) => i.group_id === g.id) }));
+};
+
+/**
+ * Cria um grupo de escolha em um combo.
+ */
+const createOptionGroup = async (tenantId, comboProductId, { name, min_select = 1, max_select = 1, sort_order = 0 }) => {
+  await assertIsCombo(tenantId, comboProductId);
+  if (!name?.trim()) throw new AppError('Nome do grupo é obrigatório.', 400);
+  const minS = Math.max(0, parseInt(min_select) || 0);
+  const maxS = Math.max(1, parseInt(max_select) || 1);
+  if (minS > maxS) throw new AppError('min_select não pode ser maior que max_select.', 400);
+
+  const { rows } = await db.query(
+    `INSERT INTO combo_option_groups (tenant_id, combo_product_id, name, min_select, max_select, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [tenantId, comboProductId, name.trim(), minS, maxS, parseInt(sort_order) || 0]
+  );
+  return { ...rows[0], items: [] };
+};
+
+/**
+ * Atualiza nome, min/max ou sort_order de um grupo.
+ */
+const updateOptionGroup = async (tenantId, comboProductId, groupId, data) => {
+  const { name, min_select, max_select, sort_order } = data;
+  const { rows } = await db.query(
+    `UPDATE combo_option_groups
+     SET name       = COALESCE($4,         name),
+         min_select = COALESCE($5::int,    min_select),
+         max_select = COALESCE($6::int,    max_select),
+         sort_order = COALESCE($7::int,    sort_order)
+     WHERE id = $1 AND combo_product_id = $2 AND tenant_id = $3
+     RETURNING *`,
+    [groupId, comboProductId, tenantId,
+     name?.trim() || null,
+     min_select != null ? parseInt(min_select) : null,
+     max_select != null ? parseInt(max_select) : null,
+     sort_order != null ? parseInt(sort_order) : null]
+  );
+  if (!rows[0]) throw new AppError('Grupo não encontrado.', 404);
+  return rows[0];
+};
+
+/**
+ * Remove um grupo e seus itens (cascade na FK).
+ */
+const deleteOptionGroup = async (tenantId, comboProductId, groupId) => {
+  await assertIsCombo(tenantId, comboProductId);
+  const { rowCount } = await db.query(
+    `DELETE FROM combo_option_groups WHERE id = $1 AND combo_product_id = $2 AND tenant_id = $3`,
+    [groupId, comboProductId, tenantId]
+  );
+  if (rowCount === 0) throw new AppError('Grupo não encontrado.', 404);
+};
+
+/**
+ * Adiciona um produto como opção de um grupo.
+ */
+const addOptionItem = async (tenantId, comboProductId, groupId, { product_id, extra_price = 0, sort_order = 0 }) => {
+  await assertIsCombo(tenantId, comboProductId);
+  if (!product_id) throw new AppError('product_id é obrigatório.', 400);
+
+  const { rows: grp } = await db.query(
+    `SELECT id FROM combo_option_groups WHERE id = $1 AND combo_product_id = $2 AND tenant_id = $3`,
+    [groupId, comboProductId, tenantId]
+  );
+  if (!grp[0]) throw new AppError('Grupo não encontrado.', 404);
+
+  await assertValidChild(tenantId, product_id, comboProductId);
+
+  try {
+    await db.query(
+      `INSERT INTO combo_option_items (tenant_id, group_id, product_id, extra_price, sort_order)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tenantId, groupId, product_id, parseFloat(extra_price) || 0, parseInt(sort_order) || 0]
+    );
+  } catch (err) {
+    if (err.code === '23505') throw new AppError('Este produto já está neste grupo.', 409);
+    throw err;
+  }
+
+  return getOptionGroups(tenantId, comboProductId);
+};
+
+/**
+ * Remove uma opção de um grupo.
+ */
+const removeOptionItem = async (tenantId, comboProductId, groupId, itemId) => {
+  await assertIsCombo(tenantId, comboProductId);
+  const { rowCount } = await db.query(
+    `DELETE FROM combo_option_items WHERE id = $1 AND group_id = $2 AND tenant_id = $3`,
+    [itemId, groupId, tenantId]
+  );
+  if (rowCount === 0) throw new AppError('Item não encontrado.', 404);
+  return getOptionGroups(tenantId, comboProductId);
+};
+
+module.exports = {
+  getCombo, addItem, removeItem, getComboItems,
+  getOptionGroups, createOptionGroup, updateOptionGroup, deleteOptionGroup,
+  addOptionItem, removeOptionItem,
+};

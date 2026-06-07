@@ -32,4 +32,49 @@ const removeItem = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
-module.exports = { getCombo, addItem, removeItem };
+// ── Option Groups ─────────────────────────────────────────────
+
+// GET /api/combos/:productId/option-groups
+const getOptionGroups = asyncHandler(async (req, res) => {
+  const data = await svc.getOptionGroups(req.user.tenantId, req.params.productId);
+  res.json({ success: true, data });
+});
+
+// POST /api/combos/:productId/option-groups
+const createOptionGroup = asyncHandler(async (req, res) => {
+  const { name, min_select, max_select, sort_order } = req.body;
+  const data = await svc.createOptionGroup(req.user.tenantId, req.params.productId,
+    { name, min_select, max_select, sort_order });
+  res.status(201).json({ success: true, data });
+});
+
+// PUT /api/combos/:productId/option-groups/:groupId
+const updateOptionGroup = asyncHandler(async (req, res) => {
+  const { name, min_select, max_select, sort_order } = req.body;
+  const data = await svc.updateOptionGroup(req.user.tenantId, req.params.productId,
+    req.params.groupId, { name, min_select, max_select, sort_order });
+  res.json({ success: true, data });
+});
+
+// DELETE /api/combos/:productId/option-groups/:groupId
+const deleteOptionGroup = asyncHandler(async (req, res) => {
+  await svc.deleteOptionGroup(req.user.tenantId, req.params.productId, req.params.groupId);
+  res.json({ success: true });
+});
+
+// POST /api/combos/:productId/option-groups/:groupId/items
+const addOptionItem = asyncHandler(async (req, res) => {
+  const { product_id, extra_price, sort_order } = req.body;
+  const data = await svc.addOptionItem(req.user.tenantId, req.params.productId,
+    req.params.groupId, { product_id, extra_price, sort_order });
+  res.status(201).json({ success: true, data });
+});
+
+// DELETE /api/combos/:productId/option-groups/:groupId/items/:itemId
+const removeOptionItem = asyncHandler(async (req, res) => {
+  const data = await svc.removeOptionItem(req.user.tenantId, req.params.productId,
+    req.params.groupId, req.params.itemId);
+  res.json({ success: true, data });
+});
+
+module.exports = { getCombo, addItem, removeItem, getOptionGroups, createOptionGroup, updateOptionGroup, deleteOptionGroup, addOptionItem, removeOptionItem };
