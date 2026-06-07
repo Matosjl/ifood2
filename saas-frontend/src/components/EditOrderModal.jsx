@@ -1,15 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getProducts } from '../api/orders';
-import { updateOrderInfo, markOrderPaid as markOrderPaidApi } from '../api/orders';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { getProducts, editOrderItems, updateOrderInfo, markOrderPaid as markOrderPaidApi } from '../api/orders';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
 import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 
-// Inclui fiado nas opções de edição
-const EDIT_PAY_OPTIONS = PAY_OPTIONS;
-
-// ── Monta o cart inicial a partir dos itens do pedido existente ─
-
+// ── Constrói cart inicial a partir dos itens do pedido ────────
 const buildInitialCart = (orderItems, products) => {
   const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
   const cart = {};
@@ -20,51 +15,58 @@ const buildInitialCart = (orderItems, products) => {
       product,
       qty:      item.quantity ?? 1,
       weightKg: item.weightKg ? String(item.weightKg) : '',
+      notes:    item.notes ?? '',
     };
   }
   return cart;
 };
 
-// ── Main component ────────────────────────────────────────────
+const STATUS_LABEL = {
+  pending:    '🟡 Pendente',
+  confirmed:  '🔵 Confirmado',
+  preparing:  '🟠 Preparando',
+  ready:      '🟢 Pronto',
+  delivering: '🚚 Entregando',
+  delivered:  '✅ Entregue',
+  cancelled:  '❌ Cancelado',
+};
 
+// ── Componente principal ──────────────────────────────────────
 export default function EditOrderModal({ order, onClose, onSave, onOrderChanged }) {
-  const [tab,        setTab]        = useState('items');
-  const [products,   setProducts]   = useState([]);
-  const [cart,       setCart]       = useState({});
-  const [search,     setSearch]     = useState('');
-  const [loading,    setLoading]    = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error,      setError]      = useState(null);
+  // Catálogo
+  const [products,    setProducts]    = useState([]);
+  const [loadingProds,setLoadingProds]= useState(true);
+  const [search,      setSearch]      = useState('');
+  const [activeCategory, setActiveCategory] = useState(null);
 
-  // Aba "Pedido"
+  // Carrinho
+  const [cart,        setCart]        = useState({});
+
+  // Pedido
   const [deliveryType,  setDeliveryType]  = useState(order.deliveryType ?? 'pickup');
   const [neighborhood,  setNeighborhood]  = useState(order.neighborhood ?? '');
   const [address,       setAddress]       = useState(order.customerAddress ?? '');
   const [deliveryFee,   setDeliveryFee]   = useState(String(order.deliveryFee ?? 0));
   const [payMethod,     setPayMethod]     = useState(order.paymentMethod ?? 'cash');
-  const [fiadoClienteId,  setFiadoClienteId]  = useState('');
-  const [fiadoClientes,   setFiadoClientes]   = useState([]);
-  const [fiadoSearch,     setFiadoSearch]     = useState('');
   const [adjType,       setAdjType]       = useState('discount');
   const [adjValue,      setAdjValue]      = useState('');
   const [adjReason,     setAdjReason]     = useState('');
+  const [orderNotes,    setOrderNotes]    = useState(order.notes ?? '');
 
-  // Carrega clientes fiado quando fiado é selecionado
-  useEffect(() => {
-    if (payMethod !== 'fiado') return;
-    listFiadoClientes({})
-      .then(({ data }) => setFiadoClientes((data.data ?? []).filter((c) => !c.bloqueado)))
-      .catch(() => setFiadoClientes([]));
-  }, [payMethod]);
+  // Fiado
+  const [fiadoClienteId, setFiadoClienteId] = useState('');
+  const [fiadoClientes,  setFiadoClientes]  = useState([]);
+  const [fiadoSearch,    setFiadoSearch]    = useState('');
 
-  // Lazy-load produtos só quando aba "itens" é visitada pela primeira vez
-  const [itemsTabVisited, setItemsTabVisited] = useState(false);
-  useEffect(() => {
-    if (tab === 'items' && !itemsTabVisited) setItemsTabVisited(true);
-  }, [tab, itemsTabVisited]);
+  // Estado geral
+  const [submitting, setSubmitting] = useState(false);
+  const [error,      setError]      = useState(null);
+  const [saved,      setSaved]      = useState(false);
 
+  const searchRef = useRef(null);
+
+  // ── Carrega produtos ────────────────────────────────────────
   useEffect(() => {
-    if (!itemsTabVisited) return;
     getProducts({ active: true, limit: 200 })
       .then(({ data }) => {
         const prods = data.data ?? [];
@@ -72,61 +74,86 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
         setCart(buildInitialCart(order.items ?? [], prods));
       })
       .catch(() => setError('Erro ao carregar produtos.'))
-      .finally(() => setLoading(false));
-  }, [itemsTabVisited, order]);
+      .finally(() => setLoadingProds(false));
+  }, [order]);
 
+  // ── Carrega clientes fiado ──────────────────────────────────
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+    if (payMethod !== 'fiado') return;
+    listFiadoClientes({})
+      .then(({ data }) => setFiadoClientes((data.data ?? []).filter((c) => !c.bloqueado)))
+      .catch(() => setFiadoClientes([]));
+  }, [payMethod]);
 
-  // ── Agrupamento memoizado ────────────────────────────────────
+  // ── Atalhos de teclado ──────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveAll();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, deliveryType, neighborhood, address, deliveryFee, payMethod,
+      adjType, adjValue, adjReason, orderNotes, fiadoClienteId]);
+
+  // ── Catálogo: filtros ───────────────────────────────────────
   const categories   = useMemo(() => groupByCategory(products), [products]);
-  const searchResults = search
-    ? products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-    : null;
+  const categoryKeys = useMemo(() => Object.keys(categories).sort(), [categories]);
 
-  // ── Handlers do cart ─────────────────────────────────────────
+  const filteredProducts = useMemo(() => {
+    let list = products;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((p) => p.name.toLowerCase().includes(q));
+    } else if (activeCategory) {
+      list = categories[activeCategory] ?? [];
+    }
+    return list;
+  }, [products, search, activeCategory, categories]);
+
+  // ── Handlers do cart ───────────────────────────────────────
   const handleAdd    = useCallback((p) => setCart((c) => addToCart(c, p)), []);
   const handleQty    = useCallback((id, qty) => {
     if (qty <= 0) setCart((c) => removeFromCart(c, id));
-    else setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
+    else          setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
   }, []);
   const handleWeight = useCallback((id, w) => setCart((c) => ({ ...c, [id]: { ...c[id], weightKg: w } })), []);
+  const handleNotes  = useCallback((id, n) => setCart((c) => ({ ...c, [id]: { ...c[id], notes: n } })), []);
   const handleRemove = useCallback((id) => setCart((c) => removeFromCart(c, id)), []);
 
   const cartEntries = Object.values(cart);
-  const total       = cartTotal(cart);
 
-  // ── Submit itens ─────────────────────────────────────────────
-  const handleSubmit = async () => {
-    if (cartEntries.length === 0) return setError('Adicione pelo menos 1 item.');
-    const items = cartEntries.map(({ product, qty, weightKg }) => ({
-      productId: product.id,
-      ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
-    }));
+  // Total com ajuste
+  const subtotal = cartTotal(cart);
+  const adj      = parseFloat(adjValue) || 0;
+  const fee      = deliveryType === 'delivery' ? (parseFloat(deliveryFee) || 0) : 0;
+  const total    = adjType === 'discount'
+    ? Math.max(0, subtotal - adj) + fee
+    : subtotal + adj + fee;
+
+  // ── Salvar tudo de uma vez ──────────────────────────────────
+  const handleSaveAll = async () => {
+    if (cartEntries.length === 0) { setError('Adicione pelo menos 1 item.'); return; }
     setError(null);
     setSubmitting(true);
     try {
-      await onSave(order.id, items);
-      onClose();
-    } catch {
-      setError('Erro ao salvar. Verifique o estoque disponível.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+      // 1. Itens
+      const items = cartEntries.map(({ product, qty, weightKg, notes }) => ({
+        productId: product.id,
+        notes:     notes || null,
+        ...(product.sale_type === 'kg'
+          ? { weightKg: parseFloat(weightKg) }
+          : { quantity: qty }),
+      }));
+      await editOrderItems(order.id, items);
 
-  // ── Submit informações do pedido ─────────────────────────────
-  const handleSaveOrder = async () => {
-    setError(null);
-    setSubmitting(true);
-    try {
-      // 1. Atualiza forma de pagamento se mudou
+      // 2. Forma de pagamento (se mudou)
       if (payMethod !== order.paymentMethod) {
         await markOrderPaidApi(order.id, payMethod);
-        // Se mudou para fiado, cria registro no fiado
         if (payMethod === 'fiado' && fiadoClienteId) {
           await createFiadoCompra({
             cliente_id: fiadoClienteId,
@@ -137,364 +164,465 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
         }
       }
 
-      // 2. Atualiza entrega + aplica ajuste de valor via API
-      const updated = await updateOrderInfo(order.id, {
+      // 3. Informações de entrega + ajuste de valor + notes
+      const { data: updated } = await updateOrderInfo(order.id, {
         deliveryType,
         neighborhood:    neighborhood || null,
-        customerAddress: address       || null,
+        customerAddress: address      || null,
         deliveryFee:     parseFloat(deliveryFee) || 0,
-        ...(parseFloat(adjValue) > 0 && {
+        notes:           orderNotes   || null,
+        ...(adj > 0 && {
           adjustmentType:   adjType,
-          adjustmentValue:  parseFloat(adjValue),
+          adjustmentValue:  adj,
           adjustmentReason: adjReason || undefined,
         }),
       });
 
-      onOrderChanged?.(updated.data);
-      onClose();
+      onOrderChanged?.(updated);
+      setSaved(true);
+      setTimeout(() => onClose(), 600);
     } catch (err) {
-      setError(err.response?.data?.message ?? 'Erro ao salvar alterações.');
+      setError(err.response?.data?.message ?? 'Erro ao salvar. Verifique os dados.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ── Render ───────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-3xl max-h-[92vh] bg-gray-900 rounded-2xl shadow-2xl flex flex-col border border-white/10 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 overflow-hidden">
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 shrink-0">
-          <div>
-            <h2 className="text-lg font-black text-white">Editar Pedido #{order.orderNumber}</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Altere itens, entrega, pagamento ou aplique desconto</p>
+      {/* ── HEADER FIXO ──────────────────────────────────────── */}
+      <header className="flex items-center gap-4 px-5 py-3 bg-gray-900 border-b border-white/10 shrink-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <h1 className="text-lg font-black text-white shrink-0">
+            ✏️ Editar Pedido <span className="text-orange-400">#{order.orderNumber}</span>
+          </h1>
+          <span className="hidden sm:inline text-[11px] px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 shrink-0">
+            {STATUS_LABEL[order.status] ?? order.status}
+          </span>
+          {order.customerName && (
+            <span className="text-sm text-gray-400 truncate hidden md:inline">
+              👤 {order.customerName}
+              {order.customerPhone && <span className="text-gray-600 ml-1">· {order.customerPhone}</span>}
+            </span>
+          )}
+          <span className="text-xs text-gray-600 shrink-0 hidden lg:inline">
+            {order.deliveryType === 'delivery' ? '🛵 Entrega' : '🏪 Retirada'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 text-xs text-gray-500">
+          <kbd className="hidden lg:inline px-1.5 py-0.5 rounded bg-gray-800 border border-white/10">ESC</kbd>
+          <span className="hidden lg:inline">fecha</span>
+          <kbd className="hidden lg:inline px-1.5 py-0.5 rounded bg-gray-800 border border-white/10">Ctrl+S</kbd>
+          <span className="hidden lg:inline">salva</span>
+        </div>
+        <button onClick={onClose}
+          className="p-2 rounded-xl text-gray-500 hover:text-white hover:bg-white/10 transition-colors shrink-0">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </header>
+
+      {/* ── BODY 3 COLUNAS ───────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0 divide-x divide-white/[0.07]">
+
+        {/* ══ COL 1 — CATÁLOGO (30%) ═══════════════════════════ */}
+        <div className="flex flex-col w-[30%] min-h-0 bg-gray-900/50">
+
+          {/* Busca */}
+          <div className="p-3 shrink-0">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="🔍 Buscar produto..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
+              className="input w-full text-sm"
+              autoFocus
+            />
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+
+          {/* Chips de categoria */}
+          {!search && (
+            <div className="px-3 pb-2 flex flex-wrap gap-1.5 shrink-0">
+              <button
+                onClick={() => setActiveCategory(null)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${
+                  !activeCategory
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}>
+                Todos
+              </button>
+              {categoryKeys.map((cat) => {
+                const count = (categories[cat] ?? []).filter((p) => cart[p.id]).length;
+                return (
+                  <button key={cat}
+                    onClick={() => setActiveCategory(cat === activeCategory ? null : cat)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all relative ${
+                      activeCategory === cat
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    }`}>
+                    {cat ?? 'Sem categoria'}
+                    {count > 0 && (
+                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-orange-500 text-white text-[8px] rounded-full flex items-center justify-center font-black">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Lista de produtos */}
+          <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-0.5 min-h-0">
+            {loadingProds && (
+              <div className="flex items-center justify-center h-32 text-gray-600 text-sm">
+                Carregando produtos...
+              </div>
+            )}
+            {!loadingProds && filteredProducts.length === 0 && (
+              <div className="flex items-center justify-center h-32 text-gray-600 text-sm italic">
+                Nenhum produto encontrado
+              </div>
+            )}
+            {!loadingProds && filteredProducts.map((p) => {
+              const inCart = cart[p.id];
+              return (
+                <button key={p.id} onClick={() => handleAdd(p)}
+                  className={[
+                    'w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between gap-2',
+                    'transition-all duration-100',
+                    inCart
+                      ? 'bg-blue-500/15 ring-1 ring-blue-500/40 hover:bg-blue-500/20'
+                      : 'bg-gray-800/50 hover:bg-gray-700/70',
+                  ].join(' ')}>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-semibold truncate leading-tight ${inCart ? 'text-white' : 'text-gray-200'}`}>
+                      {p.name}
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {fmt(p.sale_price)}{p.sale_type === 'kg' ? '/kg' : '/un'}
+                    </p>
+                  </div>
+                  {inCart ? (
+                    <span className="shrink-0 text-[11px] font-black text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full tabular-nums">
+                      {inCart.qty}×
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[11px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full">
+                      + add
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-white/10 shrink-0">
-          {[{ id: 'items', label: '🛒 Itens' }, { id: 'order', label: '⚙️ Pedido' }].map(({ id, label }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`px-5 py-2.5 text-sm font-semibold transition-colors border-b-2 ${
-                tab === id ? 'border-orange-500 text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* ══ COL 2 — ITENS DO PEDIDO (40%) ════════════════════ */}
+        <div className="flex flex-col w-[40%] min-h-0 bg-gray-900/30">
 
-        {/* ── ABA PEDIDO ─────────────────────────────────────── */}
-        {tab === 'order' && (
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
-            {/* Tipo de entrega */}
+          {/* Header da coluna */}
+          <div className="px-4 py-3 border-b border-white/[0.07] shrink-0 flex items-center justify-between">
             <div>
-              <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Tipo de pedido</label>
-              <div className="flex gap-2">
+              <h2 className="text-sm font-black text-gray-200">🛒 Itens do Pedido</h2>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                {cartEntries.length === 0
+                  ? 'Nenhum item — adicione pelo catálogo'
+                  : `${cartEntries.length} ${cartEntries.length === 1 ? 'item' : 'itens'}`}
+              </p>
+            </div>
+            {cartEntries.length > 0 && (
+              <span className="text-xs text-gray-500">
+                Clique em − para remover
+              </span>
+            )}
+          </div>
+
+          {/* Lista de itens */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+            {cartEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 gap-3 text-gray-600">
+                <span className="text-5xl opacity-30">🛒</span>
+                <p className="text-sm italic">Selecione produtos no catálogo</p>
+              </div>
+            ) : (
+              cartEntries.map(({ product: p, qty, weightKg, notes }) => (
+                <div key={p.id}
+                  className="bg-gray-800/60 rounded-2xl p-3.5 space-y-2.5 border border-white/[0.06] hover:border-white/[0.12] transition-colors">
+
+                  {/* Nome + remover */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-white leading-snug truncate">{p.name}</p>
+                      <p className="text-[11px] text-gray-500">{fmt(p.sale_price)}{p.sale_type === 'kg' ? '/kg' : '/un'}</p>
+                    </div>
+                    <button onClick={() => handleRemove(p.id)}
+                      className="shrink-0 p-1 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Qty / Peso */}
+                  <div className="flex items-center justify-between gap-2">
+                    {p.sale_type === 'kg' ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" min="0.001" step="0.001"
+                          value={weightKg}
+                          onChange={(e) => handleWeight(p.id, e.target.value)}
+                          className="input w-20 text-sm py-1.5 text-center"
+                          placeholder="0.000"
+                        />
+                        <span className="text-xs text-gray-500">kg</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleQty(p.id, qty - 1)}
+                          className="w-8 h-8 rounded-xl bg-gray-700 hover:bg-red-500/30 hover:text-red-300 text-white font-black flex items-center justify-center text-lg transition-colors">
+                          −
+                        </button>
+                        <span className="w-8 text-center text-base font-black text-white tabular-nums">{qty}</span>
+                        <button
+                          onClick={() => handleQty(p.id, qty + 1)}
+                          className="w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black flex items-center justify-center text-lg transition-colors">
+                          +
+                        </button>
+                      </div>
+                    )}
+                    <span className="text-base font-black text-green-400 tabular-nums">
+                      {p.sale_type === 'kg' && weightKg
+                        ? fmt(parseFloat(p.sale_price) * parseFloat(weightKg))
+                        : fmt(parseFloat(p.sale_price) * qty)}
+                    </span>
+                  </div>
+
+                  {/* Observação do item */}
+                  <input
+                    type="text"
+                    value={notes}
+                    onChange={(e) => handleNotes(p.id, e.target.value)}
+                    placeholder="Obs: sem cebola, bem passado..."
+                    className="w-full bg-gray-900/60 border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/40 transition-colors"
+                  />
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Obs do pedido */}
+          <div className="px-4 pb-3 shrink-0">
+            <textarea
+              value={orderNotes}
+              onChange={(e) => setOrderNotes(e.target.value)}
+              placeholder="Observação do pedido (opcional)..."
+              rows={2}
+              className="w-full bg-gray-800/60 border border-white/[0.07] rounded-xl px-3 py-2 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500/30 resize-none transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* ══ COL 3 — RESUMO + CONFIGURAÇÃO (30%) ═════════════ */}
+        <div className="flex flex-col w-[30%] min-h-0 bg-gray-900/50 overflow-y-auto">
+          <div className="p-4 space-y-4">
+
+            {/* ── Total ──────────────────────────────────────── */}
+            <div className="bg-gray-800/80 rounded-2xl p-4 border border-white/[0.07] space-y-2">
+              <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Resumo</h3>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-sm text-gray-300">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">{fmt(subtotal)}</span>
+                </div>
+                {deliveryType === 'delivery' && fee > 0 && (
+                  <div className="flex justify-between text-sm text-gray-300">
+                    <span>Taxa entrega</span>
+                    <span className="tabular-nums text-yellow-400">{fmt(fee)}</span>
+                  </div>
+                )}
+                {adj > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className={adjType === 'discount' ? 'text-green-400' : 'text-red-400'}>
+                      {adjType === 'discount' ? '🔻 Desconto' : '🔺 Acréscimo'}
+                    </span>
+                    <span className={`tabular-nums ${adjType === 'discount' ? 'text-green-400' : 'text-red-400'}`}>
+                      {adjType === 'discount' ? '−' : '+'}{fmt(adj)}
+                    </span>
+                  </div>
+                )}
+                <div className="border-t border-white/10 pt-2 flex justify-between items-center">
+                  <span className="text-sm font-bold text-gray-200">TOTAL</span>
+                  <span className="text-2xl font-black text-green-400 tabular-nums">{fmt(total)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Tipo de entrega ────────────────────────────── */}
+            <div>
+              <label className="text-xs text-gray-400 font-bold mb-2 block uppercase tracking-wide">Tipo</label>
+              <div className="grid grid-cols-2 gap-2">
                 {[{ v: 'pickup', label: '🏪 Retirada' }, { v: 'delivery', label: '🛵 Entrega' }].map(({ v, label }) => (
-                  <button key={v} type="button" onClick={() => setDeliveryType(v)}
-                    className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
-                      deliveryType === v ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/40' : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                  <button key={v} onClick={() => setDeliveryType(v)}
+                    className={`py-2 rounded-xl text-sm font-bold transition-all ${
+                      deliveryType === v
+                        ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/50'
+                        : 'bg-gray-800/60 text-gray-500 hover:bg-gray-700/60'
                     }`}>{label}</button>
                 ))}
               </div>
             </div>
 
+            {/* Campos de entrega */}
             {deliveryType === 'delivery' && (
               <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Bairro</label>
-                  <select value={neighborhood}
-                    onChange={(e) => {
-                      const b = e.target.value;
-                      setNeighborhood(b);
-                      const f = NEIGHBORHOODS.find((n) => n.bairro === b);
-                      if (f) setDeliveryFee(String(f.taxa));
-                    }}
-                    className="input w-full text-sm">
-                    <option value="">— Selecione —</option>
-                    {NEIGHBORHOODS.map(({ bairro, taxa }) => (
-                      <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
-                    ))}
-                    <option value="outro">Outro</option>
-                  </select>
-                </div>
-                <input type="text" placeholder="Endereço completo..." value={address}
-                  onChange={(e) => setAddress(e.target.value)} className="input w-full text-sm" />
+                <select value={neighborhood}
+                  onChange={(e) => {
+                    const b = e.target.value;
+                    setNeighborhood(b);
+                    const f = NEIGHBORHOODS.find((n) => n.bairro === b);
+                    if (f) setDeliveryFee(String(f.taxa));
+                  }}
+                  className="input w-full text-sm">
+                  <option value="">— Bairro —</option>
+                  {NEIGHBORHOODS.map(({ bairro, taxa }) => (
+                    <option key={bairro} value={bairro}>{bairro} — R$ {taxa.toFixed(2)}</option>
+                  ))}
+                  <option value="outro">Outro</option>
+                </select>
+                <input type="text" placeholder="Endereço completo..."
+                  value={address} onChange={(e) => setAddress(e.target.value)}
+                  className="input w-full text-sm" />
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-400 shrink-0">Taxa (R$)</label>
+                  <label className="text-xs text-gray-500 shrink-0">Taxa (R$)</label>
                   <input type="number" min="0" step="0.5" value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(e.target.value)} className="input flex-1 text-sm text-right" />
+                    onChange={(e) => setDeliveryFee(e.target.value)}
+                    className="input flex-1 text-sm text-right" />
                 </div>
               </div>
             )}
 
-            {/* Forma de pagamento */}
+            {/* ── Pagamento ──────────────────────────────────── */}
             <div>
-              <label className="text-xs text-gray-400 font-semibold mb-1.5 block">Forma de pagamento</label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {EDIT_PAY_OPTIONS.map(({ value, label }) => (
-                  <button key={value} type="button" onClick={() => setPayMethod(value)}
-                    className={`py-2 px-1 rounded-lg text-xs font-semibold transition-all ${
+              <label className="text-xs text-gray-400 font-bold mb-2 block uppercase tracking-wide">Pagamento</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {PAY_OPTIONS.map(({ value, label }) => (
+                  <button key={value} onClick={() => setPayMethod(value)}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-bold transition-all ${
                       payMethod === value
                         ? value === 'fiado'
-                          ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                          ? 'bg-purple-500/25 text-purple-300 ring-1 ring-purple-500/50'
                           : 'bg-green-500/20 text-green-300 ring-1 ring-green-500/40'
-                        : 'bg-gray-800/60 text-gray-400 hover:bg-gray-700/60'
+                        : 'bg-gray-800/60 text-gray-500 hover:bg-gray-700/60'
                     }`}>{label}</button>
                 ))}
               </div>
-
-              {/* Picker de cliente fiado */}
               {payMethod === 'fiado' && (
                 <div className="mt-2 space-y-1.5">
-                  <p className="text-[11px] text-purple-400 font-semibold">Selecione o cliente do fiado:</p>
-                  <input
-                    type="text"
-                    placeholder="Buscar cliente..."
-                    value={fiadoSearch}
+                  <p className="text-[11px] text-purple-400 font-bold">Cliente do fiado:</p>
+                  <input type="text" placeholder="Buscar cliente..." value={fiadoSearch}
                     onChange={(e) => setFiadoSearch(e.target.value)}
-                    className="w-full bg-gray-800 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50"
-                  />
-                  <div className="max-h-28 overflow-y-auto rounded-lg border border-white/[0.06] bg-gray-800/60 divide-y divide-white/[0.04]">
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50" />
+                  <div className="max-h-28 overflow-y-auto rounded-xl border border-white/[0.06] bg-gray-800/60 divide-y divide-white/[0.04]">
                     {fiadoClientes
                       .filter((c) => !fiadoSearch || c.name.toLowerCase().includes(fiadoSearch.toLowerCase()))
                       .map((c) => (
-                        <button key={c.id} type="button"
-                          onClick={() => setFiadoClienteId(c.id)}
+                        <button key={c.id} onClick={() => setFiadoClienteId(c.id)}
                           className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
                             fiadoClienteId === c.id ? 'bg-purple-500/20 text-purple-300' : 'text-gray-300 hover:bg-gray-700'
                           }`}>
                           {c.name}
                           {parseFloat(c.total_aberto) > 0 && (
-                            <span className="ml-2 text-yellow-400 text-[10px]">
-                              Deve R${parseFloat(c.total_aberto).toFixed(2)}
-                            </span>
+                            <span className="ml-2 text-yellow-400 text-[10px]">Deve R${parseFloat(c.total_aberto).toFixed(2)}</span>
                           )}
                         </button>
                       ))}
                     {fiadoClientes.length === 0 && (
-                      <p className="text-xs text-gray-600 italic px-3 py-2">Nenhum cliente cadastrado.</p>
+                      <p className="text-xs text-gray-600 italic px-3 py-2">Nenhum cliente.</p>
                     )}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Desconto / Acréscimo */}
-            <div className="bg-gray-800/40 rounded-xl p-3 space-y-2">
-              <label className="text-xs text-gray-400 font-semibold block">Ajuste de valor</label>
-              <div className="flex gap-2">
+            {/* ── Ajuste de valor ────────────────────────────── */}
+            <div className="bg-gray-800/40 rounded-2xl p-3.5 space-y-2.5 border border-white/[0.05]">
+              <label className="text-xs text-gray-400 font-bold block uppercase tracking-wide">Ajuste de valor</label>
+              <div className="grid grid-cols-2 gap-2">
                 {[{ v: 'discount', l: '🔻 Desconto' }, { v: 'surcharge', l: '🔺 Acréscimo' }].map(({ v, l }) => (
-                  <button key={v} type="button" onClick={() => setAdjType(v)}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  <button key={v} onClick={() => setAdjType(v)}
+                    className={`py-1.5 rounded-xl text-xs font-bold transition-all ${
                       adjType === v
-                        ? v === 'discount' ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/30' : 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
+                        ? v === 'discount'
+                          ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/30'
+                          : 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
                         : 'bg-gray-700/60 text-gray-500 hover:bg-gray-700'
                     }`}>{l}</button>
                 ))}
               </div>
-              <input type="number" min="0" step="0.01" placeholder="Valor (R$)"
-                value={adjValue} onChange={(e) => setAdjValue(e.target.value)} className="input w-full text-sm" />
-              <input type="text" placeholder="Motivo (ex: cortesia, frete errado...)"
-                value={adjReason} onChange={(e) => setAdjReason(e.target.value)} className="input w-full text-sm" />
-              {parseFloat(adjValue) > 0 && (
-                <p className="text-xs text-gray-400 bg-gray-700/40 rounded px-2 py-1">
-                  {adjType === 'discount' ? '🔻 Desconto' : '🔺 Acréscimo'} de{' '}
-                  <b>R$ {parseFloat(adjValue).toFixed(2)}</b> será aplicado ao total e registrado nas observações
-                </p>
+              <input type="number" min="0" step="0.01" placeholder="Valor R$"
+                value={adjValue} onChange={(e) => setAdjValue(e.target.value)}
+                className="input w-full text-sm" />
+              {adj > 0 && (
+                <input type="text" placeholder="Motivo (cortesia, frete errado...)"
+                  value={adjReason} onChange={(e) => setAdjReason(e.target.value)}
+                  className="input w-full text-sm" />
               )}
             </div>
 
-            {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
+            {/* ── Info do cliente ────────────────────────────── */}
+            {(order.customerName || order.customerPhone || order.customerAddress) && (
+              <div className="bg-gray-800/30 rounded-2xl p-3.5 border border-white/[0.05] space-y-1.5">
+                <label className="text-xs text-gray-400 font-bold uppercase tracking-wide">Cliente</label>
+                {order.customerName  && <p className="text-sm text-gray-200">👤 {order.customerName}</p>}
+                {order.customerPhone && <p className="text-xs text-gray-400">📞 {order.customerPhone}</p>}
+                {order.customerAddress && <p className="text-xs text-gray-400">📍 {order.customerAddress}</p>}
+              </div>
+            )}
 
-            <button onClick={handleSaveOrder} disabled={submitting}
-              className="w-full btn-green py-2.5 disabled:opacity-50">
-              {submitting ? 'Salvando...' : '✓ Salvar Alterações do Pedido'}
-            </button>
           </div>
-        )}
-
-        {tab === 'items' && (
-          <div className="flex flex-1 min-h-0 divide-x divide-white/10">
-
-            {/* LEFT — Catálogo */}
-            <div className="flex flex-col w-3/5 min-h-0">
-              <div className="p-3 shrink-0">
-                <input type="text" placeholder="Buscar produto..." value={search}
-                  onChange={(e) => setSearch(e.target.value)} className="input w-full" autoFocus />
-              </div>
-
-              <div className="col-scroll flex-1 px-3 pb-3 space-y-1">
-                {loading && <p className="text-gray-500 text-sm text-center py-8">Carregando...</p>}
-
-                {/* Lista plana — sem categorias, mostra todos os produtos */}
-                {!loading && (searchResults ?? products).map((p) => {
-                  const inCart = cart[p.id];
-                  return (
-                    <button key={p.id} onClick={() => handleAdd(p)}
-                      className={[
-                        'w-full text-left px-3 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors',
-                        'bg-gray-800/60 hover:bg-gray-700/80',
-                        inCart ? 'ring-1 ring-blue-500/60 bg-blue-500/5' : '',
-                      ].join(' ')}>
-                      <span className="text-sm font-medium text-gray-200 truncate flex-1">{p.name}</span>
-                      {inCart && (
-                        <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full shrink-0 tabular-nums">{inCart.qty}×</span>
-                      )}
-                      <span className="text-green-400 font-bold text-sm shrink-0 tabular-nums">{fmt(p.sale_price)}</span>
-                    </button>
-                  );
-                })}
-
-                {!loading && (searchResults ?? products).length === 0 && (
-                  <p className="text-gray-500 text-sm text-center py-8">Nenhum produto encontrado</p>
-                )}
-              </div>
-            </div>
-
-            {/* RIGHT — Carrinho */}
-            <div className="flex flex-col w-2/5 min-h-0">
-              {/* Header do carrinho */}
-              <div className="px-3 pt-3 pb-2 shrink-0 border-b border-white/[0.06]">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
-                  🛒 Pedido atual
-                  {cartEntries.length > 0 && (
-                    <span className="ml-2 bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full text-[10px]">
-                      {cartEntries.length} {cartEntries.length === 1 ? 'item' : 'itens'}
-                    </span>
-                  )}
-                </p>
-              </div>
-
-              <div className="col-scroll flex-1 p-3 space-y-2">
-                {cartEntries.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600">
-                    <span className="text-3xl">🛒</span>
-                    <p className="text-sm italic">Selecione produtos</p>
-                  </div>
-                ) : (
-                  cartEntries.map(({ product: p, qty, weightKg }) => (
-                    <div key={p.id} className="bg-gray-800/60 rounded-xl p-2.5 space-y-1.5 border border-white/[0.05]">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-200 leading-tight flex-1 min-w-0">{p.name}</p>
-                        <button onClick={() => handleRemove(p.id)} className="text-gray-600 hover:text-red-400 shrink-0 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                      {p.sale_type === 'kg' ? (
-                        <div className="flex items-center gap-1.5">
-                          <input type="number" min="0.1" step="0.1" value={weightKg}
-                            onChange={(e) => handleWeight(p.id, e.target.value)}
-                            className="input w-16 text-xs py-1" placeholder="kg" />
-                          {weightKg && <span className="text-xs text-green-400 font-semibold ml-auto">{fmt(parseFloat(p.sale_price) * parseFloat(weightKg))}</span>}
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => handleQty(p.id, qty - 1)} className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-bold flex items-center justify-center text-sm">−</button>
-                          <span className="w-6 text-center text-sm font-bold text-white tabular-nums">{qty}</span>
-                          <button onClick={() => handleQty(p.id, qty + 1)} className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center text-sm">+</button>
-                          <span className="text-xs text-green-400 font-semibold ml-auto">{fmt(parseFloat(p.sale_price) * qty)}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="p-3 border-t border-white/10 space-y-2 shrink-0">
-                {error && <p className="text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xl font-black text-white">{fmt(total)}</span>
-                  <button onClick={handleSubmit} disabled={submitting || cartEntries.length === 0}
-                    className="btn-green px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                    {submitting ? 'Salvando...' : 'Salvar'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
+        </div>
       </div>
-    </div>
-  );
-}
 
-// ── CategoryAccordion ─────────────────────────────────────────
-
-function CategoryAccordion({ name, items, cart, onAdd, onQty, onWeight }) {
-  const [open, setOpen] = useState(false);
-  const inCartCount = items.filter((p) => cart[p.id]).length;
-
-  return (
-    <div className="border border-white/[0.07] rounded-xl overflow-hidden">
-      <button onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-800/70 hover:bg-gray-800 transition-colors">
-        <div className="flex items-center gap-2 min-w-0">
-          <svg className={`w-3.5 h-3.5 text-gray-500 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-          <span className="text-sm font-semibold text-gray-200 truncate">{name ?? 'Sem categoria'}</span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {inCartCount > 0 && (
-            <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-semibold">{inCartCount}</span>
+      {/* ── FOOTER FIXO ──────────────────────────────────────── */}
+      <footer className="flex items-center justify-between gap-3 px-5 py-3.5 bg-gray-900 border-t border-white/10 shrink-0">
+        <div className="flex-1 min-w-0">
+          {error && (
+            <p className="text-sm text-red-400 bg-red-400/10 rounded-xl px-3 py-2 truncate">
+              ⚠️ {error}
+            </p>
           )}
-          <span className="text-xs text-gray-500">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+          {saved && (
+            <p className="text-sm text-green-400 bg-green-400/10 rounded-xl px-3 py-2">
+              ✅ Salvo com sucesso!
+            </p>
+          )}
         </div>
-      </button>
-
-      {open && (
-        <ul className="divide-y divide-white/[0.04]">
-          {items.map((p) => {
-            const inCart = cart[p.id];
-            return (
-              <li key={p.id} className="px-3 py-2 bg-gray-900/40 hover:bg-gray-800/40 transition-colors">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-medium truncate ${inCart ? 'text-white' : 'text-gray-300'}`}>{p.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {fmt(p.sale_price)}/{p.sale_type === 'kg' ? 'kg' : 'un'}
-                    </p>
-                  </div>
-                  {p.sale_type === 'kg' ? (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <input type="number" min="0.1" step="0.1" placeholder="kg"
-                        value={inCart?.weightKg ?? ''}
-                        onChange={(e) => { if (!inCart) onAdd(p); onWeight(p.id, e.target.value); }}
-                        className="input w-16 text-xs py-1 text-center" />
-                    </div>
-                  ) : inCart ? (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => inCart.qty <= 1 ? onQty(p.id, 0) : onQty(p.id, inCart.qty - 1)}
-                        className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-bold text-sm flex items-center justify-center">−</button>
-                      <span className="w-6 text-center text-sm font-bold text-white tabular-nums">{inCart.qty}</span>
-                      <button onClick={() => onQty(p.id, inCart.qty + 1)}
-                        className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm flex items-center justify-center">+</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => onAdd(p)}
-                      className="text-xs font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-2.5 py-1 rounded-lg transition-colors shrink-0">
-                      + Add
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+        <div className="flex items-center gap-3 shrink-0">
+          <button onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+            Cancelar
+          </button>
+          <button
+            onClick={handleSaveAll}
+            disabled={submitting || cartEntries.length === 0}
+            className="px-6 py-2.5 rounded-xl text-sm font-black text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed
+              bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-900/30">
+            {submitting
+              ? '⏳ Salvando...'
+              : saved
+                ? '✅ Salvo!'
+                : `✓ Salvar Alterações · ${fmt(total)}`}
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }
