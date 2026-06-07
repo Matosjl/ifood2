@@ -133,6 +133,7 @@ export default function DeliveryMapPicker({
     }
 
     map.on('moveend', () => {
+      if (map.isMoving()) return; // ignora moveend durante flyTo animado
       const c = map.getCenter();
       setCenterCoords({ lat: c.lat, lng: c.lng });
       setMapMoved(true);
@@ -181,9 +182,11 @@ export default function DeliveryMapPicker({
       const info = calcFeeEta(lat, lng, deliveryZones, deliveryZoneType, restaurantLat, restaurantLng, nb);
       setFeeInfo(info);
     } catch {
-      // Nominatim falhou (rate limit, rede) — não bloquear, lat/lng já foram capturados
+      // Nominatim falhou (rate limit, rede) — calcula fee pelo fallback para não bloquear pedido
       setAddress('Localização no mapa');
       setAddressApprox(true);
+      const fallback = calcFeeEta(lat, lng, deliveryZones, deliveryZoneType, restaurantLat, restaurantLng, '');
+      setFeeInfo(fallback);
     } finally {
       setGeocoding(false);
     }
@@ -266,7 +269,12 @@ export default function DeliveryMapPicker({
           onClick={() => {
             if (!navigator.geolocation) return;
             navigator.geolocation.getCurrentPosition((pos) => {
-              mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16, speed: 1.5 });
+              const { latitude: lat, longitude: lng } = pos.coords;
+              mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, speed: 1.5 });
+              // Geocodifica imediatamente nos coords do GPS, sem esperar moveend
+              setCenterCoords({ lat, lng });
+              setMapMoved(true);
+              doGeocode(lat, lng);
             }, () => {});
           }}
           className="absolute bottom-28 right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-lg"

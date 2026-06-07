@@ -16,7 +16,11 @@ import { PAY_OPTIONS } from '../constants/orders';
 // ── Helpers ───────────────────────────────────────────────────
 
 const getUser = () => {
-  try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
+  try {
+    const user   = JSON.parse(localStorage.getItem('user')   ?? '{}');
+    const tenant = JSON.parse(localStorage.getItem('tenant') ?? 'null');
+    return tenant ? { ...user, tenant } : user;
+  }
   catch { return {}; }
 };
 
