@@ -221,47 +221,35 @@ export function printOrder(order) {
 
 </body></html>`;
 
-  // ── Impressão via window.open ────────────────────────────────
-  const w = window.open('', '_blank', 'width=300,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
+  // ── Impressão via Blob URL (garante UTF-8 + evita popup bloqueado) ──
+  // document.write() não processa <meta charset> antes de renderizar,
+  // corrompendo acentos (Família → Famñe ia). Blob URL abre já com encoding correto.
+  const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const w = window.open(blobUrl, '_blank', 'width=300,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
 
   if (!w) {
-    // Popup bloqueado — fallback: baixa como arquivo HTML
-    const blob = new Blob([html], { type: 'text/html' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `pedido-${order.orderNumber ?? order.order_number}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Popup bloqueado — notifica o usuário em vez de baixar silenciosamente
+    URL.revokeObjectURL(blobUrl);
+    alert('Impressão bloqueada pelo navegador.\nPermita popups para este site nas configurações do Chrome e tente novamente.');
     return false;
   }
 
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-
-  // FIX: usa afterprint para fechar SOMENTE após o dialog ser dispensado.
-  // Evita double-print (onload + fallback setTimeout) e evita fechar
-  // a janela no meio da impressão com timer fixo.
   let printed = false;
 
   const doPrint = () => {
-    if (printed) return;   // guarda: nunca imprime duas vezes
+    if (printed) return;
     printed = true;
-
-    // Fecha a janela quando o usuário dispensar o dialog (imprimir ou cancelar)
     w.addEventListener('afterprint', () => {
       try { w.close(); } catch (e) { /* já fechada */ }
+      URL.revokeObjectURL(blobUrl);
     });
-
     w.focus();
     w.print();
   };
 
-  // Dispara via onload (caminho normal)
   w.onload = () => setTimeout(doPrint, 250);
-
-  // Fallback para browsers que não disparam onload em document.write
   setTimeout(() => { if (!w.closed) doPrint(); }, 900);
 
   return true;
@@ -413,29 +401,25 @@ export function printKitchen(order, target = null) {
 
 </body></html>`;
 
-  const w = window.open('', '_blank', 'width=380,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
+  const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const w = window.open(blobUrl, '_blank', 'width=380,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
 
   if (!w) {
-    // Popup bloqueado — fallback arquivo HTML
-    const blob = new Blob([html], { type: 'text/html' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `comanda-${order.orderNumber ?? order.order_number}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(blobUrl);
+    alert('Impressão bloqueada pelo navegador.\nPermita popups para este site nas configurações do Chrome e tente novamente.');
     return false;
   }
-
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
 
   let printed = false;
   const doPrint = () => {
     if (printed) return;
     printed = true;
-    w.addEventListener('afterprint', () => { try { w.close(); } catch (e) { /* já fechada */ } });
+    w.addEventListener('afterprint', () => {
+      try { w.close(); } catch (e) { /* já fechada */ }
+      URL.revokeObjectURL(blobUrl);
+    });
     w.focus();
     w.print();
   };
