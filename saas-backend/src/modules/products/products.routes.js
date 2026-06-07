@@ -14,13 +14,13 @@ router.use(authenticate);
 const productRules = [
   body('name').trim().notEmpty().withMessage('Nome do produto é obrigatório.')
     .isLength({ max: 200 }).withMessage('Nome muito longo.'),
-  body('sale_type').optional().isIn(['unit', 'kg'])
-    .withMessage("sale_type deve ser 'unit' ou 'kg'."),
-  body('cost_price').optional().isFloat({ min: 0 })
+  body('saleType').optional().isIn(['unit', 'kg'])
+    .withMessage("saleType deve ser 'unit' ou 'kg'."),
+  body('costPrice').optional().isFloat({ min: 0 })
     .withMessage('Preço de custo inválido.'),
-  body('sale_price').optional().isFloat({ min: 0 })
+  body('salePrice').optional().isFloat({ min: 0 })
     .withMessage('Preço de venda inválido.'),
-  body('stock_qty').optional().isFloat({ min: 0 })
+  body('stockQty').optional().isFloat({ min: 0 })
     .withMessage('Estoque inválido.'),
   body('isCombo').optional().isBoolean()
     .withMessage('isCombo deve ser true ou false.'),

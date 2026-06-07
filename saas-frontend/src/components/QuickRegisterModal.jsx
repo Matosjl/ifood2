@@ -176,17 +176,24 @@ export default function QuickRegisterModal({ onClose, onSaved, onComplete }) {
     setSaving(true);
 
     try {
-      const fd = new FormData();
-      fd.append('name',       name.trim());
-      fd.append('sale_price', p);
-      fd.append('sale_type',  'unit');
-      fd.append('active',     'true');
-      fd.append('featured',   'false');
-      if (categoryId) fd.append('category_id', categoryId);
-      if (imageFile)  fd.append('image', imageFile);
+      const payload = {
+        name:       name.trim(),
+        salePrice:  p,
+        saleType:   'unit',
+        stockQty:   999,
+        featured:   false,
+        categoryId: categoryId || undefined,
+      };
 
-      const { data } = await createProduct(fd);
+      const { data } = await createProduct(payload);
       const created = data.data ?? data;
+
+      if (imageFile && created.id) {
+        const fd = new FormData();
+        fd.append('image', imageFile);
+        await api.post(`/products/${created.id}/image`, fd);
+      }
+
       setDone({ id: created.id, name: created.name });
       onSaved?.(created);
       setStep('saved');
