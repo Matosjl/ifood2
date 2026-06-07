@@ -799,7 +799,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
                   Estoque Inicial ({form.saleType === 'kg' ? 'kg' : 'un'})
                 </label>
                 <input
-                  type="number" min="0" step={form.saleType === 'kg' ? '0.1' : '1'}
+                  type="number" min="0" step={form.saleType === 'kg' ? '0.001' : '1'}
                   value={form.stockQty}
                   onChange={(e) => set('stockQty', e.target.value)}
                   className="input w-full"
@@ -812,7 +812,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
                 Alerta de Estoque ({form.saleType === 'kg' ? 'kg' : 'un'})
               </label>
               <input
-                type="number" min="0" step={form.saleType === 'kg' ? '0.1' : '1'}
+                type="number" min="0" step={form.saleType === 'kg' ? '0.001' : '1'}
                 value={form.alertThreshold}
                 onChange={(e) => set('alertThreshold', e.target.value)}
                 className="input w-full"
