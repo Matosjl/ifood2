@@ -23,6 +23,36 @@ function notesWithoutTroco(notes) {
   return notes.replace(/[\n\r]?troco\s+para[:\s]+R?\$?\s*[\d.,]+/gi, '').trim();
 }
 
+function openPrint(html, width = 300) {
+  const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  const w       = window.open(blobUrl, '_blank',
+    `width=${width},height=700,toolbar=0,scrollbars=1,status=0,menubar=0`);
+
+  if (!w) {
+    URL.revokeObjectURL(blobUrl);
+    alert('Impressão bloqueada pelo navegador.\nPermita popups para este site nas configurações do Chrome e tente novamente.');
+    return false;
+  }
+
+  let printed = false;
+  const doPrint = () => {
+    if (printed) return;
+    printed = true;
+    w.addEventListener('afterprint', () => {
+      try { w.close(); } catch (_) { /* já fechada */ }
+      URL.revokeObjectURL(blobUrl);
+    });
+    w.focus();
+    w.print();
+  };
+
+  w.onload = () => setTimeout(doPrint, 250);
+  setTimeout(() => { if (!w.closed) doPrint(); }, 900);
+  return true;
+}
+
+// ── Recibo do cliente — 58mm ──────────────────────────────────
 export function printOrder(order) {
   const user = (() => {
     try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
@@ -31,148 +61,235 @@ export function printOrder(order) {
 
   const tenant = user.tenant?.name ?? 'Restaurante';
   const now    = new Date();
-  const date   = now.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
-  const time   = now.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  const date   = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time   = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const troco      = extractTroco(order.notes);
+  const cleanNotes = notesWithoutTroco(order.notes);
+  const delivType  = order.deliveryType ?? order.delivery_type ?? '';
+  const isDelivery = delivType === 'delivery' ||
+                     (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
+  const neighborhood = order.neighborhood ?? null;
+  const address      = order.customerAddress ?? order.customer_address ?? '';
+  const payment      = PAYMENT_LABELS[order.paymentMethod ?? order.payment_method] ?? 'Dinheiro';
+  const deliveryFee  = parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0);
+  const channel      = order.channel && order.channel !== 'manual'
+    ? `<div class="channel">${order.channel.toUpperCase()}</div>` : '';
 
   const itemRows = (order.items ?? []).map((item) => {
     const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}x`;
     const name = item.productName ?? item.product_name ?? '';
-    const tot  = parseFloat(item.total ?? 0).toFixed(2);
+    const tot  = `R$ ${parseFloat(item.total ?? 0).toFixed(2)}`;
     const note = item.notes
-      ? `<br><span style="font-size:10px">&nbsp;&nbsp;↳ ${item.notes}</span>`
-      : '';
+      ? `<div class="item-obs">↳ ${item.notes}</div>` : '';
     return `
-      <tr>
-        <td style="padding:3px 2px 3px 0;line-height:1.5;vertical-align:top">
-          <b>${qty}</b> ${name}${note}
-        </td>
-        <td style="text-align:right;white-space:nowrap;padding:3px 0;vertical-align:top;font-weight:bold">
-          ${tot}
-        </td>
-      </tr>`;
+      <div class="item-row">
+        <div class="item-main">
+          <span class="item-qty">${qty}</span>
+          <span class="item-name">${name}</span>
+          <span class="item-price">${tot}</span>
+        </div>
+        ${note}
+      </div>`;
   }).join('');
 
-  const troco      = extractTroco(order.notes);
-  const cleanNotes = notesWithoutTroco(order.notes);
-
-  const delivType   = order.deliveryType ?? order.delivery_type ?? '';
-  const isDelivery  = delivType === 'delivery' ||
-                      (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
-  const neighborhood = order.neighborhood ?? null;
-  const address     = order.customerAddress ?? order.customer_address ?? '';
-  const payment     = PAYMENT_LABELS[order.paymentMethod ?? order.payment_method] ?? 'Dinheiro';
-  const channel     = order.channel && order.channel !== 'manual'
-    ? `<p class="center" style="font-size:10px;font-weight:bold;letter-spacing:1px">${order.channel.toUpperCase()}</p>`
-    : '';
-
   const html = `<!DOCTYPE html>
-<html><head>
+<html lang="pt-BR"><head>
   <meta charset="UTF-8">
   <title>Pedido #${order.orderNumber ?? order.order_number}</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace;
       font-size: 12px;
       font-weight: bold;
-      line-height: 1.5;
       width: 58mm;
       min-width: 58mm;
       max-width: 58mm;
-      padding: 2mm 2mm 6mm 2mm;
+      padding: 3mm 2mm 8mm 2mm;
       color: #000;
       background: #fff;
     }
-    .center  { text-align:center; }
-    hr       { border:none; border-top:1px dashed #000; margin:4px 0; }
-    hr.solid { border-top:2px solid #000; }
-    p        { margin-bottom:2px; font-weight:bold; }
-    table    { width:100%; border-collapse:collapse; }
+    /* ── Utilitários ── */
+    .center   { text-align: center; }
+    .hr-solid { border: none; border-top: 2px solid #000; margin: 5px 0; }
+    .hr-dash  { border: none; border-top: 1px dashed #000; margin: 4px 0; }
 
+    /* ── Cabeçalho ── */
     .restaurante {
-      font-size:13px;
-      font-weight:900;
-      text-align:center;
-      letter-spacing:1px;
-      text-transform:uppercase;
+      font-size: 15px;
+      font-weight: 900;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      line-height: 1.2;
+      margin-bottom: 2px;
+    }
+    .channel {
+      text-align: center;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      border: 1px solid #000;
+      padding: 1px 4px;
+      margin: 3px auto;
+      display: inline-block;
+      width: 100%;
     }
     .num-pedido {
-      font-size:22px;
-      font-weight:900;
-      letter-spacing:2px;
-      text-align:center;
-      line-height:1.2;
-      margin:3px 0 1px;
+      font-size: 28px;
+      font-weight: 900;
+      text-align: center;
+      letter-spacing: 3px;
+      border: 2px solid #000;
+      padding: 4px 0;
+      margin: 5px 0 3px;
+      line-height: 1.1;
     }
     .datetime {
-      text-align:center;
-      font-size:11px;
-      font-weight:bold;
-      margin-bottom:2px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 4px;
     }
+
+    /* ── Cliente ── */
     .cliente-box {
-      border:2px solid #000;
-      padding:3px 5px;
-      margin:4px 0;
+      border: 2px solid #000;
+      padding: 4px 6px;
+      margin: 4px 0;
     }
     .cliente-nome {
-      font-size:13px;
-      font-weight:900;
-      text-transform:uppercase;
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
     }
     .cliente-tel {
-      font-size:11px;
-      font-weight:bold;
-      margin-top:1px;
+      font-size: 11px;
+      font-weight: bold;
+      margin-top: 2px;
     }
+
+    /* ── Itens ── */
     .itens-titulo {
-      font-size:11px;
-      font-weight:900;
-      letter-spacing:1px;
-      text-transform:uppercase;
-      margin-bottom:2px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-align: center;
+      margin: 4px 0 3px;
     }
-    .total-row td {
-      border-top:2px solid #000;
-      padding-top:4px;
-      font-weight:900;
-      font-size:14px;
+    .item-row {
+      margin-bottom: 4px;
+      padding-bottom: 3px;
+      border-bottom: 1px dashed #ccc;
+    }
+    .item-row:last-of-type { border-bottom: none; }
+    .item-main {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 4px;
+    }
+    .item-qty {
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 20px;
+    }
+    .item-name {
+      font-size: 12px;
+      font-weight: bold;
+      flex: 1;
+      line-height: 1.3;
+    }
+    .item-price {
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      flex-shrink: 0;
+      text-align: right;
+    }
+    .item-obs {
+      font-size: 10px;
+      font-weight: bold;
+      padding-left: 20px;
+      margin-top: 1px;
+      font-style: italic;
+    }
+
+    /* ── Total ── */
+    .total-box {
+      border-top: 2px solid #000;
+      margin-top: 5px;
+      padding-top: 5px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 16px;
+      font-weight: 900;
+    }
+    .taxa-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: bold;
+      margin-top: 2px;
     }
     .troco {
-      text-decoration:underline;
-      font-weight:900;
-      font-size:12px;
-      margin:3px 0;
+      font-size: 12px;
+      font-weight: 900;
+      text-decoration: underline;
+      margin-top: 4px;
+    }
+
+    /* ── Rodapé ── */
+    .tipo-box {
+      border: 2px solid #000;
+      padding: 4px 6px;
+      margin: 5px 0 3px;
     }
     .tipo-label {
-      font-size:12px;
-      font-weight:900;
-      text-transform:uppercase;
+      font-size: 14px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
     .endereco {
-      font-size:11px;
-      font-weight:bold;
-      margin-top:1px;
-      line-height:1.4;
+      font-size: 11px;
+      font-weight: bold;
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+    .pagamento {
+      font-size: 12px;
+      font-weight: bold;
+      margin: 3px 0;
+    }
+    .obs-box {
+      border: 1px dashed #000;
+      padding: 3px 5px;
+      margin: 4px 0;
+      font-size: 11px;
+      font-weight: bold;
     }
     .obrigado {
-      text-align:center;
-      font-size:12px;
-      font-weight:900;
-      letter-spacing:0.5px;
-      margin-top:5px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      margin-top: 6px;
     }
 
     @media print {
-      @page {
-        size: 58mm auto;
-        margin: 0mm;
-      }
+      @page { size: 58mm auto; margin: 0mm; }
       html, body {
         width: 58mm;
         min-width: 58mm;
         max-width: 58mm;
-        padding: 1mm 2mm 4mm 2mm;
+        padding: 1mm 2mm 5mm 2mm;
       }
     }
   </style>
@@ -181,251 +298,252 @@ export function printOrder(order) {
 
   <p class="restaurante">${tenant}</p>
   ${channel}
-  <hr class="solid">
+  <div class="hr-solid"></div>
 
-  <p class="num-pedido">#${order.orderNumber ?? order.order_number}</p>
-  <p class="datetime">${date} · ${time}</p>
+  <div class="num-pedido center">#${order.orderNumber ?? order.order_number}</div>
+  <p class="datetime">${date} &middot; ${time}</p>
 
-  <hr>
+  <div class="hr-dash"></div>
 
   ${order.customerName ? `
   <div class="cliente-box">
     <p class="cliente-nome">${order.customerName}</p>
-    ${order.customerPhone ? `<p class="cliente-tel">📞 ${order.customerPhone}</p>` : ''}
+    ${order.customerPhone ? `<p class="cliente-tel">Tel: ${order.customerPhone}</p>` : ''}
   </div>` : ''}
 
   <p class="itens-titulo">── Itens ──</p>
-  <table>
+
+  <div class="itens">
     ${itemRows}
-    <tr class="total-row">
-      <td>TOTAL</td>
-      <td style="text-align:right">R$ ${parseFloat(order.total ?? 0).toFixed(2)}</td>
-    </tr>
-  </table>
+  </div>
 
-  ${troco ? `<hr><p class="troco">💵 ${troco.replace(/troco\s+para/i,'Troco p/')}</p>` : ''}
-  ${cleanNotes ? `<hr><p style="font-size:10px"><b>Obs:</b> ${cleanNotes}</p>` : ''}
+  <div class="total-box">
+    ${deliveryFee > 0 ? `<div class="taxa-row"><span>Taxa de entrega</span><span>R$ ${deliveryFee.toFixed(2)}</span></div>` : ''}
+    <div class="total-row">
+      <span>TOTAL</span>
+      <span>R$ ${parseFloat(order.total ?? 0).toFixed(2)}</span>
+    </div>
+  </div>
 
-  <hr>
+  ${troco ? `<p class="troco">Troco p/ ${troco.replace(/troco\s+para[:\s]*/i, '')}</p>` : ''}
 
-  <p class="tipo-label">${isDelivery ? '🛵 Entrega' : '🏪 Retirada'}</p>
-  ${isDelivery && neighborhood ? `<p class="endereco" style="font-size:12px;font-weight:900">📌 ${neighborhood}</p>` : ''}
-  ${isDelivery && address      ? `<p class="endereco">📍 ${address}</p>` : ''}
-  ${isDelivery && parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0
-    ? `<p style="font-size:10px;font-weight:bold;margin-top:1px">Taxa: R$ ${parseFloat(order.deliveryFee ?? order.delivery_fee).toFixed(2)}</p>`
-    : ''}
-  <p style="margin-top:3px;font-size:11px">💳 ${payment}</p>
+  ${cleanNotes ? `<div class="obs-box"><b>Obs:</b> ${cleanNotes}</div>` : ''}
 
-  <hr class="solid">
-  <p class="obrigado">Obrigado! 😊</p>
+  <div class="hr-solid"></div>
+
+  <div class="tipo-box">
+    <p class="tipo-label">${isDelivery ? 'Entrega' : 'Retirada'}</p>
+    ${isDelivery && neighborhood ? `<p class="endereco">Bairro: ${neighborhood}</p>` : ''}
+    ${isDelivery && address      ? `<p class="endereco">${address}</p>` : ''}
+  </div>
+
+  <p class="pagamento">Pagamento: ${payment}</p>
+
+  <div class="hr-solid"></div>
+  <p class="obrigado">Obrigado pela preferencia!</p>
 
 </body></html>`;
 
-  // ── Impressão via Blob URL (garante UTF-8 + evita popup bloqueado) ──
-  // document.write() não processa <meta charset> antes de renderizar,
-  // corrompendo acentos (Família → Famñe ia). Blob URL abre já com encoding correto.
-  const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  const w = window.open(blobUrl, '_blank', 'width=300,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
-
-  if (!w) {
-    // Popup bloqueado — notifica o usuário em vez de baixar silenciosamente
-    URL.revokeObjectURL(blobUrl);
-    alert('Impressão bloqueada pelo navegador.\nPermita popups para este site nas configurações do Chrome e tente novamente.');
-    return false;
-  }
-
-  let printed = false;
-
-  const doPrint = () => {
-    if (printed) return;
-    printed = true;
-    w.addEventListener('afterprint', () => {
-      try { w.close(); } catch (e) { /* já fechada */ }
-      URL.revokeObjectURL(blobUrl);
-    });
-    w.focus();
-    w.print();
-  };
-
-  w.onload = () => setTimeout(doPrint, 250);
-  setTimeout(() => { if (!w.closed) doPrint(); }, 900);
-
-  return true;
+  return openPrint(html, 300);
 }
 
 // ── Comanda de cozinha — 80mm ─────────────────────────────────
-// target: 'kitchen' | 'bar' | 'both' | null (null = todos os itens)
 export function printKitchen(order, target = null) {
   const now  = new Date();
   const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  // Filtra itens pelo destino se informado
   const allItems = order.items ?? [];
   const items = target == null ? allItems : allItems.filter((item) => {
     const t = item.printerTarget ?? item.printer_target ?? 'kitchen';
     return t === target || t === 'both';
   });
 
-  // Nada a imprimir para este destino
   if (items.length === 0) return false;
 
-  const targetLabel = target === 'bar' ? '🍺 BAR' : '⭐ COZINHA ⭐';
-
-  const itemRows = items.map((item) => {
-    const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}×`;
-    const name = item.productName ?? item.product_name ?? '';
-    const note = item.notes
-      ? `<div class="item-obs">↳ ${item.notes}</div>`
-      : '';
-    return `
-      <div class="item">
-        <span class="item-qty">${qty}</span>
-        <span class="item-name">${name}</span>
-        ${note}
-      </div>`;
-  }).join('');
+  const targetLabel = target === 'bar' ? 'BAR' : 'COZINHA';
+  const targetIcon  = target === 'bar' ? '🍺' : '⭐';
 
   const delivType  = order.deliveryType ?? order.delivery_type ?? '';
   const isDelivery = delivType === 'delivery' ||
                      (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
-  const tipoLabel  = isDelivery ? '🛵 ENTREGA' : '🏪 RETIRADA';
+  const tipoLabel  = isDelivery ? 'ENTREGA' : 'RETIRADA';
+
+  const itemRows = items.map((item) => {
+    const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}`;
+    const name = item.productName ?? item.product_name ?? '';
+    const note = item.notes
+      ? `<div class="item-obs">↳ ${item.notes}</div>` : '';
+    return `
+      <div class="item">
+        <div class="item-main">
+          <span class="item-qty">${qty}x</span>
+          <span class="item-name">${name}</span>
+        </div>
+        ${note}
+      </div>`;
+  }).join('');
 
   const html = `<!DOCTYPE html>
-<html><head>
+<html lang="pt-BR"><head>
   <meta charset="UTF-8">
   <title>Comanda #${order.orderNumber ?? order.order_number}</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Courier New', Courier, monospace;
       font-weight: bold;
       width: 80mm;
       min-width: 80mm;
       max-width: 80mm;
-      padding: 3mm 3mm 8mm 3mm;
+      padding: 4mm 3mm 10mm 3mm;
       color: #000;
       background: #fff;
     }
-    .header-label {
+
+    /* ── Utilitários ── */
+    .hr-solid { border: none; border-top: 3px solid #000; margin: 6px 0; }
+    .hr-dash  { border: none; border-top: 2px dashed #000; margin: 5px 0; }
+
+    /* ── Cabeçalho destino ── */
+    .dest-box {
+      border: 3px solid #000;
+      padding: 5px 0;
       text-align: center;
-      font-size: 11px;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-      font-weight: 900;
-      border: 2px solid #000;
-      padding: 2px 0;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
     }
+    .dest-label {
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+
+    /* ── Número do pedido ── */
     .num {
       text-align: center;
-      font-size: 52px;
+      font-size: 64px;
       font-weight: 900;
       line-height: 1;
-      letter-spacing: -1px;
-      margin: 2px 0;
+      letter-spacing: -2px;
+      margin: 4px 0;
     }
+
+    /* ── Hora e tipo ── */
     .hora {
       text-align: center;
-      font-size: 14px;
+      font-size: 16px;
       font-weight: 900;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
-    .tipo {
+    .tipo-box {
+      border: 2px solid #000;
+      padding: 4px 0;
       text-align: center;
-      font-size: 14px;
-      font-weight: 900;
-      letter-spacing: 1px;
-      margin-bottom: 4px;
+      margin: 4px 0;
     }
-    hr { border: none; border-top: 2px dashed #000; margin: 4px 0; }
-    hr.solid { border-top: 3px solid #000; }
-    .item {
-      padding: 5px 0;
-      border-bottom: 1px dashed #ccc;
-      line-height: 1.3;
-    }
-    .item:last-child { border-bottom: none; }
-    .item-qty {
-      display: inline-block;
-      font-size: 22px;
-      font-weight: 900;
-      min-width: 36px;
-      vertical-align: top;
-    }
-    .item-name {
-      display: inline-block;
+    .tipo-label {
       font-size: 18px;
       font-weight: 900;
-      vertical-align: top;
-      line-height: 1.3;
-      max-width: 62mm;
+      letter-spacing: 3px;
+    }
+
+    /* ── Cliente ── */
+    .cliente {
+      font-size: 14px;
+      font-weight: 900;
+      text-transform: uppercase;
+      text-align: center;
+      margin: 4px 0;
+    }
+
+    /* ── Itens ── */
+    .item {
+      padding: 8px 0;
+      border-bottom: 2px dashed #000;
+    }
+    .item:last-child { border-bottom: none; }
+    .item-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .item-qty {
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1;
+      min-width: 48px;
+      flex-shrink: 0;
+    }
+    .item-name {
+      font-size: 22px;
+      font-weight: 900;
+      line-height: 1.2;
+      flex: 1;
+      padding-top: 2px;
     }
     .item-obs {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 900;
-      padding-left: 36px;
-      margin-top: 2px;
-      text-decoration: underline;
-    }
-    .obs-pedido {
-      font-size: 13px;
-      font-weight: 900;
-      border: 2px solid #000;
-      padding: 3px 5px;
+      padding-left: 54px;
       margin-top: 4px;
+      text-decoration: underline;
+      font-style: italic;
     }
+
+    /* ── Observação do pedido ── */
+    .obs-pedido {
+      border: 3px solid #000;
+      padding: 5px 6px;
+      margin-top: 6px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+    .obs-label {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
     @media print {
       @page { size: 80mm auto; margin: 0mm; }
       html, body {
         width: 80mm;
         min-width: 80mm;
         max-width: 80mm;
-        padding: 2mm 3mm 6mm 3mm;
+        padding: 2mm 3mm 8mm 3mm;
       }
     }
   </style>
 </head>
 <body>
 
-  <div class="header-label">${targetLabel}</div>
-  <p class="num">#${order.orderNumber ?? order.order_number}</p>
+  <div class="dest-box">
+    <div class="dest-label">${targetIcon} ${targetLabel} ${targetIcon}</div>
+  </div>
+
+  <div class="num">#${order.orderNumber ?? order.order_number}</div>
   <p class="hora">${time}</p>
-  <p class="tipo">${tipoLabel}</p>
-  <hr class="solid">
 
-  <div class="itens">${itemRows}</div>
+  <div class="tipo-box">
+    <p class="tipo-label">${tipoLabel}</p>
+  </div>
 
-  ${order.notes ? `<div class="obs-pedido">⚠️ OBS: ${order.notes}</div>` : ''}
+  ${order.customerName ? `<p class="cliente">${order.customerName}</p>` : ''}
+
+  <div class="hr-solid"></div>
+
+  <div class="itens">
+    ${itemRows}
+  </div>
+
+  ${order.notes ? `
+  <div class="obs-pedido">
+    <div class="obs-label">⚠ Observacao</div>
+    ${order.notes}
+  </div>` : ''}
 
 </body></html>`;
 
-  const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  const w = window.open(blobUrl, '_blank', 'width=380,height=700,toolbar=0,scrollbars=1,status=0,menubar=0');
-
-  if (!w) {
-    URL.revokeObjectURL(blobUrl);
-    alert('Impressão bloqueada pelo navegador.\nPermita popups para este site nas configurações do Chrome e tente novamente.');
-    return false;
-  }
-
-  let printed = false;
-  const doPrint = () => {
-    if (printed) return;
-    printed = true;
-    w.addEventListener('afterprint', () => {
-      try { w.close(); } catch (e) { /* já fechada */ }
-      URL.revokeObjectURL(blobUrl);
-    });
-    w.focus();
-    w.print();
-  };
-
-  w.onload = () => setTimeout(doPrint, 250);
-  setTimeout(() => { if (!w.closed) doPrint(); }, 900);
-
-  return true;
+  return openPrint(html, 380);
 }
