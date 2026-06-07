@@ -101,18 +101,18 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
       adjType, adjValue, adjReason, orderNotes, fiadoClienteId]);
 
   // ── Catálogo: filtros ───────────────────────────────────────
-  const categories   = useMemo(() => groupByCategory(products), [products]);
-  const categoryKeys = useMemo(() => Object.keys(categories).sort(), [categories]);
+  // groupByCategory retorna [{name, items}] — não um dicionário
+  const categories = useMemo(() => groupByCategory(products), [products]);
 
   const filteredProducts = useMemo(() => {
-    let list = products;
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter((p) => p.name.toLowerCase().includes(q));
-    } else if (activeCategory) {
-      list = categories[activeCategory] ?? [];
+      return products.filter((p) => p.name.toLowerCase().includes(q));
     }
-    return list;
+    if (activeCategory) {
+      return categories.find((c) => c.name === activeCategory)?.items ?? [];
+    }
+    return products;
   }, [products, search, activeCategory, categories]);
 
   // ── Handlers do cart ───────────────────────────────────────
@@ -256,8 +256,8 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                 }`}>
                 Todos
               </button>
-              {categoryKeys.map((cat) => {
-                const count = (categories[cat] ?? []).filter((p) => cart[p.id]).length;
+              {categories.map(({ name: cat, items }) => {
+                const count = items.filter((p) => cart[p.id]).length;
                 return (
                   <button key={cat}
                     onClick={() => setActiveCategory(cat === activeCategory ? null : cat)}
