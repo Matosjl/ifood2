@@ -218,5 +218,3 @@ const getOperationalMetrics = async (tenantId) => {
 };
 
 module.exports = { getHealthScore, getHealthScoreCached, getOperationalMetrics };
-
-module.exports = { getHealthScore, getOperationalMetrics };

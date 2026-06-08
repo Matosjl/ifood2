@@ -15,6 +15,7 @@
 const db  = require('../../config/database');
 const TZ  = 'America/Sao_Paulo';
 const { brazilToday } = require('../../utils/financeDate');
+const { BILLABLE_SQL } = require('../../utils/orderStatus');
 
 const getFechamentoHoje = async (tenantId) => {
   // Data explícita em horário de Brasília — evita CURRENT_DATE do servidor (UTC)
@@ -23,17 +24,17 @@ const getFechamentoHoje = async (tenantId) => {
   // ── 1. Vendas ──────────────────────────────────────────────────
   const { rows: [vendas] } = await db.query(
     `SELECT
-       COUNT(o.id)::int                                                      AS total_pedidos,
-       COALESCE(SUM(o.total), 0)::float                                      AS faturamento,
-       COALESCE(SUM(o.total - COALESCE(o.delivery_fee, 0)), 0)::float        AS receita_produtos,
+       COUNT(o.id) FILTER (WHERE o.status IN ${BILLABLE_SQL})::int                                                          AS total_pedidos,
+       COALESCE(SUM(o.total)                    FILTER (WHERE o.status IN ${BILLABLE_SQL}), 0)::float                       AS faturamento,
+       COALESCE(SUM(o.total - COALESCE(o.delivery_fee, 0)) FILTER (WHERE o.status IN ${BILLABLE_SQL}), 0)::float            AS receita_produtos,
        COALESCE(SUM(CASE WHEN o.delivery_type='delivery'
-                         THEN COALESCE(o.delivery_fee,0) ELSE 0 END),0)::float AS taxas_entrega,
-       COALESCE(AVG(o.total), 0)::float                                      AS ticket_medio,
-       COUNT(*) FILTER (WHERE o.delivery_type='delivery')::int               AS pedidos_entrega,
-       COUNT(*) FILTER (WHERE o.delivery_type='pickup')::int                 AS pedidos_retirada,
-       COUNT(*) FILTER (WHERE o.delivery_type='table')::int                  AS pedidos_mesa,
-       COUNT(*) FILTER (WHERE o.status='cancelled')::int                     AS pedidos_cancelados,
-       COALESCE(SUM(o.total) FILTER (WHERE o.payment_method = 'fiado'), 0)::float AS total_fiado
+                         THEN COALESCE(o.delivery_fee,0) ELSE 0 END) FILTER (WHERE o.status IN ${BILLABLE_SQL}),0)::float   AS taxas_entrega,
+       COALESCE(AVG(o.total)                    FILTER (WHERE o.status IN ${BILLABLE_SQL}), 0)::float                       AS ticket_medio,
+       COUNT(*) FILTER (WHERE o.delivery_type='delivery' AND o.status IN ${BILLABLE_SQL})::int                              AS pedidos_entrega,
+       COUNT(*) FILTER (WHERE o.delivery_type='pickup'   AND o.status IN ${BILLABLE_SQL})::int                              AS pedidos_retirada,
+       COUNT(*) FILTER (WHERE o.delivery_type='table'    AND o.status IN ${BILLABLE_SQL})::int                              AS pedidos_mesa,
+       COUNT(*) FILTER (WHERE o.status='cancelled')::int                                                                    AS pedidos_cancelados,
+       COALESCE(SUM(o.total) FILTER (WHERE o.payment_method = 'fiado' AND o.status IN ${BILLABLE_SQL}), 0)::float           AS total_fiado
      FROM orders o
      WHERE o.tenant_id = $1
        AND o.status IN ('ready','delivered','cancelled')
@@ -401,15 +402,15 @@ const getFechamentoMensal = async (tenantId, month) => {
   // ── 1. Vendas ──────────────────────────────────────────────────
   const { rows: [v] } = await db.query(
     `SELECT
-       COUNT(*)  FILTER (WHERE o.status NOT IN ('cancelled','pending'))::int   AS total_pedidos,
-       COUNT(*)  FILTER (WHERE o.status = 'cancelled')::int                    AS pedidos_cancelados,
-       COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('cancelled','pending')),0)::float AS faturamento,
-       COALESCE(SUM(COALESCE(o.delivery_fee,0)) FILTER (WHERE o.status NOT IN ('cancelled','pending') AND o.delivery_type='delivery'),0)::float AS taxas_entrega,
-       COALESCE(SUM(o.total - COALESCE(o.delivery_fee,0)) FILTER (WHERE o.status NOT IN ('cancelled','pending')),0)::float AS receita_produtos,
-       COALESCE(AVG(o.total) FILTER (WHERE o.status NOT IN ('cancelled','pending')),0)::float AS ticket_medio,
-       COUNT(*) FILTER (WHERE o.delivery_type='delivery' AND o.status NOT IN ('cancelled','pending'))::int AS pedidos_entrega,
-       COUNT(*) FILTER (WHERE o.delivery_type='pickup'   AND o.status NOT IN ('cancelled','pending'))::int AS pedidos_retirada,
-       COUNT(*) FILTER (WHERE o.delivery_type='table'    AND o.status NOT IN ('cancelled','pending'))::int AS pedidos_mesa
+       COUNT(*)  FILTER (WHERE o.status IN ${BILLABLE_SQL})::int                                          AS total_pedidos,
+       COUNT(*)  FILTER (WHERE o.status = 'cancelled')::int                                               AS pedidos_cancelados,
+       COALESCE(SUM(o.total)                    FILTER (WHERE o.status IN ${BILLABLE_SQL}),0)::float       AS faturamento,
+       COALESCE(SUM(COALESCE(o.delivery_fee,0)) FILTER (WHERE o.status IN ${BILLABLE_SQL} AND o.delivery_type='delivery'),0)::float AS taxas_entrega,
+       COALESCE(SUM(o.total - COALESCE(o.delivery_fee,0)) FILTER (WHERE o.status IN ${BILLABLE_SQL}),0)::float AS receita_produtos,
+       COALESCE(AVG(o.total)                    FILTER (WHERE o.status IN ${BILLABLE_SQL}),0)::float       AS ticket_medio,
+       COUNT(*) FILTER (WHERE o.delivery_type='delivery' AND o.status IN ${BILLABLE_SQL})::int             AS pedidos_entrega,
+       COUNT(*) FILTER (WHERE o.delivery_type='pickup'   AND o.status IN ${BILLABLE_SQL})::int             AS pedidos_retirada,
+       COUNT(*) FILTER (WHERE o.delivery_type='table'    AND o.status IN ${BILLABLE_SQL})::int             AS pedidos_mesa
      FROM orders o
      WHERE o.tenant_id = $1
        AND (o.created_at AT TIME ZONE '${TZ}') >= ${inicioExpr}
@@ -422,7 +423,7 @@ const getFechamentoMensal = async (tenantId, month) => {
     `SELECT payment_method, COUNT(*)::int AS qtd, COALESCE(SUM(total),0)::float AS total
      FROM orders
      WHERE tenant_id = $1
-       AND status NOT IN ('cancelled','pending')
+       AND status IN ${BILLABLE_SQL}
        AND (created_at AT TIME ZONE '${TZ}') >= ${inicioExpr}
        AND (created_at AT TIME ZONE '${TZ}') <  ${fimExpr}
      GROUP BY payment_method`,
@@ -601,7 +602,7 @@ const getFechamentoMensal = async (tenantId, month) => {
        FROM orders o
        LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE o.tenant_id = $1
-         AND o.status NOT IN ('cancelled','pending')
+         AND o.status IN ${BILLABLE_SQL}
          AND (o.created_at AT TIME ZONE '${TZ}') >= ${inicioExpr}
          AND (o.created_at AT TIME ZONE '${TZ}') <  ${fimExpr}
        GROUP BY o.id, o.created_at, o.status, o.insumos_deducted
