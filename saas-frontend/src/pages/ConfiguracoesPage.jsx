@@ -2099,6 +2099,23 @@ function ImpresorasTab({ onToast }) {
   const [saving,  setSaving]  = useState(null); // id da categoria sendo salva
   const [loading, setLoading] = useState(true);
 
+  // Largura do papel da comanda de cozinha — salvo no localStorage deste dispositivo
+  const [kitchenWidth, setKitchenWidthState] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('printerSettings') ?? '{}');
+      return s.kitchenWidth === '80' ? '80' : '58';
+    } catch { return '58'; }
+  });
+
+  const setKitchenWidth = (val) => {
+    setKitchenWidthState(val);
+    try {
+      const s = JSON.parse(localStorage.getItem('printerSettings') ?? '{}');
+      localStorage.setItem('printerSettings', JSON.stringify({ ...s, kitchenWidth: val }));
+    } catch { localStorage.setItem('printerSettings', JSON.stringify({ kitchenWidth: val })); }
+    onToast(`Largura da comanda: ${val}mm salvo neste dispositivo.`, 'success');
+  };
+
   useEffect(() => {
     api.get('/categories')
       .then(({ data }) => setCats(data.data ?? []))
@@ -2178,6 +2195,34 @@ function ImpresorasTab({ onToast }) {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* ── Largura da comanda de cozinha ── */}
+      <div>
+        <h3 className="text-base font-semibold text-white mb-1">📏 Largura da Comanda de Cozinha</h3>
+        <p className="text-sm text-gray-400 mb-3">
+          Selecione o tamanho do papel da impressora <span className="text-orange-400 font-medium">neste dispositivo</span>.
+          A configuração fica salva no navegador — defina em cada computador/tablet separadamente.
+        </p>
+        <div className="flex gap-3">
+          {[
+            { value: '58', label: '58mm', desc: 'Padrão — caixa / balcão' },
+            { value: '80', label: '80mm', desc: 'Cozinha / mesa grande' },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setKitchenWidth(opt.value)}
+              className={`flex-1 rounded-xl border px-4 py-3 text-left transition-colors ${
+                kitchenWidth === opt.value
+                  ? 'bg-orange-500/20 border-orange-500/60 text-orange-300'
+                  : 'bg-gray-800/60 border-white/10 text-gray-400 hover:border-white/20'
+              }`}
+            >
+              <p className="text-lg font-black">{opt.label}</p>
+              <p className="text-xs mt-0.5 opacity-75">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-sm text-blue-300">

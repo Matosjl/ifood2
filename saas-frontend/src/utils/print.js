@@ -347,7 +347,9 @@ export function printOrder(order) {
   return openPrint(html, 300);
 }
 
-// ── Comanda de cozinha — 80mm ─────────────────────────────────
+// ── Comanda de cozinha — 58mm ou 80mm (lê localStorage) ──────
+// Configurável em Configurações → Impressora → Largura da comanda
+// Valores: '58' (padrão) ou '80'
 export function printKitchen(order, target = null) {
   const now  = new Date();
   const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -359,6 +361,24 @@ export function printKitchen(order, target = null) {
   });
 
   if (items.length === 0) return false;
+
+  // Lê largura configurada pelo restaurante (default: 58mm)
+  const paperWidth = (() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('printerSettings') ?? '{}');
+      return s.kitchenWidth === '80' ? 80 : 58;
+    } catch { return 58; }
+  })();
+
+  const is80 = paperWidth === 80;
+
+  // Escalas de fonte por largura
+  const f = is80
+    ? { dest: 16, num: 64, hora: 16, tipo: 18, cliente: 14, qty: 28, name: 22, obs: 14, obsQtyPad: 54, obsPedido: 15, obsLabel: 11 }
+    : { dest: 13, num: 40, hora: 13, tipo: 14, cliente: 12, qty: 20, name: 16, obs: 11, obsQtyPad: 38, obsPedido: 12, obsLabel: 10 };
+
+  const mm      = paperWidth;
+  const popupW  = is80 ? 380 : 300;
 
   const targetLabel = target === 'bar' ? 'BAR' : 'COZINHA';
   const targetIcon  = target === 'bar' ? '🍺' : '⭐';
@@ -392,126 +412,126 @@ export function printKitchen(order, target = null) {
     body {
       font-family: 'Courier New', Courier, monospace;
       font-weight: bold;
-      width: 80mm;
-      min-width: 80mm;
-      max-width: 80mm;
-      padding: 4mm 3mm 10mm 3mm;
+      width: ${mm}mm;
+      min-width: ${mm}mm;
+      max-width: ${mm}mm;
+      padding: ${is80 ? '4mm 3mm 10mm 3mm' : '3mm 2mm 8mm 2mm'};
       color: #000;
       background: #fff;
     }
 
     /* ── Utilitários ── */
-    .hr-solid { border: none; border-top: 3px solid #000; margin: 6px 0; }
-    .hr-dash  { border: none; border-top: 2px dashed #000; margin: 5px 0; }
+    .hr-solid { border: none; border-top: ${is80 ? 3 : 2}px solid #000; margin: ${is80 ? 6 : 4}px 0; }
+    .hr-dash  { border: none; border-top: ${is80 ? 2 : 1}px dashed #000; margin: ${is80 ? 5 : 3}px 0; }
 
     /* ── Cabeçalho destino ── */
     .dest-box {
-      border: 3px solid #000;
-      padding: 5px 0;
+      border: ${is80 ? 3 : 2}px solid #000;
+      padding: ${is80 ? 5 : 3}px 0;
       text-align: center;
-      margin-bottom: 5px;
+      margin-bottom: ${is80 ? 5 : 3}px;
     }
     .dest-label {
-      font-size: 16px;
+      font-size: ${f.dest}px;
       font-weight: 900;
-      letter-spacing: 4px;
+      letter-spacing: ${is80 ? 4 : 2}px;
       text-transform: uppercase;
     }
 
     /* ── Número do pedido ── */
     .num {
       text-align: center;
-      font-size: 64px;
+      font-size: ${f.num}px;
       font-weight: 900;
       line-height: 1;
-      letter-spacing: -2px;
-      margin: 4px 0;
+      letter-spacing: -1px;
+      margin: ${is80 ? 4 : 2}px 0;
     }
 
     /* ── Hora e tipo ── */
     .hora {
       text-align: center;
-      font-size: 16px;
+      font-size: ${f.hora}px;
       font-weight: 900;
-      margin-bottom: 3px;
+      margin-bottom: ${is80 ? 3 : 2}px;
     }
     .tipo-box {
-      border: 2px solid #000;
-      padding: 4px 0;
+      border: ${is80 ? 2 : 1}px solid #000;
+      padding: ${is80 ? 4 : 2}px 0;
       text-align: center;
-      margin: 4px 0;
+      margin: ${is80 ? 4 : 3}px 0;
     }
     .tipo-label {
-      font-size: 18px;
+      font-size: ${f.tipo}px;
       font-weight: 900;
-      letter-spacing: 3px;
+      letter-spacing: ${is80 ? 3 : 2}px;
     }
 
     /* ── Cliente ── */
     .cliente {
-      font-size: 14px;
+      font-size: ${f.cliente}px;
       font-weight: 900;
       text-transform: uppercase;
       text-align: center;
-      margin: 4px 0;
+      margin: ${is80 ? 4 : 3}px 0;
     }
 
     /* ── Itens ── */
     .item {
-      padding: 8px 0;
-      border-bottom: 2px dashed #000;
+      padding: ${is80 ? 8 : 5}px 0;
+      border-bottom: ${is80 ? 2 : 1}px dashed #000;
     }
     .item:last-child { border-bottom: none; }
     .item-main {
       display: flex;
       align-items: flex-start;
-      gap: 6px;
+      gap: ${is80 ? 6 : 4}px;
     }
     .item-qty {
-      font-size: 28px;
+      font-size: ${f.qty}px;
       font-weight: 900;
       line-height: 1;
-      min-width: 48px;
+      min-width: ${is80 ? 48 : 34}px;
       flex-shrink: 0;
     }
     .item-name {
-      font-size: 22px;
+      font-size: ${f.name}px;
       font-weight: 900;
       line-height: 1.2;
       flex: 1;
       padding-top: 2px;
     }
     .item-obs {
-      font-size: 14px;
+      font-size: ${f.obs}px;
       font-weight: 900;
-      padding-left: 54px;
-      margin-top: 4px;
+      padding-left: ${f.obsQtyPad}px;
+      margin-top: ${is80 ? 4 : 2}px;
       text-decoration: underline;
       font-style: italic;
     }
 
     /* ── Observação do pedido ── */
     .obs-pedido {
-      border: 3px solid #000;
-      padding: 5px 6px;
-      margin-top: 6px;
-      font-size: 15px;
+      border: ${is80 ? 3 : 2}px solid #000;
+      padding: ${is80 ? 5 : 3}px ${is80 ? 6 : 4}px;
+      margin-top: ${is80 ? 6 : 4}px;
+      font-size: ${f.obsPedido}px;
       font-weight: 900;
     }
     .obs-label {
-      font-size: 11px;
+      font-size: ${f.obsLabel}px;
       letter-spacing: 2px;
       text-transform: uppercase;
-      margin-bottom: 3px;
+      margin-bottom: ${is80 ? 3 : 2}px;
     }
 
     @media print {
-      @page { size: 80mm auto; margin: 0mm; }
+      @page { size: ${mm}mm auto; margin: 0mm; }
       html, body {
-        width: 80mm;
-        min-width: 80mm;
-        max-width: 80mm;
-        padding: 2mm 3mm 8mm 3mm;
+        width: ${mm}mm;
+        min-width: ${mm}mm;
+        max-width: ${mm}mm;
+        padding: ${is80 ? '2mm 3mm 8mm 3mm' : '1mm 2mm 6mm 2mm'};
       }
     }
   </style>
@@ -545,5 +565,5 @@ export function printKitchen(order, target = null) {
 
 </body></html>`;
 
-  return openPrint(html, 380);
+  return openPrint(html, popupW);
 }
