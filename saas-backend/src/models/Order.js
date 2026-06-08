@@ -57,9 +57,31 @@ class Order {
                   'unit_price',      oi.unit_price,
                   'total',           oi.total,
                   'notes',           oi.notes,
-                  'printer_target',  COALESCE(c.printer_target, 'kitchen')
+                  'printer_target',  COALESCE(c.printer_target, 'kitchen'),
+                  'addons', (
+                    SELECT COALESCE(json_agg(json_build_object(
+                      'id',            oia.id,
+                      'addon_item_id', oia.addon_item_id,
+                      'addon_name',    oia.addon_name,
+                      'qty',           oia.qty,
+                      'unit_price',    oia.unit_price,
+                      'total',         oia.total
+                    )), '[]'::json)
+                    FROM order_item_addons oia WHERE oia.order_item_id = oi.id
+                  ),
+                  'choices', (
+                    SELECT COALESCE(json_agg(json_build_object(
+                      'group_id',     oicc.group_id,
+                      'product_id',   oicc.product_id,
+                      'product_name', cp.name,
+                      'extra_price',  oicc.extra_price
+                    )), '[]'::json)
+                    FROM order_item_combo_choices oicc
+                    JOIN products cp ON cp.id = oicc.product_id
+                    WHERE oicc.order_item_id = oi.id
+                  )
                 ) ORDER BY oi.id
-              ) AS items
+              ) FILTER (WHERE oi.id IS NOT NULL) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
        LEFT   JOIN products p   ON p.id = oi.product_id
@@ -88,7 +110,7 @@ class Order {
                   'total',           oi.total,
                   'notes',           oi.notes,
                   'printer_target',  COALESCE(c.printer_target, 'kitchen'),
-                  'addons',       (
+                  'addons', (
                     SELECT COALESCE(json_agg(json_build_object(
                       'id',            oia.id,
                       'addon_item_id', oia.addon_item_id,
@@ -98,9 +120,20 @@ class Order {
                       'total',         oia.total
                     )), '[]'::json)
                     FROM order_item_addons oia WHERE oia.order_item_id = oi.id
+                  ),
+                  'choices', (
+                    SELECT COALESCE(json_agg(json_build_object(
+                      'group_id',     oicc.group_id,
+                      'product_id',   oicc.product_id,
+                      'product_name', cp.name,
+                      'extra_price',  oicc.extra_price
+                    )), '[]'::json)
+                    FROM order_item_combo_choices oicc
+                    JOIN products cp ON cp.id = oicc.product_id
+                    WHERE oicc.order_item_id = oi.id
                   )
                 ) ORDER BY oi.id
-              ) AS items
+              ) FILTER (WHERE oi.id IS NOT NULL) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
        LEFT   JOIN products p   ON p.id = oi.product_id

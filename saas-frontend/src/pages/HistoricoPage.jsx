@@ -140,7 +140,25 @@ function DetailRow({ order, onNfceUpdate }) {
               <p className="text-gray-400 text-xs mt-2">Criado: {fmtDate(order.created_at)}</p>
               <div className="flex gap-2 mt-2">
                 <button
-                  onClick={() => printOrder({ ...order, orderNumber: order.order_number, customerName: order.customer_name, customerPhone: order.customer_phone, customerAddress: order.customer_address, deliveryType: order.delivery_type, deliveryFee: order.delivery_fee, paymentMethod: order.payment_method })}
+                  onClick={() => printOrder({
+                    ...order,
+                    orderNumber:     order.order_number,
+                    customerName:    order.customer_name,
+                    customerPhone:   order.customer_phone,
+                    customerAddress: order.customer_address,
+                    deliveryType:    order.delivery_type,
+                    deliveryFee:     order.delivery_fee,
+                    paymentMethod:   order.payment_method,
+                    // normaliza itens: snake_case → camelCase para printOrder
+                    items: (order.items ?? []).filter(i => i && i.id).map(i => ({
+                      ...i,
+                      productName:  i.productName  ?? i.product_name,
+                      weightKg:     i.weightKg     ?? i.weight_kg ?? null,
+                      printerTarget: i.printerTarget ?? i.printer_target ?? 'kitchen',
+                      addons:  Array.isArray(i.addons)  ? i.addons  : [],
+                      choices: Array.isArray(i.choices) ? i.choices : [],
+                    })),
+                  })}
                   className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-700/60 hover:bg-gray-700 text-gray-300 border border-white/10 transition-colors"
                 >
                   🖨️ Reimprimir

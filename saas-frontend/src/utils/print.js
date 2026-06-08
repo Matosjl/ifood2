@@ -82,6 +82,24 @@ export function printOrder(order) {
     const tot  = `R$ ${parseFloat(item.total ?? 0).toFixed(2)}`;
     const note = item.notes
       ? `<div class="item-obs">↳ ${item.notes}</div>` : '';
+
+    // Choices do combo (ex: sabor escolhido, tipo de carne)
+    const choiceRows = (item.choices ?? []).map(c => {
+      const cName  = c.productName ?? c.product_name ?? '';
+      const cExtra = parseFloat(c.extraPrice ?? c.extra_price ?? 0);
+      const cPrice = cExtra > 0 ? ` +R$ ${cExtra.toFixed(2)}` : '';
+      return `<div class="item-sub">↳ ${cName}${cPrice}</div>`;
+    }).join('');
+
+    // Addons / complementos (ex: batata extra, cheddar, bebida)
+    const addonRows = (item.addons ?? []).map(a => {
+      const aName = a.addonName ?? a.addon_name ?? '';
+      const aQty  = (a.qty ?? 1) > 1 ? `${a.qty}x ` : '';
+      const aTot  = parseFloat(a.total ?? 0) > 0
+        ? ` R$ ${parseFloat(a.total).toFixed(2)}` : '';
+      return `<div class="item-sub">+ ${aQty}${aName}${aTot}</div>`;
+    }).join('');
+
     return `
       <div class="item-row">
         <div class="item-main">
@@ -90,6 +108,8 @@ export function printOrder(order) {
           <span class="item-price">${tot}</span>
         </div>
         ${note}
+        ${choiceRows}
+        ${addonRows}
       </div>`;
   }).join('');
 
@@ -163,6 +183,8 @@ export function printOrder(order) {
       font-size: 13px;
       font-weight: 900;
       text-transform: uppercase;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .cliente-tel {
       font-size: 11px;
@@ -217,6 +239,16 @@ export function printOrder(order) {
       padding-left: 20px;
       margin-top: 1px;
       font-style: italic;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+    .item-sub {
+      font-size: 10px;
+      font-weight: bold;
+      padding-left: 20px;
+      margin-top: 1px;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
 
     /* ── Total ── */
@@ -262,6 +294,8 @@ export function printOrder(order) {
       font-weight: bold;
       margin-top: 2px;
       line-height: 1.4;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .pagamento {
       font-size: 12px;
@@ -393,6 +427,20 @@ export function printKitchen(order, target = null) {
     const name = item.productName ?? item.product_name ?? '';
     const note = item.notes
       ? `<div class="item-obs">↳ ${item.notes}</div>` : '';
+
+    // Choices do combo — cozinha precisa saber o sabor/tipo escolhido
+    const choiceRows = (item.choices ?? []).map(c => {
+      const cName = c.productName ?? c.product_name ?? '';
+      return `<div class="item-choice">↳ ${cName}</div>`;
+    }).join('');
+
+    // Addons / complementos — cozinha/bar precisa preparar
+    const addonRows = (item.addons ?? []).map(a => {
+      const aName = a.addonName ?? a.addon_name ?? '';
+      const aQty  = (a.qty ?? 1) > 1 ? `${a.qty}x ` : '';
+      return `<div class="item-addon-k">+ ${aQty}${aName}</div>`;
+    }).join('');
+
     return `
       <div class="item">
         <div class="item-main">
@@ -400,6 +448,8 @@ export function printKitchen(order, target = null) {
           <span class="item-name">${name}</span>
         </div>
         ${note}
+        ${choiceRows}
+        ${addonRows}
       </div>`;
   }).join('');
 
@@ -508,6 +558,27 @@ export function printKitchen(order, target = null) {
       margin-top: ${is80 ? 4 : 2}px;
       text-decoration: underline;
       font-style: italic;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+    /* Choices do combo (sabor/tipo escolhido) */
+    .item-choice {
+      font-size: ${f.obs}px;
+      font-weight: 900;
+      padding-left: ${f.obsQtyPad}px;
+      margin-top: ${is80 ? 3 : 2}px;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+    /* Addons / complementos (batata, bebida, extra) */
+    .item-addon-k {
+      font-size: ${f.obs}px;
+      font-weight: bold;
+      padding-left: ${f.obsQtyPad}px;
+      margin-top: ${is80 ? 2 : 1}px;
+      font-style: italic;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
 
     /* ── Observação do pedido ── */
