@@ -54,12 +54,15 @@ function openPrint(html, width = 300) {
 
 // ── Recibo do cliente — 58mm ──────────────────────────────────
 export function printOrder(order) {
-  const user = (() => {
-    try { return JSON.parse(localStorage.getItem('user') ?? '{}'); }
-    catch { return {}; }
+  // Login salva user e tenant em chaves separadas no localStorage
+  const tenant = (() => {
+    try {
+      const t = JSON.parse(localStorage.getItem('tenant') ?? 'null');
+      if (t?.name) return t.name;
+      const u = JSON.parse(localStorage.getItem('user')   ?? '{}');
+      return u.tenant?.name ?? 'Restaurante';
+    } catch { return 'Restaurante'; }
   })();
-
-  const tenant = user.tenant?.name ?? 'Restaurante';
   const now    = new Date();
   const date   = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const time   = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -207,31 +210,40 @@ export function printOrder(order) {
       border-bottom: 1px dashed #ccc;
     }
     .item-row:last-of-type { border-bottom: none; }
+    /* display:table é mais robusto que flex em drivers de impressora térmica */
     .item-main {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 4px;
+      display: table;
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: auto;
     }
     .item-qty {
+      display: table-cell;
       font-size: 12px;
       font-weight: 900;
       white-space: nowrap;
-      flex-shrink: 0;
-      min-width: 20px;
+      vertical-align: top;
+      padding-right: 3px;
+      width: 1%;
     }
     .item-name {
+      display: table-cell;
       font-size: 12px;
       font-weight: bold;
-      flex: 1;
       line-height: 1.3;
+      vertical-align: top;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     .item-price {
+      display: table-cell;
       font-size: 12px;
       font-weight: 900;
       white-space: nowrap;
-      flex-shrink: 0;
+      vertical-align: top;
       text-align: right;
+      padding-left: 4px;
+      width: 1%;
     }
     .item-obs {
       font-size: 10px;
@@ -258,18 +270,22 @@ export function printOrder(order) {
       padding-top: 5px;
     }
     .total-row {
-      display: flex;
-      justify-content: space-between;
+      display: table;
+      width: 100%;
       font-size: 16px;
       font-weight: 900;
     }
+    .total-row span { display: table-cell; }
+    .total-row span:last-child { text-align: right; white-space: nowrap; }
     .taxa-row {
-      display: flex;
-      justify-content: space-between;
+      display: table;
+      width: 100%;
       font-size: 11px;
       font-weight: bold;
       margin-top: 2px;
     }
+    .taxa-row span { display: table-cell; }
+    .taxa-row span:last-child { text-align: right; white-space: nowrap; }
     .troco {
       font-size: 12px;
       font-weight: 900;
@@ -335,7 +351,7 @@ export function printOrder(order) {
   <div class="hr-solid"></div>
 
   <div class="num-pedido center">#${order.orderNumber ?? order.order_number}</div>
-  <p class="datetime">${date} &middot; ${time}</p>
+  <p class="datetime">${date} - ${time}</p>
 
   <div class="hr-dash"></div>
 
