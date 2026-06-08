@@ -4,6 +4,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const AppError  = require('../../utils/AppError');
 const { TZ, getPeriodDates, getPrevPeriodDates, getMonthDates } = require('../../utils/financeDate');
 const financeLog = require('../../utils/financeLog');
+const { BILLABLE_SQL } = require('../../utils/orderStatus');
 
 // ── Macro SQL helper ──────────────────────────────────────────────────
 // Todas as queries de pedidos usam (created_at AT TIME ZONE TZ)::date
@@ -42,13 +43,19 @@ const summary = asyncHandler(async (req, res) => {
           AND d.status = 'delivered'
           AND (od.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
        )                                                                                           AS total_driver_fees,
-       COUNT(o.id)::int                                                                            AS order_count,
+       COUNT(*)::int                                                                               AS order_count,
        COALESCE(AVG(o.total), 0)::float                                                            AS avg_ticket,
-       COALESCE(SUM(oi.total_cost), 0)::float                                                      AS total_cmv
+       -- CMV via subquery agregada — evita fan-out do JOIN order_items
+       (SELECT COALESCE(SUM(oi.total_cost), 0)::float
+        FROM order_items oi
+        JOIN orders o2 ON o2.id = oi.order_id
+        WHERE o2.tenant_id = $1
+          AND o2.status IN ${BILLABLE_SQL}
+          AND (o2.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
+       )                                                                                           AS total_cmv
      FROM orders o
-     LEFT JOIN order_items oi ON oi.order_id = o.id
      WHERE o.tenant_id = $1
-       AND o.status IN ('ready','delivered')
+       AND o.status IN ${BILLABLE_SQL}
        AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
     [tenantId, startDate, endDate, TZ]
   );
@@ -57,13 +64,19 @@ const summary = asyncHandler(async (req, res) => {
   const { rows: [prev] } = await db.query(
     `SELECT
        COALESCE(SUM(o.total), 0)::float   AS revenue,
-       COUNT(o.id)::int                    AS order_count,
+       COUNT(*)::int                       AS order_count,
        COALESCE(AVG(o.total), 0)::float    AS avg_ticket,
-       COALESCE(SUM(oi.total_cost), 0)::float AS total_cmv
+       -- CMV via subquery agregada — evita fan-out do JOIN order_items
+       (SELECT COALESCE(SUM(oi.total_cost), 0)::float
+        FROM order_items oi
+        JOIN orders o2 ON o2.id = oi.order_id
+        WHERE o2.tenant_id = $1
+          AND o2.status IN ${BILLABLE_SQL}
+          AND (o2.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
+       )                                   AS total_cmv
      FROM orders o
-     LEFT JOIN order_items oi ON oi.order_id = o.id
      WHERE o.tenant_id = $1
-       AND o.status IN ('ready','delivered')
+       AND o.status IN ${BILLABLE_SQL}
        AND (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
     [tenantId, pStart, pEnd, TZ]
   );
