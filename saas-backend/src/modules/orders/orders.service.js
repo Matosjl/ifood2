@@ -637,8 +637,8 @@ const updateStatus = async (id, tenantId, status) => {
   const waNotify = require('../../services/waNotify.service');
   waNotify.notifyCustomer(tenantId, updatedOrder).catch(() => {});
 
-  // Deduz insumos quando pedido é confirmado
-  if (status === 'confirmed') {
+  // Deduz insumos quando pedido é confirmado ou vai direto para preparing (atalho pending→preparing)
+  if (status === 'confirmed' || status === 'preparing') {
     const insumosSvc = require('../insumos/insumos.service');
     insumosSvc.deductForOrder(tenantId, id).catch((err) => {
       logger.error('Falha ao deduzir insumos na atualização de status', {
@@ -692,7 +692,7 @@ const cancelOrder = async (id, tenantId, reason = null) => {
 
   const updated = await Order.updateStatus(id, tenantId, 'cancelled', reason);
 
-  if (['confirmed', 'preparing', 'ready'].includes(order.status)) {
+  if (!['delivered', 'cancelled'].includes(order.status)) {
     const client = await db.getClient();
     try {
       await client.query('BEGIN');
