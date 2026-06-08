@@ -433,11 +433,16 @@ const getResult = asyncHandler(async (req, res) => {
          COALESCE(SUM(o.total - COALESCE(o.delivery_fee, 0)), 0)::float                       AS products_revenue,
          COALESCE(SUM(CASE WHEN o.delivery_type = 'delivery'
                            THEN COALESCE(o.delivery_fee, 0) ELSE 0 END), 0)::float            AS delivery_fees_charged,
-         COALESCE(SUM(oi.total_cost),0)::float                                                 AS total_cmv
+         (SELECT COALESCE(SUM(oi.total_cost),0)::float
+          FROM order_items oi
+          JOIN orders o2 ON o2.id = oi.order_id
+          WHERE o2.tenant_id = $1
+            AND o2.status IN ${BILLABLE_SQL}
+            AND (o2.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date
+         )                                                                                    AS total_cmv
        FROM orders o
-       LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE  o.tenant_id = $1
-         AND  o.status IN ('ready','delivered')
+         AND  o.status IN ${BILLABLE_SQL}
          AND  (o.created_at AT TIME ZONE $4)::date BETWEEN $2::date AND $3::date`,
       [tenantId, startDate, endDate, TZ]
     ),
@@ -507,7 +512,7 @@ const getResult = asyncHandler(async (req, res) => {
   const logisticsResult = parseFloat((deliveryFees - driverFees).toFixed(2));
 
   // CMV Teórico: baseado em fichas técnicas. Só considera produtos com ficha cadastrada.
-  const cmvTeorico      = parseFloat((cmvTeo[0]?.cmv_teorico || 0).toFixed(2));
+  const cmvTeorico      = parseFloat((cmvTeo?.cmv_teorico || 0).toFixed(2));
   const cmvReal         = parseFloat((rev.total_cmv || 0).toFixed(2));
   // Desvio positivo = consumiu mais que o esperado (perdas não capturadas, desvio, desperdício)
   // Desvio negativo = fichas técnicas desatualizadas ou produtos sem ficha não computados
@@ -543,16 +548,16 @@ const getResult = asyncHandler(async (req, res) => {
       // Custo real dos itens consumidos internamente (fora das vendas)
       // Deve ser considerado no lucro real do período
       consumo_interno: {
-        total:       parseFloat((consumo[0]?.total      || 0).toFixed(2)),
-        registros:   parseInt (consumo[0]?.registros    || 0),
-        funcionario: parseFloat((consumo[0]?.funcionario || 0).toFixed(2)),
-        familia:     parseFloat((consumo[0]?.familia     || 0).toFixed(2)),
-        brinde:      parseFloat((consumo[0]?.brinde      || 0).toFixed(2)),
-        degustacao:  parseFloat((consumo[0]?.degustacao  || 0).toFixed(2)),
-        perda:       parseFloat((consumo[0]?.perda       || 0).toFixed(2)),
+        total:       parseFloat((consumo?.total      || 0).toFixed(2)),
+        registros:   parseInt (consumo?.registros    || 0),
+        funcionario: parseFloat((consumo?.funcionario || 0).toFixed(2)),
+        familia:     parseFloat((consumo?.familia     || 0).toFixed(2)),
+        brinde:      parseFloat((consumo?.brinde      || 0).toFixed(2)),
+        degustacao:  parseFloat((consumo?.degustacao  || 0).toFixed(2)),
+        perda:       parseFloat((consumo?.perda       || 0).toFixed(2)),
       },
       // Lucro real = lucro operacional - consumo interno (custo não refletido no CMV de vendas)
-      profit_real: parseFloat((netProfit - parseFloat(consumo[0]?.total || 0)).toFixed(2)),
+      profit_real: parseFloat((netProfit - parseFloat(consumo?.total || 0)).toFixed(2)),
     },
   });
 });
