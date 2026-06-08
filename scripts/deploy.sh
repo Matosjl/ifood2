@@ -47,6 +47,13 @@ docker compose run --rm backend node src/database/migrate.js
 log "▶  Starting services..."
 docker compose up -d --remove-orphans
 
+# ── Reload nginx to pick up new backend IP ────────────────────
+# When backend/worker are rebuilt, Docker assigns a new container IP.
+# Nginx caches the resolved IP at startup — without a reload it keeps
+# routing to the old (dead) IP, causing 502 on every request.
+log "▶  Reloading nginx (flush upstream IP cache)..."
+docker compose exec -T nginx nginx -s reload || docker compose restart nginx
+
 # Wait for backend health
 log "▶  Waiting for backend to become healthy..."
 for i in $(seq 1 30); do
