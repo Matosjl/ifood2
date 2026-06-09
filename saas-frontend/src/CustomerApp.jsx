@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   getPublicMenu, createPublicOrder, trackPublicOrder,
   getPublicCustomer, submitPublicRating, getPublicOrderHistory,
 } from './api/public';
 import DeliveryMapPicker from './components/DeliveryMapPicker';
 import SplashScreen from './components/SplashScreen';
+import ProductModal from './components/ProductModal';
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -746,6 +748,9 @@ export default function CustomerApp({ slug }) {
   const [pickerProduct, setPickerProduct] = useState(null);
   const [pickerGroups,  setPickerGroups]  = useState([]);
 
+  // Modal premium de produto
+  const [productModal, setProductModal] = useState(null);
+
   // Perfil (localStorage)
   const [profile,      setProfile]      = useState(() => loadProfile(slug));
   const [showProfile,  setShowProfile]  = useState(false);
@@ -990,6 +995,25 @@ export default function CustomerApp({ slug }) {
   }, [pickerProduct]);
 
   const handlePickerClose = useCallback(() => { setPickerProduct(null); setPickerGroups([]); }, []);
+
+  // ── Modal premium de produto ───────────────────────────────
+
+  const handleOpenModal  = useCallback((product) => setProductModal(product), []);
+  const handleCloseModal = useCallback(() => setProductModal(null), []);
+
+  // Chamado pelo ProductModal ao clicar em "Adicionar".
+  // Se tem addons → fecha modal e abre AddonPicker.
+  // Se não tem addons → define qty diretamente no carrinho.
+  const handleAddFromModal = useCallback((product, qty) => {
+    const groups = product.addon_groups ?? [];
+    if (groups.length > 0) {
+      setProductModal(null);
+      setPickerProduct(product);
+      setPickerGroups(groups);
+    } else {
+      setCart(c => ({ ...c, [product.id]: { product, qty, weightKg: '', addons: [] } }));
+    }
+  }, []);
 
   // ── Cart helpers ──────────────────────────────────────────
 
@@ -1660,7 +1684,7 @@ export default function CustomerApp({ slug }) {
               return (
                 <div key={product.id}
                   className="shrink-0 w-40 bg-zinc-900 rounded-2xl overflow-hidden border border-white/[0.08] flex flex-col cursor-pointer active:scale-95 transition-transform hover:border-amber-400/30"
-                  onClick={() => !inCart && handleAdd(product)}>
+                  onClick={() => handleOpenModal(product)}>
                   <div className={`h-28 relative ${!product.image_url ? `bg-gradient-to-br ${grad}` : ''}`}>
                     {product.image_url
                       ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
@@ -1721,8 +1745,9 @@ export default function CustomerApp({ slug }) {
                 } : null;
                 return (
                   <div key={product.id}
-                    className={`rounded-2xl border overflow-hidden transition-all ${
-                      outOfStock ? 'opacity-40' : ''
+                    onClick={() => !outOfStock && handleOpenModal(product)}
+                    className={`rounded-2xl border overflow-hidden transition-all cursor-pointer ${
+                      outOfStock ? 'opacity-40 cursor-not-allowed' : ''
                     } ${
                       inCart
                         ? 'bg-zinc-800/80 border-amber-400/30 ring-1 ring-amber-400/20'
@@ -1741,7 +1766,8 @@ export default function CustomerApp({ slug }) {
                         {inCart?.addons?.length > 0 && (
                           <p className="text-xs text-amber-400/80 mt-1">+ {inCart.addons.map(a => `${a.addon_name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(', ')}</p>
                         )}
-                        <div className="flex items-center justify-between mt-2.5 gap-2">
+                        <div className="flex items-center justify-between mt-2.5 gap-2"
+                          onClick={(e) => e.stopPropagation()}>
                           <span className="text-amber-400 font-black text-base tabular-nums">
                             {fmtBRL(product.sale_price)}{product.sale_type === 'kg' && <span className="text-xs font-semibold text-zinc-500">/kg</span>}
                           </span>
@@ -1764,7 +1790,7 @@ export default function CustomerApp({ slug }) {
                                   className="w-8 h-8 rounded-xl bg-amber-400 text-zinc-900 font-black text-lg flex items-center justify-center hover:bg-amber-300">+</button>
                               </div>
                             ) : (
-                              <button onClick={() => handleAdd(product)}
+                              <button onClick={() => handleOpenModal(product)}
                                 className="flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-zinc-900 font-black text-sm px-3.5 py-2 rounded-xl transition-colors active:scale-95">
                                 <span className="text-base leading-none">+</span>Adicionar
                               </button>
@@ -1850,6 +1876,19 @@ export default function CustomerApp({ slug }) {
           <style>{`@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }`}</style>
         </div>
       )}
+
+      {/* Modal premium de produto */}
+      <AnimatePresence>
+        {productModal && (
+          <ProductModal
+            product={productModal}
+            cart={cart}
+            badgeConfig={menuData?.badge_config ?? {}}
+            onClose={handleCloseModal}
+            onAdd={handleAddFromModal}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Addon Picker */}
       {pickerProduct && (
