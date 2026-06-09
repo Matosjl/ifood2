@@ -1,6 +1,7 @@
 'use strict';
 const db         = require('../../config/database');
 const { withCache } = require('../../config/redis');
+const { BILLABLE_SQL } = require('../../utils/orderStatus');
 
 /**
  * Operational Health Engine
@@ -129,7 +130,7 @@ const getHealthScore = async (tenantId) => {
      JOIN orders o ON o.id = oi.order_id
      WHERE o.tenant_id = $1
        AND o.created_at >= $2
-       AND o.status NOT IN ('cancelled')
+       AND o.status IN ${BILLABLE_SQL}
        AND oi.total_cost > 0`,
     [tenantId, todayStart.toISOString()]
   );
@@ -206,7 +207,7 @@ const getOperationalMetrics = async (tenantId) => {
        ROUND(AVG(
          EXTRACT(EPOCH FROM (o.updated_at - o.created_at)) / 60
        )::numeric, 1)                                       AS avg_processing_min,
-       ROUND(SUM(o.total)::numeric, 2)                      AS revenue
+       ROUND(SUM(o.total) FILTER (WHERE o.status IN ${BILLABLE_SQL})::numeric, 2) AS revenue
      FROM orders o
      WHERE o.tenant_id = $1
        AND o.created_at >= NOW() - INTERVAL '7 days'

@@ -1,6 +1,7 @@
 const db           = require('../../config/database');
 const asyncHandler = require('../../utils/asyncHandler');
 const AppError     = require('../../utils/AppError');
+const { BILLABLE_SQL } = require('../../utils/orderStatus');
 
 // ── GET /api/caixa/current ────────────────────────────────────
 const getCurrent = asyncHandler(async (req, res) => {
@@ -115,7 +116,7 @@ const closeCaixa = asyncHandler(async (req, res) => {
      FROM orders o
      LEFT JOIN deliveries d ON d.order_id = o.id AND d.status = 'delivered'
      WHERE o.tenant_id = $1
-       AND o.status NOT IN ('cancelled', 'pending')
+       AND o.status IN ${BILLABLE_SQL}
        AND o.created_at >= $2`,
     [tenantId, caixa.opened_at]
   );
