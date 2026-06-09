@@ -790,17 +790,20 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved, badg
       let savedProduct = data.data;
 
       // Upload image if one was selected
+      let uploadFailed = false;
       if (imgFile) {
         try {
           const { data: imgData } = await uploadProductImage(savedProduct.id, imgFile);
           savedProduct = { ...savedProduct, image_url: imgData.data?.image_url ?? imgData.image_url };
         } catch (uploadErr) {
+          uploadFailed = true;
           setError(`Produto salvo, mas falha no upload da imagem: ${uploadErr.response?.data?.message ?? 'erro desconhecido'}. Tente editar e trocar a foto.`);
         }
       }
 
       onSaved(savedProduct, isEdit);
-      onClose();
+      // Não fecha o modal se o upload falhou — mantém o erro visível ao usuário
+      if (!uploadFailed) onClose();
     } catch (err) {
       setError(err.response?.data?.message ?? 'Erro ao salvar produto.');
     } finally {
