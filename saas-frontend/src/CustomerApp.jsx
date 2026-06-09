@@ -1703,6 +1703,13 @@ export default function CustomerApp({ slug }) {
                 const inCart     = cart[product.id];
                 const outOfStock = product.stock_qty <= 0;
                 const hasAddons  = (product.addon_groups ?? []).length > 0;
+                const BADGE_CONFIG = {
+                  mais_pedido:  { label: '🔥 Mais Pedido',       cls: 'bg-orange-500 text-white'    },
+                  escolha_rei:  { label: '👑 Escolha do Rei',    cls: 'bg-yellow-400 text-zinc-900' },
+                  novidade:     { label: '⭐ Novidade',           cls: 'bg-blue-500 text-white'      },
+                  explosao:     { label: '💣 Explosão de Sabor', cls: 'bg-red-600 text-white'       },
+                };
+                const badgeCfg = product.badge ? BADGE_CONFIG[product.badge] : null;
                 return (
                   <div key={product.id}
                     className={`rounded-2xl border overflow-hidden transition-all ${
@@ -1715,6 +1722,7 @@ export default function CustomerApp({ slug }) {
                     <div className="flex gap-3 p-3.5">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start gap-1 flex-wrap mb-1">
+                          {badgeCfg && <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badgeCfg.cls}`}>{badgeCfg.label}</span>}
                           {product.featured && <span className="text-[10px] bg-amber-400/20 text-amber-300 font-bold px-1.5 py-0.5 rounded-full">⭐ Destaque</span>}
                           {outOfStock && <span className="text-[10px] bg-red-500/15 text-red-400 font-bold px-2 py-0.5 rounded-full">Esgotado</span>}
                           {hasAddons && <span className="text-[10px] bg-orange-500/15 text-orange-300 font-bold px-1.5 py-0.5 rounded-full">🍟 Personalizável</span>}

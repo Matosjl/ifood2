@@ -94,21 +94,21 @@ class Product {
   // ── Escrita ────────────────────────────────────────────────
 
   static async create(tenantId, data, dbClient = db) {
-    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured, isCombo, barcode } = data;
+    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, stockQty, alertThreshold, featured, isCombo, barcode, badge } = data;
     const { rows } = await dbClient.query(
       `INSERT INTO products
-         (tenant_id, category_id, name, display_name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured, is_combo, barcode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         (tenant_id, category_id, name, display_name, description, sale_type, cost_price, sale_price, stock_qty, alert_threshold, featured, is_combo, barcode, badge)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
       [tenantId, categoryId || null, name.trim(), displayName?.trim() || null, description || null,
        saleType || 'unit', costPrice || 0, salePrice || 0, stockQty || 0, alertThreshold || 0,
-       featured ?? false, isCombo ?? false, barcode?.trim() || null]
+       featured ?? false, isCombo ?? false, barcode?.trim() || null, badge || null]
     );
     return rows[0];
   }
 
   static async update(id, tenantId, data, dbClient = db) {
-    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, alertThreshold, active, featured, isCombo, barcode } = data;
+    const { categoryId, name, displayName, description, saleType, costPrice, salePrice, alertThreshold, active, featured, isCombo, barcode, badge } = data;
     const { rows } = await dbClient.query(
       `UPDATE products
        SET category_id     = COALESCE($3, category_id),
@@ -123,6 +123,7 @@ class Product {
            featured        = COALESCE($12, featured),
            is_combo        = COALESCE($13, is_combo),
            barcode         = CASE WHEN $14::text IS NOT NULL THEN $14 ELSE barcode END,
+           badge           = $15,
            updated_at      = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
@@ -131,7 +132,8 @@ class Product {
        description, saleType, costPrice, salePrice, alertThreshold, active,
        featured !== undefined ? featured : null,
        isCombo  !== undefined ? isCombo  : null,
-       barcode  !== undefined ? (barcode?.trim() || null) : null]
+       barcode  !== undefined ? (barcode?.trim() || null) : null,
+       badge    !== undefined ? (badge || null) : null]
     );
     return rows[0] || null;
   }

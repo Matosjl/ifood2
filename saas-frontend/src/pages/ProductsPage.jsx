@@ -617,6 +617,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
     active:         product?.active          ?? true,
     featured:       product?.featured        ?? false,
     isCombo:        product?.is_combo        ?? false,
+    badge:          product?.badge           ?? null,
   });
   const [saving,     setSaving]     = useState(false);
   const [error,      setError]      = useState(null);
@@ -652,6 +653,7 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
         description:    form.description || undefined,
         featured:       form.featured,
         isCombo:        form.isCombo,
+        badge:          form.badge ?? null,
       };
       if (!isEdit) payload.stockQty = parseFloat(form.stockQty) || 0;
       else         payload.active   = form.active;
@@ -895,6 +897,33 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
             />
             <span className="text-sm text-gray-300">⭐ Produto em destaque <span className="text-gray-600 text-xs">(aparece no carrossel do cardápio)</span></span>
           </label>
+
+          {/* Selo do produto */}
+          <div>
+            <p className="text-xs text-gray-400 font-semibold mb-2">Selo do produto <span className="text-gray-600 font-normal">(atrai o olhar do cliente)</span></p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: null,            label: 'Nenhum',            bg: 'bg-gray-700',   text: 'text-gray-400'   },
+                { value: 'mais_pedido',   label: '🔥 Mais Pedido',    bg: 'bg-orange-500', text: 'text-white'      },
+                { value: 'escolha_rei',   label: '👑 Escolha do Rei', bg: 'bg-yellow-500', text: 'text-zinc-900'   },
+                { value: 'novidade',      label: '⭐ Novidade',       bg: 'bg-blue-500',   text: 'text-white'      },
+                { value: 'explosao',      label: '💣 Explosão de Sabor', bg: 'bg-red-600', text: 'text-white'      },
+              ].map(({ value, label, bg, text }) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  onClick={() => set('badge', form.badge === value ? null : value)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 transition-all ${
+                    form.badge === value
+                      ? `${bg} ${text} border-transparent`
+                      : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Combo */}
           <label className="flex items-center gap-2 cursor-pointer select-none">
