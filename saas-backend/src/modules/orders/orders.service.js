@@ -793,7 +793,12 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
     const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
 
     // 3. Valida e calcula totais
-    let orderTotal = 0;
+    //    Total deve incluir a taxa de entrega; editOrderItems nao altera
+    //    entrega, entao preserva a delivery_fee atual (0 se nao for delivery).
+    const preservedDeliveryFee = order.delivery_type === 'delivery'
+      ? (parseFloat(order.delivery_fee) || 0)
+      : 0;
+    let orderTotal = preservedDeliveryFee;
     const resolvedItems = [];
     for (const item of newItemsPayload) {
       const product = productMap[item.productId];
@@ -883,15 +888,40 @@ const updateOrderInfo = async (id, tenantId, {
   if (deliveryType    !== undefined) setClauses.push(`delivery_type = ${push(deliveryType)}`);
   if (neighborhood    !== undefined) setClauses.push(`neighborhood  = ${push(neighborhood || null)}`);
   if (customerAddress !== undefined) setClauses.push(`customer_address = ${push(customerAddress || null)}`);
-  if (deliveryFee     !== undefined) setClauses.push(`delivery_fee  = ${push(parseFloat(deliveryFee) || 0)}`);
+  // -- Recalculo de total: total = soma_itens + delivery_fee - desc + acresc --
+  // Regra: delivery_type != 'delivery' => delivery_fee = 0.
+  const effectiveType = deliveryType !== undefined ? deliveryType : order.delivery_type;
+  let effectiveFee;
+  if (effectiveType !== 'delivery')   effectiveFee = 0;
+  else if (deliveryFee !== undefined) effectiveFee = parseFloat(deliveryFee) || 0;
+  else                                effectiveFee = parseFloat(order.delivery_fee) || 0;
 
-  // Ajuste de valor
-  let newTotal = parseFloat(order.total);
-  if (adjustmentValue && parseFloat(adjustmentValue) > 0) {
-    const delta = parseFloat(adjustmentValue);
-    newTotal = adjustmentType === 'discount'
-      ? Math.max(0, newTotal - delta)
-      : newTotal + delta;
+  // Persiste a taxa quando entrega/taxa foram tocadas (zera em retirada/mesa).
+  if (deliveryFee !== undefined || deliveryType !== undefined) {
+    setClauses.push(`delivery_fee = ${push(effectiveFee)}`);
+  }
+
+  // Recalcula o total apenas quando algo que o afeta mudou (taxa, tipo de
+  // entrega ou ajuste). Edicao so de observacoes nao mexe no total.
+  const totalAfetado =
+    deliveryFee !== undefined ||
+    deliveryType !== undefined ||
+    (adjustmentValue && parseFloat(adjustmentValue) > 0);
+
+  if (totalAfetado) {
+    const { rows: [sub] } = await db.query(
+      `SELECT COALESCE(SUM(total), 0)::float AS subtotal FROM order_items WHERE order_id = $1`,
+      [id]
+    );
+    const subtotal = parseFloat(sub.subtotal) || 0;
+
+    let newTotal = subtotal + effectiveFee;
+    if (adjustmentValue && parseFloat(adjustmentValue) > 0) {
+      const delta = parseFloat(adjustmentValue);
+      newTotal = adjustmentType === 'discount'
+        ? Math.max(0, newTotal - delta)
+        : newTotal + delta;
+    }
     setClauses.push(`total = ${push(parseFloat(newTotal.toFixed(2)))}`);
   }
 
