@@ -1703,13 +1703,22 @@ export default function CustomerApp({ slug }) {
                 const inCart     = cart[product.id];
                 const outOfStock = product.stock_qty <= 0;
                 const hasAddons  = (product.addon_groups ?? []).length > 0;
-                const BADGE_CONFIG = {
-                  mais_pedido:  { label: '🔥 Mais Pedido',       cls: 'bg-orange-500 text-white'    },
-                  escolha_rei:  { label: '👑 Escolha do Rei',    cls: 'bg-yellow-400 text-zinc-900' },
-                  novidade:     { label: '⭐ Novidade',           cls: 'bg-blue-500 text-white'      },
-                  explosao:     { label: '💣 Explosão de Sabor', cls: 'bg-red-600 text-white'       },
+                const BADGE_DEFAULTS = {
+                  mais_pedido: '🔥 Mais Pedido',
+                  escolha_rei: '👑 Escolha do Rei',
+                  novidade:    '⭐ Novidade',
+                  explosao:    '💣 Explosão de Sabor',
                 };
-                const badgeCfg = product.badge ? BADGE_CONFIG[product.badge] : null;
+                const BADGE_CLS = {
+                  mais_pedido: 'bg-orange-500 text-white',
+                  escolha_rei: 'bg-yellow-400 text-zinc-900',
+                  novidade:    'bg-blue-500 text-white',
+                  explosao:    'bg-red-600 text-white',
+                };
+                const badgeCfg = product.badge ? {
+                  label: (menuData?.badge_config?.[product.badge]) ?? BADGE_DEFAULTS[product.badge],
+                  cls:   BADGE_CLS[product.badge],
+                } : null;
                 return (
                   <div key={product.id}
                     className={`rounded-2xl border overflow-hidden transition-all ${

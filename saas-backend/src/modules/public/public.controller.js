@@ -54,9 +54,17 @@ const getMenu = asyncHandler(async (req, res) => {
     }
   } catch { /* colunas ainda não existem – ignora */ }
 
+  // badge_config: tenta buscar, mas não quebra se coluna não existir ainda
+  try {
+    const { rows: bc } = await db.query(
+      `SELECT badge_config FROM tenants WHERE id = $1`, [tenant.id]
+    );
+    if (bc[0]?.badge_config) tenant.badge_config = bc[0].badge_config;
+  } catch { /* coluna ainda não existe – ignora */ }
+
   const { rows: products } = await db.query(
-    `SELECT p.id, p.name, p.description, p.sale_type, p.sale_price,
-            p.stock_qty, p.image_url, p.featured, p.sort_order, c.name AS category_name
+    `SELECT p.id, p.name, p.display_name, p.description, p.sale_type, p.sale_price,
+            p.stock_qty, p.image_url, p.featured, p.badge, p.sort_order, c.name AS category_name
      FROM   products p
      LEFT   JOIN categories c ON c.id = p.category_id
      WHERE  p.tenant_id = $1 AND p.active = true AND p.stock_qty > 0

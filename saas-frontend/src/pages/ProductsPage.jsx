@@ -12,7 +12,22 @@ import {
   getOptionGroups, createOptionGroup, deleteOptionGroup, updateOptionGroup,
   addOptionItem, removeOptionItem,
 } from '../api/combos';
+import { getFullSettings, updateSettings } from '../api/users';
 import QuickRegisterModal from '../components/QuickRegisterModal';
+
+const DEFAULT_BADGE_CONFIG = {
+  mais_pedido: '🔥 Mais Pedido',
+  escolha_rei: '👑 Escolha do Rei',
+  novidade:    '⭐ Novidade',
+  explosao:    '💣 Explosão de Sabor',
+};
+
+const BADGE_COLORS = {
+  mais_pedido: { bg: 'bg-orange-500', text: 'text-white'    },
+  escolha_rei: { bg: 'bg-yellow-500', text: 'text-zinc-900' },
+  novidade:    { bg: 'bg-blue-500',   text: 'text-white'    },
+  explosao:    { bg: 'bg-red-600',    text: 'text-white'    },
+};
 
 const fmt    = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2)}`;
 const fmtPct = (n) => (n != null && n !== '' ? `${parseFloat(n).toFixed(1)}%` : '—');
@@ -598,10 +613,120 @@ function FichaTecnicaManager({ productId }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Badge Selector — escolha + edição de nomes dos selos
+// ─────────────────────────────────────────────────────────────
+
+function BadgeSelector({ value, onChange, badgeConfig, onBadgeConfigSaved }) {
+  const [editing,     setEditing]     = useState(false);
+  const [editLabels,  setEditLabels]  = useState({});
+  const [saving,      setSaving]      = useState(false);
+  const [saveError,   setSaveError]   = useState(null);
+
+  const BADGE_KEYS = ['mais_pedido', 'escolha_rei', 'novidade', 'explosao'];
+
+  const startEdit = () => {
+    setEditLabels({ ...badgeConfig });
+    setSaveError(null);
+    setEditing(true);
+  };
+
+  const handleSaveLabels = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const { data } = await updateSettings({ badgeConfig: editLabels });
+      const saved = data?.data?.badge_config ?? editLabels;
+      onBadgeConfigSaved?.(saved);
+      setEditing(false);
+    } catch {
+      setSaveError('Erro ao salvar. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-gray-400 font-semibold">
+          Selo do produto <span className="text-gray-600 font-normal">(atrai o olhar do cliente)</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => editing ? setEditing(false) : startEdit()}
+          className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors"
+        >
+          {editing ? '✕ Cancelar' : '✏️ Editar nomes'}
+        </button>
+      </div>
+
+      {/* Seletor de selos */}
+      <div className="flex flex-wrap gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 transition-all ${
+            !value ? 'bg-gray-700 text-gray-200 border-transparent' : 'bg-transparent text-gray-500 border-gray-700 hover:border-gray-500'
+          }`}
+        >
+          Nenhum
+        </button>
+        {BADGE_KEYS.map((key) => {
+          const { bg, text } = BADGE_COLORS[key];
+          const label = badgeConfig[key] ?? DEFAULT_BADGE_CONFIG[key];
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onChange(value === key ? null : key)}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 transition-all ${
+                value === key
+                  ? `${bg} ${text} border-transparent`
+                  : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Painel de edição dos nomes */}
+      {editing && (
+        <div className="mt-3 p-3 bg-gray-800 rounded-xl border border-white/10 space-y-2">
+          <p className="text-xs text-gray-400 font-semibold mb-2">Editar nomes dos selos</p>
+          {BADGE_KEYS.map((key) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="text-sm w-6 text-center">{DEFAULT_BADGE_CONFIG[key].split(' ')[0]}</span>
+              <input
+                className="input flex-1 text-sm py-1.5"
+                value={editLabels[key] ?? ''}
+                maxLength={50}
+                placeholder={DEFAULT_BADGE_CONFIG[key]}
+                onChange={(e) => setEditLabels((p) => ({ ...p, [key]: e.target.value }))}
+              />
+            </div>
+          ))}
+          {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+          <button
+            type="button"
+            onClick={handleSaveLabels}
+            disabled={saving}
+            className="btn-green text-xs py-1.5 px-4 w-full mt-1"
+          >
+            {saving ? 'Salvando...' : 'Salvar nomes'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Product modal (create / edit)
 // ─────────────────────────────────────────────────────────────
 
-function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
+function ProductModal({ product, categories, allProducts, onClose, onSaved, badgeConfig = DEFAULT_BADGE_CONFIG, onBadgeConfigSaved }) {
   const isEdit = !!product;
 
   const [form, setForm] = useState({
@@ -899,31 +1024,12 @@ function ProductModal({ product, categories, allProducts, onClose, onSaved }) {
           </label>
 
           {/* Selo do produto */}
-          <div>
-            <p className="text-xs text-gray-400 font-semibold mb-2">Selo do produto <span className="text-gray-600 font-normal">(atrai o olhar do cliente)</span></p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: null,            label: 'Nenhum',            bg: 'bg-gray-700',   text: 'text-gray-400'   },
-                { value: 'mais_pedido',   label: '🔥 Mais Pedido',    bg: 'bg-orange-500', text: 'text-white'      },
-                { value: 'escolha_rei',   label: '👑 Escolha do Rei', bg: 'bg-yellow-500', text: 'text-zinc-900'   },
-                { value: 'novidade',      label: '⭐ Novidade',       bg: 'bg-blue-500',   text: 'text-white'      },
-                { value: 'explosao',      label: '💣 Explosão de Sabor', bg: 'bg-red-600', text: 'text-white'      },
-              ].map(({ value, label, bg, text }) => (
-                <button
-                  key={String(value)}
-                  type="button"
-                  onClick={() => set('badge', form.badge === value ? null : value)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 transition-all ${
-                    form.badge === value
-                      ? `${bg} ${text} border-transparent`
-                      : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <BadgeSelector
+            value={form.badge}
+            onChange={(v) => set('badge', v)}
+            badgeConfig={badgeConfig}
+            onBadgeConfigSaved={onBadgeConfigSaved}
+          />
 
           {/* Combo */}
           <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -1123,17 +1229,22 @@ export default function ProductsPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [modal,        setModal]        = useState(null); // null | {type:'product',product?} | {type:'category'} | {type:'quickRegister'}
   const [error,        setError]        = useState(null);
+  const [badgeConfig,  setBadgeConfig]  = useState(DEFAULT_BADGE_CONFIG);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [pRes, cRes] = await Promise.all([
+      const [pRes, cRes, sRes] = await Promise.all([
         listProducts({ active: showInactive ? undefined : true, limit: 200 }),
         listCategories(),
+        getFullSettings().catch(() => null),
       ]);
       setProducts(pRes.data.data ?? []);
       setCategories(cRes.data.data ?? []);
+      if (sRes?.data?.data?.badge_config) {
+        setBadgeConfig({ ...DEFAULT_BADGE_CONFIG, ...sRes.data.data.badge_config });
+      }
     } catch {
       setError('Erro ao carregar dados. Verifique a conexão.');
     } finally {
@@ -1430,6 +1541,8 @@ export default function ProductsPage() {
           allProducts={products}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
+          badgeConfig={badgeConfig}
+          onBadgeConfigSaved={(cfg) => setBadgeConfig({ ...DEFAULT_BADGE_CONFIG, ...cfg })}
         />
       )}
       {modal?.type === 'category' && (
