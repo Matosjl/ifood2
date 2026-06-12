@@ -101,13 +101,27 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const { rows: summary } = await db.query(
     `SELECT
        COUNT(*)::int                                                                AS total_orders,
-       COALESCE(SUM(o.total), 0)::float                                            AS total_revenue,
+       -- faturamento_bruto: soma de TODOS os pedidos billable no período.
+       -- Inclui fiado, pending e PIX não confirmado. Valor informativo — NÃO vai pro banco virtual.
+       COALESCE(SUM(o.total), 0)::float                                            AS faturamento_bruto,
+       -- total_revenue: recebido confirmado — usado no banco_transactions e em cash_registers.total_revenue.
+       -- Exclui: fiado (contas a receber), pending (sem pagamento), PIX com paid_at NULL (não confirmado).
+       -- PIX manual confirmado (markAsPaid): paid_at IS NOT NULL, pix_paid_at pode ser NULL → incluído.
+       -- PIX OpenPix webhook confirmado: paid_at IS NOT NULL, pix_paid_at IS NOT NULL → incluído.
+       -- PIX pendente (QR gerado ou forma selecionada sem pagar): paid_at IS NULL → excluído.
+       COALESCE(SUM(o.total) FILTER (
+         WHERE o.payment_method NOT IN ('fiado', 'pending')
+           AND (o.payment_method != 'pix' OR o.paid_at IS NOT NULL)
+       ), 0)::float                                                                AS total_revenue,
        COALESCE(SUM(COALESCE(d.driver_fee, 0))
          FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                   AS total_driver_fees,
        -- Por método
        COALESCE(SUM(CASE WHEN o.payment_method='cash'
          THEN o.total - COALESCE(d.driver_fee,0) ELSE 0 END),0)::float            AS cash,
-       COALESCE(SUM(CASE WHEN o.payment_method='pix'     THEN o.total ELSE 0 END),0)::float AS pix,
+       -- PIX confirmado: paid_at IS NOT NULL (cobre PIX manual via markAsPaid e PIX via webhook OpenPix).
+       COALESCE(SUM(CASE WHEN o.payment_method='pix' AND o.paid_at IS NOT NULL THEN o.total ELSE 0 END),0)::float AS pix,
+       -- PIX pendente: paid_at IS NULL — informativo, não entra no recebido nem no banco virtual.
+       COALESCE(SUM(CASE WHEN o.payment_method='pix' AND o.paid_at IS NULL     THEN o.total ELSE 0 END),0)::float AS pix_pendente,
        COALESCE(SUM(CASE WHEN o.payment_method='credit'  THEN o.total ELSE 0 END),0)::float AS credit,
        COALESCE(SUM(CASE WHEN o.payment_method='debit'   THEN o.total ELSE 0 END),0)::float AS debit,
        COALESCE(SUM(CASE WHEN o.payment_method='voucher' THEN o.total ELSE 0 END),0)::float AS voucher,
@@ -154,12 +168,20 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const discrepancy = parseFloat((cashDiff + cardDiff + pixDiff).toFixed(2));
 
   const paymentSummary = {
-    // Vendas registradas no sistema
-    cash:    s.cash,   pix:    s.pix,
-    credit:  s.credit, debit:  s.debit,
-    voucher: s.voucher, other: s.other,
-    fiado:   s.fiado,
-    // Esperados por método
+    // Recebido confirmado por método (base para discrepância e banco virtual)
+    cash:         s.cash,
+    pix:          s.pix,          // PIX confirmado (paid_at IS NOT NULL) — manual ou webhook OpenPix
+    credit:       s.credit,
+    debit:        s.debit,
+    voucher:      s.voucher,
+    other:        s.other,
+    // Não recebidos (informativo — NÃO entram no total_revenue nem no banco virtual)
+    fiado:        s.fiado,        // contas a receber — será quitado pelo módulo fiado
+    pix_pendente: s.pix_pendente, // PIX com paid_at NULL — aguardando confirmação
+    // Totais do período
+    total_revenue:     parseFloat(s.total_revenue.toFixed(2)),   // recebido confirmado
+    faturamento_bruto: parseFloat(s.faturamento_bruto.toFixed(2)), // faturado (inclui fiado + pendente)
+    // Esperados por método (base da discrepância — todos usam só recebido confirmado)
     expected_cash: parseFloat(expectedCash.toFixed(2)),
     expected_pix:  parseFloat(expectedPix.toFixed(2)),
     expected_card: parseFloat(expectedCard.toFixed(2)),
@@ -214,14 +236,15 @@ const closeCaixa = asyncHandler(async (req, res) => {
     if (!rows[0]) throw new AppError('Este caixa já foi fechado.', 409);
     closedCaixa = rows[0];
 
-    // M2: ON CONFLICT garante que retry ou race não duplica lançamento no banco virtual
+    // M2: ON CONFLICT garante que retry ou race não duplica lançamento no banco virtual.
+    // Credita apenas s.total_revenue (recebido confirmado — já exclui fiado, pending e PIX pendente).
     if (s.total_revenue > 0) {
       await dbClient.query(
         `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
          VALUES ($1, 'credit', $2, $3, 'caixa', $4)
          ON CONFLICT (reference_id) WHERE source = 'caixa' AND reference_id IS NOT NULL DO NOTHING`,
         [tenantId, s.total_revenue,
-         `Fechamento de caixa — ${s.total_orders} pedido(s)`,
+         `Fechamento de caixa — ${s.total_orders} pedido(s) — recebido confirmado`,
          caixa.id]
       );
     }
@@ -358,7 +381,7 @@ const sangria = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: rows[0], warning });
 });
 
-// ── POST /api/caixa/suprimento ────────────────────────────────
+// ── POST /api/caixa/suprimento ────────────────────────────
 const suprimento = asyncHandler(async (req, res) => {
   const { amount, reason } = req.body;
   if (!amount || parseFloat(amount) <= 0) throw new AppError('Valor do suprimento deve ser maior que zero.', 400);
