@@ -1,7 +1,9 @@
-const db       = require('../../config/database');
-const AppError = require('../../utils/AppError');
+'use strict';
+const db         = require('../../config/database');
+const AppError   = require('../../utils/AppError');
+const financeLog = require('../../utils/financeLog');
 
-// ── Clientes ──────────────────────────────────────────────────
+// Clientes
 
 exports.listClientes = async (req, res, next) => {
   try {
@@ -18,7 +20,7 @@ exports.listClientes = async (req, res, next) => {
          fc.bloqueado, fc.notes, fc.created_at,
          COALESCE(SUM(CASE WHEN c.status='pendente' AND COALESCE(c.tipo,'compra')='compra'       THEN c.valor ELSE 0 END), 0)
            - COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor ELSE 0 END), 0) AS total_aberto,
-         COALESCE(SUM(CASE WHEN c.status='pago'     THEN c.valor ELSE 0 END), 0) AS total_pago,
+         COALESCE(SUM(CASE WHEN c.status='pago'     THEN c.valor END), 0) AS total_pago,
          COALESCE(SUM(CASE WHEN c.status='pendente' AND c.tipo='adiantamento' THEN c.valor ELSE 0 END), 0) AS total_credito,
          MAX(CASE WHEN c.status='pendente' THEN c.created_at END) AS ultimo_fiado
        FROM fiado_clientes fc
@@ -38,7 +40,7 @@ exports.createCliente = async (req, res, next) => {
   try {
     const { tenantId } = req.user;
     const { name, phone, address, dia_acerto, notes, acerto_type = 'day_of_month', acerto_weekday } = req.body;
-    if (!name?.trim()) throw new AppError('Nome é obrigatório.', 400);
+    if (!name?.trim()) throw new AppError('Nome e obrigatorio.', 400);
 
     const { rows } = await db.query(
       `INSERT INTO fiado_clientes (tenant_id, name, phone, address, dia_acerto, notes, acerto_type, acerto_weekday)
@@ -71,7 +73,7 @@ exports.updateCliente = async (req, res, next) => {
        acerto_type === 'day_of_week' ? (acerto_weekday ?? null) : null,
        id, tenantId]
     );
-    if (!rows[0]) throw new AppError('Cliente não encontrado.', 404);
+    if (!rows[0]) throw new AppError('Cliente nao encontrado.', 404);
     res.json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
 };
@@ -81,7 +83,6 @@ exports.deleteCliente = async (req, res, next) => {
     const { tenantId } = req.user;
     const { id } = req.params;
 
-    // Não permite deletar se tiver compras pendentes (B4: filtra por tenant_id)
     const { rows: pending } = await db.query(
       `SELECT COUNT(*) FROM fiado_compras WHERE cliente_id=$1 AND tenant_id=$2 AND status='pendente'`,
       [id, tenantId]
@@ -105,12 +106,12 @@ exports.toggleBloqueio = async (req, res, next) => {
        WHERE id=$1 AND tenant_id=$2 RETURNING *`,
       [id, tenantId]
     );
-    if (!rows[0]) throw new AppError('Cliente não encontrado.', 404);
+    if (!rows[0]) throw new AppError('Cliente nao encontrado.', 404);
     res.json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
 };
 
-// ── Compras ───────────────────────────────────────────────────
+// Compras
 
 exports.listCompras = async (req, res, next) => {
   try {
@@ -133,15 +134,14 @@ exports.createCompra = async (req, res, next) => {
   try {
     const { tenantId } = req.user;
     const { cliente_id, order_id, descricao, valor, tipo = 'compra' } = req.body;
-    if (!cliente_id || !valor) throw new AppError('cliente_id e valor são obrigatórios.', 400);
-    if (!['compra', 'adiantamento'].includes(tipo)) throw new AppError('tipo inválido.', 400);
+    if (!cliente_id || !valor) throw new AppError('cliente_id e valor sao obrigatorios.', 400);
+    if (!['compra', 'adiantamento'].includes(tipo)) throw new AppError('tipo invalido.', 400);
 
-    // Verifica se cliente está bloqueado (só bloqueia novas compras, não adiantamentos)
     const { rows: cli } = await db.query(
       `SELECT bloqueado FROM fiado_clientes WHERE id=$1 AND tenant_id=$2`,
       [cliente_id, tenantId]
     );
-    if (!cli[0]) throw new AppError('Cliente não encontrado.', 404);
+    if (!cli[0]) throw new AppError('Cliente nao encontrado.', 404);
     if (cli[0].bloqueado && tipo === 'compra') throw new AppError('Cliente bloqueado para compras fiadas.', 403);
 
     const defaultDesc = tipo === 'adiantamento' ? 'Pagamento adiantado' : 'Compra fiada';
@@ -154,20 +154,134 @@ exports.createCompra = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// pagarCompra — Costura 2
+//
+// Fluxo:
+//   BEGIN
+//   UPDATE fiado_compras ... WHERE status='pendente' RETURNING *   <- atomico, idempotente
+//   se 0 rows: ROLLBACK + 404
+//   se adiantamento: COMMIT (sem lancamento financeiro)
+//   validar payment_method para compra
+//   dinheiro  -> caixa_movements (type='fiado_recebido', reference_id=fiado_compra.id)
+//   digital   -> banco_transactions (type='credit', source='fiado', reference_id=fiado_compra.id)
+//   COMMIT
+//   financeLog (fire-and-forget)
+//
+// Idempotencia:
+//   - UPDATE com WHERE status='pendente' retorna 0 rows se ja pago -> ROLLBACK + 404
+//   - uq_caixa_fiado_recebido_reference e uq_banco_fiado_reference bloqueiam duplicatas no DB
 exports.pagarCompra = async (req, res, next) => {
+  const client = await db.getClient();
   try {
-    const { tenantId } = req.user;
-    const { id } = req.params;
+    const { tenantId, userId }     = req.user;
+    const { id }                   = req.params;
+    const { payment_method }       = req.body;
 
-    const { rows } = await db.query(
+    await client.query('BEGIN');
+
+    // 1. UPDATE atomico dentro da transacao — garante que so 1 request vence
+    //    WHERE status='pendente' e a unica guard de idempotencia necessaria
+    const { rows: updated } = await client.query(
       `UPDATE fiado_compras
-       SET status='pago', paid_at=NOW(), updated_at=NOW()
-       WHERE id=$1 AND tenant_id=$2 AND status='pendente' RETURNING *`,
-      [id, tenantId]
+       SET status='pago', paid_at=NOW(), updated_at=NOW(),
+           payment_method = CASE WHEN tipo='adiantamento' THEN NULL ELSE $3 END,
+           paid_by        = $4
+       WHERE id=$1 AND tenant_id=$2 AND status='pendente'
+       RETURNING *`,
+      [id, tenantId, payment_method || null, userId || null]
     );
-    if (!rows[0]) throw new AppError('Compra não encontrada ou já quitada.', 404);
-    res.json({ success: true, data: rows[0] });
-  } catch (err) { next(err); }
+
+    if (!updated[0]) {
+      await client.query('ROLLBACK');
+      throw new AppError('Compra nao encontrada ou ja quitada.', 404);
+    }
+
+    const compra = updated[0];
+
+    // 2. Adiantamento: sem lancamento financeiro (dinheiro ja foi recebido antes)
+    if (compra.tipo === 'adiantamento') {
+      await client.query('COMMIT');
+      await financeLog({
+        tenantId, userId, action: 'fiado_adiantamento_usado',
+        tableName: 'fiado_compras', recordId: id,
+        beforeData: { status: 'pendente', tipo: compra.tipo, valor: compra.valor },
+        afterData:  { status: 'pago', payment_method: null },
+        amount: compra.valor, ip: req.ip,
+      });
+      return res.json({ success: true, data: compra });
+    }
+
+    // 3. Compra: validar metodo
+    const VALID = ['cash', 'pix', 'credit', 'debit', 'voucher', 'other'];
+    if (!payment_method) {
+      await client.query('ROLLBACK');
+      throw new AppError('payment_method e obrigatorio para compras fiadas.', 400);
+    }
+    if (!VALID.includes(payment_method)) {
+      await client.query('ROLLBACK');
+      throw new AppError('payment_method invalido. Use: cash, pix, credit, debit, voucher ou other.', 400);
+    }
+
+    if (payment_method === 'cash') {
+      // 4a. Dinheiro: entra no caixa fisico
+      const { rows: cr } = await client.query(
+        `SELECT id FROM cash_registers WHERE tenant_id=$1 AND status='open' LIMIT 1`,
+        [tenantId]
+      );
+      if (!cr[0]) {
+        await client.query('ROLLBACK');
+        throw new AppError('Nenhum caixa aberto. Abra o caixa antes de registrar recebimento de fiado.', 409);
+      }
+      const cashRegisterId = cr[0].id;
+
+      // uq_caixa_fiado_recebido_reference bloqueia duplicata no DB
+      await client.query(
+        `INSERT INTO caixa_movements
+           (tenant_id, cash_register_id, type, amount, reason, created_by, reference_id)
+         VALUES ($1,$2,'fiado_recebido',$3,$4,$5,$6)
+         ON CONFLICT DO NOTHING`,
+        [tenantId, cashRegisterId, compra.valor,
+         'Fiado recebido: ' + (compra.descricao || 'compra fiada'),
+         userId || null, id]
+      );
+
+      await client.query(
+        `UPDATE fiado_compras SET cash_register_id=$1 WHERE id=$2`,
+        [cashRegisterId, id]
+      );
+    } else {
+      // 4b. Digital (PIX/cartao/voucher/other): banco_transactions
+      // type='credit' (schema: CHECK type IN ('credit','debit'))
+      // sem created_by (coluna nao existe em banco_transactions)
+      // uq_banco_fiado_reference bloqueia duplicata no DB
+      await client.query(
+        `INSERT INTO banco_transactions
+           (tenant_id, type, amount, description, source, reference_id)
+         VALUES ($1,'credit',$2,$3,'fiado',$4)
+         ON CONFLICT DO NOTHING`,
+        [tenantId, compra.valor,
+         'Fiado recebido (' + payment_method + '): ' + (compra.descricao || 'compra fiada'),
+         id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    await financeLog({
+      tenantId, userId, action: 'fiado_paid',
+      tableName: 'fiado_compras', recordId: id,
+      beforeData: { status: 'pendente', tipo: compra.tipo, valor: compra.valor },
+      afterData:  { status: 'pago', payment_method },
+      amount: compra.valor, ip: req.ip,
+    });
+
+    res.json({ success: true, data: compra });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
 };
 
 exports.cancelarCompra = async (req, res, next) => {
@@ -181,12 +295,12 @@ exports.cancelarCompra = async (req, res, next) => {
        WHERE id=$1 AND tenant_id=$2 AND status='pendente' RETURNING *`,
       [id, tenantId]
     );
-    if (!rows[0]) throw new AppError('Compra não encontrada ou não pode ser cancelada.', 404);
+    if (!rows[0]) throw new AppError('Compra nao encontrada ou nao pode ser cancelada.', 404);
     res.json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
 };
 
-// ── Resumo dashboard ──────────────────────────────────────────
+// Resumo dashboard
 
 exports.resumo = async (req, res, next) => {
   try {

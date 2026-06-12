@@ -1190,3 +1190,69 @@ CREATE TABLE IF NOT EXISTS ocr_aliases (
   UNIQUE(tenant_id, ocr_raw)
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_aliases_lookup ON ocr_aliases(tenant_id, ocr_raw);
+
+-- ── Costura 2: Baixa de fiado com método de pagamento ──────────────────────────
+-- (migration 009_fiado_baixa.sql — espelhado aqui para que migrate.js aplique)
+
+-- Fix drift: fiado_clientes (acerto_type/acerto_weekday existem em prod, faltavam no schema)
+ALTER TABLE fiado_clientes
+  ADD COLUMN IF NOT EXISTS acerto_type VARCHAR(20);
+
+UPDATE fiado_clientes
+  SET acerto_type = 'day_of_month'
+  WHERE acerto_type IS NULL;
+
+ALTER TABLE fiado_clientes
+  ALTER COLUMN acerto_type SET DEFAULT 'day_of_month';
+
+ALTER TABLE fiado_clientes
+  ALTER COLUMN acerto_type SET NOT NULL;
+
+ALTER TABLE fiado_clientes
+  ADD COLUMN IF NOT EXISTS acerto_weekday INT;
+
+-- Fix drift: fiado_compras.tipo (existe em prod, faltava no schema)
+ALTER TABLE fiado_compras
+  ADD COLUMN IF NOT EXISTS tipo VARCHAR(20);
+
+UPDATE fiado_compras
+  SET tipo = 'compra'
+  WHERE tipo IS NULL;
+
+ALTER TABLE fiado_compras
+  ALTER COLUMN tipo SET DEFAULT 'compra';
+
+ALTER TABLE fiado_compras
+  ALTER COLUMN tipo SET NOT NULL;
+
+-- Novas colunas Costura 2: rastrear método de pagamento e responsável
+ALTER TABLE fiado_compras
+  ADD COLUMN IF NOT EXISTS payment_method   VARCHAR(20);
+
+ALTER TABLE fiado_compras
+  ADD COLUMN IF NOT EXISTS paid_by          UUID REFERENCES users(id);
+
+ALTER TABLE fiado_compras
+  ADD COLUMN IF NOT EXISTS cash_register_id UUID REFERENCES cash_registers(id);
+
+-- caixa_movements: reference_id para auditoria cruzada
+ALTER TABLE caixa_movements
+  ADD COLUMN IF NOT EXISTS reference_id UUID;
+
+-- caixa_movements: ampliar CHECK para incluir fiado_recebido
+ALTER TABLE caixa_movements
+  DROP CONSTRAINT IF EXISTS caixa_movements_type_check;
+
+ALTER TABLE caixa_movements
+  ADD CONSTRAINT caixa_movements_type_check
+  CHECK (type IN ('sangria', 'suprimento', 'fiado_recebido'));
+
+-- banco_transactions: índice único para deduplicar lançamentos de fiado
+CREATE UNIQUE INDEX IF NOT EXISTS uq_banco_fiado_reference
+  ON banco_transactions(reference_id)
+  WHERE source = 'fiado' AND reference_id IS NOT NULL;
+
+-- caixa_movements: indice unico para evitar duplicata de baixa de fiado em dinheiro
+CREATE UNIQUE INDEX IF NOT EXISTS uq_caixa_fiado_recebido_reference
+  ON caixa_movements(reference_id)
+  WHERE type = 'fiado_recebido' AND reference_id IS NOT NULL;

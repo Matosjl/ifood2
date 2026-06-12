@@ -8,5 +8,5 @@ export const deleteFiadoCliente   = (id)           => api.delete(`/fiado/cliente
 export const toggleBloqueio       = (id)           => api.patch(`/fiado/clientes/${id}/bloquear`);
 export const listFiadoCompras     = (clienteId)    => api.get(`/fiado/clientes/${clienteId}/compras`);
 export const createFiadoCompra    = (data)         => api.post('/fiado/compras', data);
-export const pagarFiadoCompra     = (id)           => api.patch(`/fiado/compras/${id}/pagar`);
+export const pagarFiadoCompra     = (id, data)     => api.patch(`/fiado/compras/${id}/pagar`, data);
 export const cancelarFiadoCompra  = (id)           => api.patch(`/fiado/compras/${id}/cancelar`);

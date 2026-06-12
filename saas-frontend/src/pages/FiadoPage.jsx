@@ -149,6 +149,7 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
   const [novoValor, setNovoValor] = useState('');
   const [novoTipo, setNovoTipo] = useState('compra');
   const [saving, setSaving] = useState(false);
+  const [payModal, setPayModal] = useState(null); // id da compra fiada aguardando metodo
 
   const fetchCompras = useCallback(async () => {
     setLoading(true);
@@ -167,9 +168,15 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
   const totalCancelado = compras.filter(c => c.status === 'cancelado').reduce((s, c) => s + Number(c.valor), 0);
   const ultimoPagamento = compras.filter(c => c.status === 'pago').sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at))[0];
 
-  const handlePagar = async (id) => {
-    if (!confirm('Marcar como pago?')) return;
-    await pagarFiadoCompra(id);
+  const handlePagarAdiantamento = async (id) => {
+    if (!confirm('Usar adiantamento?')) return;
+    try { await pagarFiadoCompra(id, {}); } catch (err) { alert(err?.response?.data?.message ?? 'Erro.'); return; }
+    fetchCompras(); onUpdate();
+  };
+  const confirmPagar = async (method) => {
+    const id = payModal;
+    setPayModal(null);
+    try { await pagarFiadoCompra(id, { payment_method: method }); } catch (err) { alert(err?.response?.data?.message ?? 'Erro ao registrar pagamento.'); return; }
     fetchCompras(); onUpdate();
   };
   const handleCancelar = async (id) => {
@@ -345,7 +352,9 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
                       <td className="py-2 text-center">
                         {c.status === 'pendente' && (
                           <div className="flex gap-1 justify-center">
-                            <button onClick={() => handlePagar(c.id)} className="px-2 py-1 text-xs rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">
+                            <button
+                              onClick={() => isAdiantamento ? handlePagarAdiantamento(c.id) : setPayModal(c.id)}
+                              className="px-2 py-1 text-xs rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">
                               {isAdiantamento ? 'Usar' : 'Pago'}
                             </button>
                             <button onClick={() => handleCancelar(c.id)} className="px-2 py-1 text-xs rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">Cancelar</button>
@@ -361,6 +370,34 @@ function ClienteDetalhe({ cliente, onClose, onUpdate }) {
           )}
         </div>
       </div>
+
+      {payModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl p-6 w-full max-w-xs shadow-2xl">
+            <h3 className="text-white font-bold text-lg mb-1">Forma de pagamento</h3>
+            <p className="text-gray-400 text-sm mb-4">Como o cliente vai pagar o fiado?</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { method: 'cash',    label: 'Dinheiro' },
+                { method: 'pix',     label: 'PIX' },
+                { method: 'credit',  label: 'Credito' },
+                { method: 'debit',   label: 'Debito' },
+                { method: 'voucher', label: 'Vale Ref.' },
+                { method: 'other',   label: 'Outro' },
+              ].map(({ method, label }) => (
+                <button
+                  key={method}
+                  onClick={() => confirmPagar(method)}
+                  className="py-3 rounded-xl bg-white/5 hover:bg-orange-500/20 border border-white/10 hover:border-orange-500/50 text-white font-semibold transition-colors text-sm"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setPayModal(null)} className="mt-3 w-full py-2 rounded-xl border border-white/10 text-gray-400 hover:text-white transition-colors text-sm">Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {editando && (
         <ClienteModal

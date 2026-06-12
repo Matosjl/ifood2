@@ -142,14 +142,15 @@ const closeCaixa = asyncHandler(async (req, res) => {
      GROUP BY type`,
     [caixa.id, tenantId]
   );
-  const sangriasTotal    = movs.find(m => m.type === 'sangria')?.total    || 0;
-  const suprimentosTotal = movs.find(m => m.type === 'suprimento')?.total || 0;
+  const sangriasTotal      = movs.find(m => m.type === 'sangria')?.total         || 0;
+  const suprimentosTotal   = movs.find(m => m.type === 'suprimento')?.total      || 0;
+  const fiadoRecebidoTotal = movs.find(m => m.type === 'fiado_recebido')?.total  || 0;
 
   const s = summary[0];
 
   // ── Esperados por método (conta correta) ─────────────────────
   // Dinheiro: troco inicial + vendas em cash - sangrias + suprimentos
-  const expectedCash = parseFloat(caixa.opening_balance) + s.cash - sangriasTotal + suprimentosTotal;
+  const expectedCash = parseFloat(caixa.opening_balance) + s.cash - sangriasTotal + suprimentosTotal + fiadoRecebidoTotal;
   // PIX: exatamente o que o sistema registrou (vai para conta bancária)
   const expectedPix  = s.pix;
   // Cartão: débito + crédito + vale refeição (vai para conta bancária via maquininha)
@@ -194,8 +195,9 @@ const closeCaixa = asyncHandler(async (req, res) => {
     card_diff:    cardDiff,
     pix_diff:     pixDiff,
     // Movimentações do caixa
-    sangrias:     sangriasTotal,
-    suprimentos:  suprimentosTotal,
+    sangrias:        sangriasTotal,
+    suprimentos:     suprimentosTotal,
+    fiado_recebido:  fiadoRecebidoTotal,
     // Logística
     total_driver_fees:         s.total_driver_fees,
     // Compatibilidade com versão anterior
