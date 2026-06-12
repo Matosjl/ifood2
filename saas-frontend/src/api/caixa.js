@@ -6,5 +6,6 @@ export const closeCaixa       = (body = {})   => api.post('/caixa/close', body);
 export const getCaixaHistory  = (params = {}) => api.get('/caixa/history', { params });
 export const getCaixaById     = (id)          => api.get(`/caixa/${id}`);
 export const postSangria      = (body)        => api.post('/caixa/sangria', body);
+export const postSaidaRapida  = (body)        => api.post('/caixa/saida-rapida', body);
 export const postSuprimento   = (body)        => api.post('/caixa/suprimento', body);
 export const getCaixaMovements = (params={})  => api.get('/caixa/movements', { params });

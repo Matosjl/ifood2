@@ -4,7 +4,7 @@ import {
   getSummary, getExpenses, createExpense, updateExpense,
   payExpense, deleteExpense, getReminders, getResult,
 } from '../api/financeiro';
-import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory, postSangria, postSuprimento, getCaixaMovements } from '../api/caixa';
+import { getCurrentCaixa, openCaixa, closeCaixa, getCaixaHistory, postSangria, postSaidaRapida, postSuprimento, getCaixaMovements } from '../api/caixa';
 import api from '../api/axios';
 import { getBancoBalance, getBancoTransactions, addBancoTransaction, deleteBancoTransaction } from '../api/banco';
 import usePendingReceipts from '../hooks/usePendingReceipts';
@@ -1123,11 +1123,12 @@ function TabCaixa() {
   const [cashCounted, setCashCounted] = useState('');
   const [cardCounted, setCardCounted] = useState('');
   const [pixCounted,  setPixCounted]  = useState('');
-  // Sangria / Suprimento
+  // Sangria / Suprimento / Saída Rápida
   const [movements,      setMovements]      = useState([]);
-  const [movModal,       setMovModal]       = useState(null); // null | 'sangria' | 'suprimento'
+  const [movModal,       setMovModal]       = useState(null); // null | 'sangria' | 'suprimento' | 'saida_rapida'
   const [movAmount,      setMovAmount]      = useState('');
   const [movReason,      setMovReason]      = useState('');
+  const [movCategoria,   setMovCategoria]   = useState('');
   const [movSaving,      setMovSaving]      = useState(false);
   const [movErr,         setMovErr]         = useState('');
 
@@ -1199,14 +1200,19 @@ function TabCaixa() {
 
   const handleMovimento = async () => {
     if (!movAmount || parseFloat(movAmount) <= 0) { setMovErr('Informe um valor maior que zero.'); return; }
+    if (movModal === 'saida_rapida' && !movCategoria.trim()) { setMovErr('Selecione a categoria da despesa.'); return; }
     setMovSaving(true); setMovErr('');
     try {
-      const fn = movModal === 'sangria' ? postSangria : postSuprimento;
-      const res = await fn({ amount: parseFloat(movAmount), reason: movReason || undefined });
-      if (movModal === 'sangria' && res.data.warning?.limitExceeded) {
-        setSangriaWarning(res.data.warning);
+      let res;
+      if (movModal === 'sangria') {
+        res = await postSangria({ amount: parseFloat(movAmount), reason: movReason || undefined });
+        if (res.data.warning?.limitExceeded) setSangriaWarning(res.data.warning);
+      } else if (movModal === 'saida_rapida') {
+        res = await postSaidaRapida({ amount: parseFloat(movAmount), categoria: movCategoria.trim(), reason: movReason || undefined });
+      } else {
+        res = await postSuprimento({ amount: parseFloat(movAmount), reason: movReason || undefined });
       }
-      setMovModal(null); setMovAmount(''); setMovReason('');
+      setMovModal(null); setMovAmount(''); setMovReason(''); setMovCategoria('');
       const movRes = await getCaixaMovements();
       setMovements(movRes.data.data ?? []);
     } catch (e) { setMovErr(e?.response?.data?.message ?? 'Erro ao registrar.'); }
@@ -1380,19 +1386,25 @@ function TabCaixa() {
             </div>
           </div>
 
-          {/* Sangria / Suprimento */}
-          <div className="grid grid-cols-2 gap-2">
+          {/* Sangria / Suprimento / Saída Rápida */}
+          <div className="grid grid-cols-3 gap-2">
             <button
-              onClick={() => { setMovModal('sangria'); setMovAmount(''); setMovReason(''); setMovErr(''); }}
-              className="py-2.5 rounded-xl border border-orange-500/30 text-orange-400 font-semibold text-sm hover:bg-orange-500/10 transition-colors flex items-center justify-center gap-1.5"
+              onClick={() => { setMovModal('sangria'); setMovAmount(''); setMovReason(''); setMovCategoria(''); setMovErr(''); }}
+              className="py-2.5 rounded-xl border border-orange-500/30 text-orange-400 font-semibold text-xs hover:bg-orange-500/10 transition-colors flex items-center justify-center gap-1"
             >
               📤 Sangria
             </button>
             <button
-              onClick={() => { setMovModal('suprimento'); setMovAmount(''); setMovReason(''); setMovErr(''); }}
-              className="py-2.5 rounded-xl border border-blue-500/30 text-blue-400 font-semibold text-sm hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-1.5"
+              onClick={() => { setMovModal('suprimento'); setMovAmount(''); setMovReason(''); setMovCategoria(''); setMovErr(''); }}
+              className="py-2.5 rounded-xl border border-blue-500/30 text-blue-400 font-semibold text-xs hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-1"
             >
               📥 Suprimento
+            </button>
+            <button
+              onClick={() => { setMovModal('saida_rapida'); setMovAmount(''); setMovReason(''); setMovCategoria(''); setMovErr(''); }}
+              className="py-2.5 rounded-xl border border-red-500/30 text-red-400 font-semibold text-xs hover:bg-red-500/10 transition-colors flex items-center justify-center gap-1"
+            >
+              💸 Saída
             </button>
           </div>
 
@@ -1424,40 +1436,48 @@ function TabCaixa() {
                 </div>
               </div>
               <div className="divide-y divide-white/[0.04] max-h-40 overflow-y-auto">
-                {movements.map((m) => (
-                  <div key={m.id} className="px-4 py-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-base">{m.type === 'sangria' ? '📤' : '📥'}</span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-white capitalize">{m.type}</p>
-                        {m.reason && <p className="text-[10px] text-gray-500 truncate">{m.reason}</p>}
+                {movements.map((m) => {
+                  const isSaida = m.type === 'sangria' || m.type === 'saida_rapida';
+                  const icon  = m.type === 'sangria' ? '📤' : m.type === 'saida_rapida' ? '💸' : '📥';
+                  const color = m.type === 'sangria' ? 'text-orange-400' : m.type === 'saida_rapida' ? 'text-red-400' : 'text-blue-400';
+                  const label = m.type === 'saida_rapida' ? (m.categoria ?? 'Saída rápida') : m.type;
+                  return (
+                    <div key={m.id} className="px-4 py-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base">{icon}</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-white capitalize">{label}</p>
+                          {m.reason && <p className="text-[10px] text-gray-500 truncate">{m.reason}</p>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-sm font-bold ${color}`}>
+                          {isSaida ? '-' : '+'}{fmtBRL(parseFloat(m.amount))}
+                        </p>
+                        <p className="text-[10px] text-gray-600">{fmtDt(m.created_at)}</p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className={`text-sm font-bold ${m.type === 'sangria' ? 'text-orange-400' : 'text-blue-400'}`}>
-                        {m.type === 'sangria' ? '-' : '+'}{fmtBRL(parseFloat(m.amount))}
-                      </p>
-                      <p className="text-[10px] text-gray-600">{fmtDt(m.created_at)}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* Modal sangria/suprimento */}
+          {/* Modal sangria/suprimento/saída rápida */}
           {movModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
               <div className="bg-gray-900 border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <p className="font-bold text-white text-base">
-                    {movModal === 'sangria' ? '📤 Sangria de Caixa' : '📥 Suprimento de Caixa'}
+                    {movModal === 'sangria' ? '📤 Sangria de Caixa' : movModal === 'saida_rapida' ? '💸 Saída Rápida' : '📥 Suprimento de Caixa'}
                   </p>
                   <button onClick={() => setMovModal(null)} className="text-gray-400 hover:text-white p-1">✕</button>
                 </div>
                 <p className="text-xs text-gray-400">
                   {movModal === 'sangria'
                     ? 'Registre a retirada de dinheiro do caixa (ex: depósito, troco, pagamento).'
+                    : movModal === 'saida_rapida'
+                    ? 'Registre uma despesa operacional com categoria (ex: gás, material de limpeza).'
                     : 'Registre a entrada de dinheiro no caixa (ex: troco adicional, reforço).'}
                 </p>
                 {movModal === 'sangria' && sangriaLimit != null && (
@@ -1467,20 +1487,42 @@ function TabCaixa() {
                   </p>
                 )}
                 {movErr && <p className="text-red-400 text-xs bg-red-500/10 rounded-lg px-3 py-2">{movErr}</p>}
+                {movModal === 'saida_rapida' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 mb-1">Categoria *</label>
+                    <select
+                      value={movCategoria} onChange={(e) => setMovCategoria(e.target.value)}
+                      className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                    >
+                      <option value="">Selecione a categoria...</option>
+                      <option value="Alimentação / insumos">Alimentação / insumos</option>
+                      <option value="Gás / combustível">Gás / combustível</option>
+                      <option value="Material de limpeza">Material de limpeza</option>
+                      <option value="Embalagens">Embalagens</option>
+                      <option value="Manutenção">Manutenção</option>
+                      <option value="Serviços / fornecedores">Serviços / fornecedores</option>
+                      <option value="Marketing / publicidade">Marketing / publicidade</option>
+                      <option value="Transporte / entrega">Transporte / entrega</option>
+                      <option value="Outros">Outros</option>
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 mb-1">Valor (R$) *</label>
                   <input
                     type="number" step="0.01" min="0.01" placeholder="0,00"
                     value={movAmount} onChange={(e) => setMovAmount(e.target.value)}
-                    autoFocus
+                    autoFocus={movModal !== 'saida_rapida'}
                     className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 mb-1">Motivo (opcional)</label>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">
+                    {movModal === 'saida_rapida' ? 'Descrição (opcional)' : 'Motivo (opcional)'}
+                  </label>
                   <input
                     type="text"
-                    placeholder={movModal === 'sangria' ? 'Ex: Depósito no banco' : 'Ex: Reforço de troco'}
+                    placeholder={movModal === 'sangria' ? 'Ex: Depósito no banco' : movModal === 'saida_rapida' ? 'Ex: 2 botijões de gás' : 'Ex: Reforço de troco'}
                     value={movReason} onChange={(e) => setMovReason(e.target.value)}
                     className="w-full bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
@@ -1491,9 +1533,9 @@ function TabCaixa() {
                   </button>
                   <button
                     onClick={handleMovimento} disabled={movSaving}
-                    className={`flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition-colors disabled:opacity-50 ${movModal === 'sangria' ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'}`}
+                    className={`flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition-colors disabled:opacity-50 ${movModal === 'sangria' ? 'bg-orange-600 hover:bg-orange-500' : movModal === 'saida_rapida' ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'}`}
                   >
-                    {movSaving ? 'Salvando...' : `Confirmar ${movModal === 'sangria' ? 'Sangria' : 'Suprimento'}`}
+                    {movSaving ? 'Salvando...' : movModal === 'sangria' ? 'Confirmar Sangria' : movModal === 'saida_rapida' ? 'Registrar Saída' : 'Confirmar Suprimento'}
                   </button>
                 </div>
               </div>

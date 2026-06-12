@@ -1245,7 +1245,12 @@ ALTER TABLE caixa_movements
 
 ALTER TABLE caixa_movements
   ADD CONSTRAINT caixa_movements_type_check
-  CHECK (type IN ('sangria', 'suprimento', 'fiado_recebido'));
+  CHECK (type IN ('sangria', 'suprimento', 'fiado_recebido', 'saida_rapida'));
+
+-- ── Costura 3: Saída rápida com categoria ─────────────────────────────────────
+-- categoria: obrigatória na aplicação para saida_rapida, nullable nos demais tipos
+ALTER TABLE caixa_movements
+  ADD COLUMN IF NOT EXISTS categoria VARCHAR(80);
 
 -- banco_transactions: índice único para deduplicar lançamentos de fiado
 CREATE UNIQUE INDEX IF NOT EXISTS uq_banco_fiado_reference

@@ -383,6 +383,35 @@ const sangria = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: rows[0], warning });
 });
 
+// ── POST /api/caixa/saida-rapida ─────────────────────────
+const saidaRapida = asyncHandler(async (req, res) => {
+  const { amount, categoria, reason } = req.body;
+  if (!amount || parseFloat(amount) <= 0) throw new AppError('Valor deve ser maior que zero.', 400);
+  if (!categoria?.trim()) throw new AppError('Categoria é obrigatória na saída rápida.', 400);
+
+  const tenantId = req.user.tenantId;
+  const caixa    = await getOpenCaixa(tenantId);
+
+  const { rows } = await db.query(
+    `INSERT INTO caixa_movements
+       (tenant_id, cash_register_id, type, amount, reason, categoria, created_by)
+     VALUES ($1, $2, 'saida_rapida', $3, $4, $5, $6) RETURNING *`,
+    [tenantId, caixa.id, parseFloat(amount), reason ?? null, categoria.trim(), req.user.userId]
+  );
+
+  try {
+    await db.query(
+      `INSERT INTO banco_transactions (tenant_id, type, amount, description, source, reference_id)
+       VALUES ($1, 'debit', $2, $3, 'saida_rapida', $4)`,
+      [tenantId, parseFloat(amount),
+       `Saída rápida [${categoria.trim()}]${reason ? ': ' + reason : ''}`,
+       rows[0].id]
+    );
+  } catch { /* não bloqueia se banco_transactions falhar */ }
+
+  res.status(201).json({ success: true, data: rows[0] });
+});
+
 // ── POST /api/caixa/suprimento ────────────────────────────
 const suprimento = asyncHandler(async (req, res) => {
   const { amount, reason } = req.body;
@@ -440,4 +469,4 @@ const getMovements = asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-module.exports = { getCurrent, openCaixa, closeCaixa, sangria, suprimento, getMovements, getHistory, getOne };
+module.exports = { getCurrent, openCaixa, closeCaixa, sangria, saidaRapida, suprimento, getMovements, getHistory, getOne };
