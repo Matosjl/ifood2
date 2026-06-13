@@ -459,6 +459,8 @@ function FechamentoMensal() {
               <Linha label="Sangrias"              valor={fmt(caixa.sangrias)}
                 cor="amarelo" destaque={caixa.sangrias > 0} />
               <Linha label="Suprimentos"           valor={fmt(caixa.suprimentos)} />
+              <Linha label="Saídas rápidas"        valor={fmt(caixa.saidas_rapidas)}
+                cor="amarelo" destaque={caixa.saidas_rapidas > 0} />
             </Bloco>
 
             {/* ── Incidentes ── */}
