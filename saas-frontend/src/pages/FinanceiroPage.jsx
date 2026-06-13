@@ -1229,8 +1229,9 @@ function TabCaixa() {
     finally { setSangriaLimitSaving(false); }
   };
 
-  const totalSangrias    = movements.filter(m => m.type === 'sangria').reduce((s,m) => s + parseFloat(m.amount), 0);
-  const totalSuprimentos = movements.filter(m => m.type === 'suprimento').reduce((s,m) => s + parseFloat(m.amount), 0);
+  const totalSangrias     = movements.filter(m => m.type === 'sangria').reduce((s,m) => s + parseFloat(m.amount), 0);
+  const totalSuprimentos  = movements.filter(m => m.type === 'suprimento').reduce((s,m) => s + parseFloat(m.amount), 0);
+  const totalSaidasRapidas = movements.filter(m => m.type === 'saida_rapida').reduce((s,m) => s + parseFloat(m.amount), 0);
 
   const fmtDt = (s) => {
     if (!s) return '—';
@@ -1432,6 +1433,7 @@ function TabCaixa() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Movimentos do Caixa</p>
                 <div className="flex gap-3 text-xs">
                   {totalSangrias > 0 && <span className="text-orange-400">📤 -{fmtBRL(totalSangrias)}</span>}
+                  {totalSaidasRapidas > 0 && <span className="text-red-400">💸 -{fmtBRL(totalSaidasRapidas)}</span>}
                   {totalSuprimentos > 0 && <span className="text-blue-400">📥 +{fmtBRL(totalSuprimentos)}</span>}
                 </div>
               </div>
@@ -1726,7 +1728,7 @@ function TabCaixa() {
                       <div className="space-y-0.5">
                         <p className="text-[10px] text-gray-600 font-semibold">💵 DINHEIRO</p>
                         <div className="flex justify-between text-xs">
-                          <span className="text-gray-500">Esperado (troco + vendas - sangrias)</span>
+                          <span className="text-gray-500">Esperado (troco + vendas − sangrias − saídas rápidas)</span>
                           <span className="text-gray-300 tabular-nums">{fmtBRL(ps.expected_cash)}</span>
                         </div>
                         <div className="flex justify-between text-xs">
@@ -1783,6 +1785,9 @@ function TabCaixa() {
                       )}
                       {ps.suprimentos > 0 && (
                         <p className="text-[11px] text-gray-500">Suprimentos no período: {fmtBRL(ps.suprimentos)}</p>
+                      )}
+                      {ps.saidas_rapidas > 0 && (
+                        <p className="text-[11px] text-red-400/70">💸 Saídas rápidas no período: {fmtBRL(ps.saidas_rapidas)}</p>
                       )}
                     </div>
                     )}

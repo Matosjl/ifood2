@@ -145,12 +145,13 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const sangriasTotal      = movs.find(m => m.type === 'sangria')?.total         || 0;
   const suprimentosTotal   = movs.find(m => m.type === 'suprimento')?.total      || 0;
   const fiadoRecebidoTotal = movs.find(m => m.type === 'fiado_recebido')?.total  || 0;
+  const saidasRapidasTotal = movs.find(m => m.type === 'saida_rapida')?.total    || 0;
 
   const s = summary[0];
 
   // ── Esperados por método (conta correta) ─────────────────────
   // Dinheiro: troco inicial + vendas em cash - sangrias + suprimentos
-  const expectedCash = parseFloat(caixa.opening_balance) + s.cash - sangriasTotal + suprimentosTotal + fiadoRecebidoTotal;
+  const expectedCash = parseFloat(caixa.opening_balance) + s.cash - sangriasTotal + suprimentosTotal + fiadoRecebidoTotal - saidasRapidasTotal;
   // PIX: exatamente o que o sistema registrou (vai para conta bancária)
   const expectedPix  = s.pix;
   // Cartão: débito + crédito + vale refeição (vai para conta bancária via maquininha)
@@ -198,6 +199,7 @@ const closeCaixa = asyncHandler(async (req, res) => {
     sangrias:        sangriasTotal,
     suprimentos:     suprimentosTotal,
     fiado_recebido:  fiadoRecebidoTotal,
+    saidas_rapidas:  saidasRapidasTotal,
     // Logística
     total_driver_fees:         s.total_driver_fees,
     // Compatibilidade com versão anterior
@@ -267,7 +269,7 @@ const closeCaixa = asyncHandler(async (req, res) => {
       type:        'cash_difference',
       orderId:     null,
       cost:        Math.abs(discrepancy),
-      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)}) | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})`,
+      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)})${saidasRapidasTotal > 0 ? ` [saídas rápidas R$${saidasRapidasTotal.toFixed(2)} descontadas]` : ''} | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})`,
       source:      'auto',
     }).catch(() => {}); // fire-and-forget — nunca bloqueia resposta
   }

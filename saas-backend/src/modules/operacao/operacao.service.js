@@ -560,8 +560,9 @@ const getFechamentoMensal = async (tenantId, month) => {
   );
   const { rows: [cxMov] } = await db.query(
     `SELECT
-       COALESCE(SUM(amount) FILTER (WHERE type='sangria'),0)::float    AS sangrias,
-       COALESCE(SUM(amount) FILTER (WHERE type='suprimento'),0)::float AS suprimentos
+       COALESCE(SUM(amount) FILTER (WHERE type='sangria'),0)::float      AS sangrias,
+       COALESCE(SUM(amount) FILTER (WHERE type='suprimento'),0)::float   AS suprimentos,
+       COALESCE(SUM(amount) FILTER (WHERE type='saida_rapida'),0)::float AS saidas_rapidas
      FROM caixa_movements cm
      JOIN cash_registers cr ON cr.id = cm.cash_register_id
      WHERE cm.tenant_id = $1
@@ -704,6 +705,7 @@ const getFechamentoMensal = async (tenantId, month) => {
       divergencias_total:          parseFloat((cx.divergencias_total || 0).toFixed(2)),
       sangrias:                    parseFloat((cxMov.sangrias        || 0).toFixed(2)),
       suprimentos:                 parseFloat((cxMov.suprimentos     || 0).toFixed(2)),
+      saidas_rapidas:              parseFloat((cxMov.saidas_rapidas  || 0).toFixed(2)),
     },
 
     incidentes: {
