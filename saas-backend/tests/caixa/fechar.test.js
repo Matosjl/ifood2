@@ -229,4 +229,60 @@ describe('POST /api/caixa/close', () => {
     expect(parseFloat(ps.saidas_rapidas)).toBeCloseTo(20, 2);
     expect(parseFloat(res.body.data.discrepancy)).toBeCloseTo(0, 2);
   });
+
+  // ───────────────────────────────────────────────────────────────
+  // Costura 5 — alerta por método individual (net zero não esconde furo)
+  // ───────────────────────────────────────────────────────────────
+  // afterTime isola cada teste: só incidentes criados APÓS o início deste teste
+  const waitIncident = async (type, maxMs = 1500, afterTime = new Date()) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      const { rows } = await db.query(
+        `SELECT id, cost FROM operational_incidents
+         WHERE tenant_id = $1 AND type = $2 AND created_at > $3
+         ORDER BY created_at DESC LIMIT 1`,
+        [tenantId, type, afterTime]
+      );
+      if (rows[0]) return rows[0];
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return null;
+  };
+
+  it('200 — C5: divergência por método com net 0 AINDA gera incidente', async () => {
+    const before = new Date();
+    await openCashRegister(tenantId, userId, 100);
+    // sem pedidos: esperado cash=100, card=0, pix=0
+    // contar 50/30/20 → cashDiff -50, cardDiff +30, pixDiff +20 → net 0
+    const res = await request(app)
+      .post('/api/caixa/close')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cashCounted: 50, cardCounted: 30, pixCounted: 20 });
+
+    expect(res.status).toBe(200);
+    const ps = psOf(res.body.data);
+    expect(parseFloat(res.body.data.discrepancy)).toBeCloseTo(0, 2);   // net continua 0
+    expect(parseFloat(ps.cash_diff)).toBeCloseTo(-50, 2);
+    expect(parseFloat(ps.card_diff)).toBeCloseTo(30, 2);
+    expect(parseFloat(ps.pix_diff)).toBeCloseTo(20, 2);
+
+    const inc = await waitIncident('cash_difference', 1500, before);
+    expect(inc).not.toBeNull();                         // ANTES da C5 isto seria null
+    expect(parseFloat(inc.cost)).toBeCloseTo(100, 2);   // exposição = |−50|+|30|+|20|
+  });
+
+  it('200 — C5: fechamento perfeito (todos os métodos batem) NÃO gera incidente', async () => {
+    const before = new Date();
+    await openCashRegister(tenantId, userId, 100);
+    const res = await request(app)
+      .post('/api/caixa/close')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cashCounted: 100, cardCounted: 0, pixCounted: 0 });
+
+    expect(res.status).toBe(200);
+    expect(parseFloat(res.body.data.discrepancy)).toBeCloseTo(0, 2);
+
+    const inc = await waitIncident('cash_difference', 800, before);
+    expect(inc).toBeNull();
+  });
 });

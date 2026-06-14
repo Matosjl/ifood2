@@ -263,13 +263,19 @@ const closeCaixa = asyncHandler(async (req, res) => {
 
   // ── Auto-incidente: diferença no fechamento ──────────────────
   // Fora da transação — falha aqui não desfaz o fechamento do caixa
-  if (closedCaixa && discrepancy !== 0) {
+  // Costura 5: dispara quando QUALQUER método diverge, não só o net.
+  // net=0 com cashDiff=-50/cardDiff=+30/pixDiff=+20 ainda é um furo real.
+  const anyMethodDiff = cashDiff !== 0 || cardDiff !== 0 || pixDiff !== 0;
+  if (closedCaixa && anyMethodDiff) {
+    const exposicao = parseFloat(
+      (Math.abs(cashDiff) + Math.abs(cardDiff) + Math.abs(pixDiff)).toFixed(2)
+    );
     const incidentSvc = require('../incidents/incidents.service');
     incidentSvc.createIncident(tenantId, {
       type:        'cash_difference',
       orderId:     null,
-      cost:        Math.abs(discrepancy),
-      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)})${saidasRapidasTotal > 0 ? ` [saídas rápidas R$${saidasRapidasTotal.toFixed(2)} descontadas]` : ''} | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})`,
+      cost:        exposicao,
+      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)})${saidasRapidasTotal > 0 ? ` [saídas rápidas R$${saidasRapidasTotal.toFixed(2)} descontadas]` : ''} | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})${discrepancy === 0 && anyMethodDiff ? ' ⚠ DIVERGÊNCIA POR MÉTODO COM NET ZERO — possível furo compensado' : ''}`,
       source:      'auto',
     }).catch(() => {}); // fire-and-forget — nunca bloqueia resposta
   }
