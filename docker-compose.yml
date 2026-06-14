@@ -9,10 +9,31 @@
 
 services:
 
+  # ── Autoheal (reinício automático por unhealthy) ─────────────
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: saas_autoheal
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal   # só reinicia quem tem label autoheal=true
+      AUTOHEAL_INTERVAL: 10                # checa status a cada 10s
+      AUTOHEAL_START_PERIOD: 30            # ignora health nos primeiros 30s após (re)start
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 15
+      # Alerta opcional — apontar para webhook real quando decidir canal (WhatsApp/Telegram):
+      # WEBHOOK_URL: "https://<seu-endpoint>"
+      # WEBHOOK_JSON_KEY: "text"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
   # ── Reverse Proxy ────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
     container_name: saas_nginx
+    labels:
+      - autoheal=true
     ports:
       - "80:80"
       - "443:443"
