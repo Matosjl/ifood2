@@ -263,13 +263,17 @@ const closeCaixa = asyncHandler(async (req, res) => {
 
   // ── Auto-incidente: diferença no fechamento ──────────────────
   // Fora da transação — falha aqui não desfaz o fechamento do caixa
-  if (closedCaixa && discrepancy !== 0) {
+  // Costura 5 (revisado): dispara quando o pior método diverge acima da tolerância.
+  // Tolerância evita incidente por centavos a cada fechamento (spec §12: > R$5).
+  const TOLERANCIA_CAIXA = 5.00; // R$ — tornar configurável por tenant depois
+  const maxMethodDiff = Math.max(Math.abs(cashDiff), Math.abs(cardDiff), Math.abs(pixDiff));
+  if (closedCaixa && maxMethodDiff > TOLERANCIA_CAIXA) {
     const incidentSvc = require('../incidents/incidents.service');
     incidentSvc.createIncident(tenantId, {
       type:        'cash_difference',
       orderId:     null,
-      cost:        Math.abs(discrepancy),
-      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)})${saidasRapidasTotal > 0 ? ` [saídas rápidas R$${saidasRapidasTotal.toFixed(2)} descontadas]` : ''} | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})`,
+      cost:        maxMethodDiff, // exposição do pior método; soma dos abs superestimaria
+      description: `Fechamento de caixa — Dinheiro: esperado R$${expectedCash.toFixed(2)} contado R$${cashC.toFixed(2)} (${cashDiff >= 0 ? '+' : ''}${cashDiff.toFixed(2)})${saidasRapidasTotal > 0 ? ` [saídas rápidas R$${saidasRapidasTotal.toFixed(2)} descontadas]` : ''} | Cartão: esperado R$${expectedCard.toFixed(2)} contado R$${cardC.toFixed(2)} (${cardDiff >= 0 ? '+' : ''}${cardDiff.toFixed(2)}) | PIX: esperado R$${expectedPix.toFixed(2)} contado R$${pixC.toFixed(2)} (${pixDiff >= 0 ? '+' : ''}${pixDiff.toFixed(2)})${discrepancy === 0 ? ' ⚠ DIVERGÊNCIA POR MÉTODO COM NET ZERO — possível furo compensado' : ''}`,
       source:      'auto',
     }).catch(() => {}); // fire-and-forget — nunca bloqueia resposta
   }
