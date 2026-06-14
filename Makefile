@@ -13,6 +13,7 @@ COMPOSE_DEV     = -f docker-compose.yml -f docker-compose.dev.yml
 
 .PHONY: up
 up:  ## Start all services in detached mode
+	@sh scripts/bootstrap-nginx.sh
 	$(COMPOSE) $(COMPOSE_FILE) up -d
 
 .PHONY: down

@@ -43,6 +43,10 @@ docker compose build $BUILD_FLAGS
 log "▶  Running database migrations..."
 docker compose run --rm backend node src/database/migrate.js
 
+# ── Ensure nginx/conf.d/app.conf exists before starting ──────
+log "▶  Bootstrap nginx config..."
+sh "$SCRIPT_DIR/bootstrap-nginx.sh"
+
 # ── Rolling restart ───────────────────────────────────────────
 log "▶  Starting services..."
 docker compose up -d --remove-orphans
