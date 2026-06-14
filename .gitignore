@@ -42,7 +42,7 @@ dist
 *credentials.json*
 
 # Deployment artefacts — generated at runtime, never committed
-nginx/conf.d/app-ssl.conf
+nginx/conf.d/app.conf
 backups/
 saas-frontend/dist/
 
