@@ -268,7 +268,7 @@ describe('POST /api/caixa/close', () => {
 
     const inc = await waitIncident('cash_difference', 1500, before);
     expect(inc).not.toBeNull();                         // ANTES da C5 isto seria null
-    expect(parseFloat(inc.cost)).toBeCloseTo(100, 2);   // exposição = |−50|+|30|+|20|
+    expect(parseFloat(inc.cost)).toBeCloseTo(50, 2);    // cost = max(|−50|,|+30|,|+20|)
   });
 
   it('200 — C5: fechamento perfeito (todos os métodos batem) NÃO gera incidente', async () => {
@@ -284,5 +284,20 @@ describe('POST /api/caixa/close', () => {
 
     const inc = await waitIncident('cash_difference', 800, before);
     expect(inc).toBeNull();
+  });
+
+  it('200 — C5: divergência dentro da tolerância (≤ R$5) NÃO gera incidente', async () => {
+    const before = new Date();
+    await openCashRegister(tenantId, userId, 100);
+    // cashDiff = 98 − 100 = −2 → maxMethodDiff = 2 ≤ TOLERANCIA_CAIXA(5) → sem incidente
+    const res = await request(app)
+      .post('/api/caixa/close')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cashCounted: 98, cardCounted: 0, pixCounted: 0 });
+
+    expect(res.status).toBe(200);
+    expect(parseFloat(res.body.data.discrepancy)).toBeCloseTo(-2, 2); // net != 0...
+    const inc = await waitIncident('cash_difference', 800, before);
+    expect(inc).toBeNull();                                            // ...mas sem incidente
   });
 });
