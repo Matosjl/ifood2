@@ -14,6 +14,7 @@ jest.mock('../../src/queues/order.queue', () => ({
 
 const request = require('supertest');
 const app = require('../../src/app');
+const db = require('../../src/config/database');
 const { createTestTenant, cleanupTenant } = require('../helpers/db');
 const { enqueueAndWait } = require('../../src/queues/order.queue');
 
@@ -36,6 +37,12 @@ beforeAll(async () => {
   const tenant = await createTestTenant({ withProducts: true });
   tenantId = tenant.tenantId;
   slug     = tenant.slug;
+
+  // D1 delivery tests need at least one zone; zone with fee 8.00 matches the D1 fee test.
+  await db.query(
+    `UPDATE tenants SET delivery_zones = $1 WHERE id = $2`,
+    [JSON.stringify([{ name: 'Zona Teste', fee: '8.00' }]), tenantId]
+  );
 });
 
 afterAll(async () => {
@@ -158,27 +165,20 @@ describe('POST /api/public/:slug/orders', () => {
     );
   });
 
-  it('D1 — delivery sem deliveryFee no payload grava 0 (comportamento legado documentado)', async () => {
-    // Este teste documenta o comportamento sem o guard do frontend:
-    // se deliveryFee não vier, o backend grava 0.
-    // O guard no CustomerApp.jsx bloqueia este caminho no cardápio digital.
+  it('D1 — delivery sem deliveryFee retorna 400 (backend bloqueia taxa não calculada)', async () => {
+    // deliveryFee ausente para delivery → backend rejeita com 400.
+    // O frontend (CustomerApp.jsx) nunca deixa chegar aqui, mas o backend defende ativamente.
     const res = await request(app)
       .post(`/api/public/${slug}/orders`)
       .send({
         customerName:    'Cliente Sem Taxa',
         customerAddress: 'Rua X 1',
         deliveryType:    'delivery',
-        // deliveryFee omitido intencionalmente
+        // deliveryFee omitido — deve ser rejeitado
         items: [{ productId: 'some-product-id', quantity: 1 }],
       });
 
-    expect(res.status).toBe(201);
-    expect(enqueueAndWait).toHaveBeenCalledWith(
-      'create',
-      expect.objectContaining({
-        payload: expect.objectContaining({ deliveryFee: 0 }),
-      }),
-      expect.any(Object)
-    );
+    expect(res.status).toBe(400);
+    expect(enqueueAndWait).not.toHaveBeenCalled();
   });
 });
