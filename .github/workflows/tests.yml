@@ -26,6 +26,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       NODE_ENV: test
       JWT_SECRET: ci-jwt-secret-not-for-production
@@ -35,10 +45,11 @@ jobs:
       DB_NAME: saas_restaurant_test
       DB_USER: saas_user
       DB_PASSWORD: saas_pass
-      # Redis is not required for tests — queue is mocked. Provide a dummy URL so
-      # ioredis doesn't throw at module load time if it validates the URL eagerly.
       REDIS_URL: redis://localhost:6379
       SUPER_ADMIN_KEY: ci-admin-key
+      # VPS2 (AI Engine) não está acessível em CI — skip o check para que
+      # /health retorne 200 quando DB e Redis estão ok.
+      HEALTH_SKIP_VPS2: 'true'
 
     steps:
       - name: Checkout code
