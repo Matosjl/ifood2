@@ -8,5 +8,8 @@ module.exports = {
     'src/modules/**/*.js',
     '!src/**/*.test.js',
   ],
+  coverageThreshold: {
+    global: { statements: 26, branches: 4, lines: 29, functions: 3 }
+  },
   testTimeout: 15000,
 };
