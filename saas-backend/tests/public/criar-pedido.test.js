@@ -38,10 +38,15 @@ beforeAll(async () => {
   tenantId = tenant.tenantId;
   slug     = tenant.slug;
 
-  // D1 delivery tests need at least one zone; zone with fee 8.00 matches the D1 fee test.
+  // D1 delivery tests: uma zona paga (fee=8) e uma grátis (fee=0).
+  // A zona grátis é necessária para que deliveryFee=0 passe no guard de frete grátis
+  // do public.controller (linha: fee===0 && !zones.some(z => parseFloat(z.fee)===0)).
   await db.query(
     `UPDATE tenants SET delivery_zones = $1 WHERE id = $2`,
-    [JSON.stringify([{ name: 'Zona Teste', fee: '8.00' }]), tenantId]
+    [JSON.stringify([
+      { name: 'Zona Paga',   fee: '8.00' },
+      { name: 'Zona Grátis', fee: '0.00' },
+    ]), tenantId]
   );
 });
 
@@ -139,6 +144,30 @@ describe('POST /api/public/:slug/orders', () => {
       'create',
       expect.objectContaining({
         payload: expect.objectContaining({ deliveryFee: 8 }),
+      }),
+      expect.any(Object)
+    );
+  });
+
+  it('D1 — delivery com deliveryFee=0 (frete grátis) é aceito → 201', async () => {
+    // fee=0 é VÁLIDO quando existe zona grátis configurada no tenant.
+    // O guard do public.controller só rejeita fee=0 quando NENHUMA zona tem fee=0.
+    // Não confundir com "fee ausente" (undefined → 400).
+    const res = await request(app)
+      .post(`/api/public/${slug}/orders`)
+      .send({
+        customerName:    'Cliente Frete Grátis',
+        customerAddress: 'Rua das Flores 456',
+        deliveryType:    'delivery',
+        deliveryFee:     0,
+        items: [{ productId: 'some-product-id', quantity: 1 }],
+      });
+
+    expect(res.status).toBe(201);
+    expect(enqueueAndWait).toHaveBeenCalledWith(
+      'create',
+      expect.objectContaining({
+        payload: expect.objectContaining({ deliveryFee: 0 }),
       }),
       expect.any(Object)
     );
