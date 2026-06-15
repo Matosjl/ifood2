@@ -49,6 +49,8 @@ async function checkRedis() {
 }
 
 async function checkVps2() {
+  // Em CI (HEALTH_SKIP_VPS2=true), VPS2 não está acessível — skip explícito.
+  if (process.env.HEALTH_SKIP_VPS2 === 'true') return { ok: true };
   try {
     // Reutiliza a função já existente no ai.service (timeout 5s interno)
     const aiService = require('./ai.service');
