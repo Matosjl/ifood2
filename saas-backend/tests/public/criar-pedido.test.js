@@ -173,6 +173,37 @@ describe('POST /api/public/:slug/orders', () => {
     );
   });
 
+  it('D1 — delivery com deliveryFee=0 SEM zona gratuita → 400 (anti-bug taxa não calculada)', async () => {
+    // Salva as zonas atuais e remove a zona gratuita só para este teste
+    const { rows: [orig] } = await db.query(
+      'SELECT delivery_zones FROM tenants WHERE id = $1', [tenantId]
+    );
+    await db.query(
+      'UPDATE tenants SET delivery_zones = $1 WHERE id = $2',
+      [JSON.stringify([{ name: 'Zona Teste', fee: '8.00' }]), tenantId]   // sem zona 0,00
+    );
+    try {
+      const res = await request(app)
+        .post(`/api/public/${slug}/orders`)
+        .send({
+          customerName:    'Cliente Frete Zero Sem Zona',
+          customerAddress: 'Rua Y 2',
+          deliveryType:    'delivery',
+          deliveryFee:     0,                 // frete grátis "não calculado"
+          items: [{ productId: 'some-product-id', quantity: 1 }],
+        });
+
+      expect(res.status).toBe(400);
+      expect(enqueueAndWait).not.toHaveBeenCalled();
+    } finally {
+      // Restaura as zonas originais (com a 0,00) para os demais testes
+      await db.query(
+        'UPDATE tenants SET delivery_zones = $1 WHERE id = $2',
+        [JSON.stringify(orig.delivery_zones), tenantId]
+      );
+    }
+  });
+
   it('D1 — pickup força deliveryFee=0 mesmo se frontend enviar outro valor', async () => {
     const res = await request(app)
       .post(`/api/public/${slug}/orders`)
