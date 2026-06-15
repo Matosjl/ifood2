@@ -1191,6 +1191,22 @@ CREATE TABLE IF NOT EXISTS ocr_aliases (
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_aliases_lookup ON ocr_aliases(tenant_id, ocr_raw);
 
+-- ── Incidentes operacionais (gerados automaticamente pelo fechamento de caixa) ──
+CREATE TABLE IF NOT EXISTS operational_incidents (
+  id          UUID                     NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id   UUID                     NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  order_id    UUID,
+  type        VARCHAR                  NOT NULL,
+  cost        NUMERIC                  DEFAULT 0,
+  description TEXT,
+  source      VARCHAR                  DEFAULT 'auto',
+  resolved    BOOLEAN                  DEFAULT false,
+  resolved_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ              DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_tenant_date  ON operational_incidents(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_incidents_unresolved   ON operational_incidents(tenant_id, resolved) WHERE resolved = false;
+
 -- ── Costura 2: Baixa de fiado com método de pagamento ──────────────────────────
 -- (migration 009_fiado_baixa.sql — espelhado aqui para que migrate.js aplique)
 
