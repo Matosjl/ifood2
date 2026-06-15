@@ -1,0 +1,70 @@
+name: Caixa Tests
+
+# Roda em todo PR e push para main — garante que nenhuma Costura de caixa
+# regride silenciosamente antes de merge ou deploy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  caixa:
+    name: Testes de fechamento de caixa (Costuras 1–5)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: saas_restaurant_test
+          POSTGRES_USER: saas_user
+          POSTGRES_PASSWORD: saas_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U saas_user -d saas_restaurant_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-jwt-secret-not-for-production
+      JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production
+      SUPER_ADMIN_KEY: ci-admin-key
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: saas_restaurant_test
+      DB_USER: saas_user
+      DB_PASSWORD: saas_pass
+      # Redis não é necessário — BullMQ é mockado em fechar.test.js.
+      # URL dummy evita erro de validação no require do queue ao carregar o app.
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: saas-backend/package-lock.json
+
+      - name: Instalar dependências
+        working-directory: saas-backend
+        run: npm ci
+
+      - name: Aplicar schema do banco
+        run: |
+          PGPASSWORD=saas_pass psql \
+            -h localhost \
+            -U saas_user \
+            -d saas_restaurant_test \
+            -f saas-backend/src/database/schema.sql
+
+      - name: Rodar testes de caixa
+        working-directory: saas-backend
+        run: npm test -- tests/caixa/fechar.test.js
