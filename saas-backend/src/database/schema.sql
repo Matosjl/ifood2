@@ -930,6 +930,8 @@ ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_cost      DECIMAL(10,2) N
 -- 011: snapshot da variação (tamanho) escolhida — ex. "Média", "Grande"
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS variation_label VARCHAR(120);
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS variation_price NUMERIC(10,2);
+-- 012: posição de inserção — garante ordem estável na comanda
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS line_no INT;
 
 -- Backfill: atualiza itens existentes com o custo atual do produto
 UPDATE order_items oi

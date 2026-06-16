@@ -54,6 +54,9 @@ function openPrint(html, width = 300) {
 
 // ── Recibo do cliente — 58mm ──────────────────────────────────
 export function printOrder(order) {
+  const items = order.items ?? [];
+  if (items.length === 0) return { ok: false, reason: 'no_items' };
+
   // Login salva user e tenant em chaves separadas no localStorage
   const tenant = (() => {
     try {

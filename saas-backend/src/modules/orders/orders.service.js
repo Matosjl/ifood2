@@ -404,7 +404,7 @@ const createOrder = async (tenantId, {
       cashChangeFor: cashChangeFor ? parseFloat(cashChangeFor) : null,
     }, client);
 
-    for (const item of resolvedItems) {
+    for (const [lineNo, item] of resolvedItems.entries()) {
       // Custo unitário:
       //   Produto normal → cost_price do produto
       //   Combo → filhos fixos + custo dos produtos escolhidos nos grupos de opção
@@ -442,6 +442,7 @@ const createOrder = async (tenantId, {
         totalCost:      parseFloat((unitCost * soldQty).toFixed(2)),
         variationLabel: item.variationLabel,
         variationPrice: item.variationPrice,
+        lineNo,
       }, client);
 
       // Grava escolhas dos grupos de opção (necessário para reverter insumos no cancelamento)
@@ -660,7 +661,7 @@ const createExternalOrder = async (tenantId, {
       return p ? parseFloat(p.cost_price) : 0;
     };
 
-    for (const item of validItems) {
+    for (const [lineNo, item] of validItems.entries()) {
       const qty      = parseInt(item.quantity, 10) || 1;
       const unitCost = findCost(item.name ?? '');
       await Order.createItem({
@@ -674,6 +675,7 @@ const createExternalOrder = async (tenantId, {
         notes:       item.notes ?? null,
         unitCost,
         totalCost:   parseFloat((unitCost * qty).toFixed(2)),
+        lineNo,
       }, client);
     }
 
@@ -907,7 +909,7 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
 
     // 5. Substitui itens no banco
     await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
-    for (const item of resolvedItems) {
+    for (const [lineNo, item] of resolvedItems.entries()) {
       await Order.createItem({
         orderId:     id,
         productId:   item.product.id,
@@ -917,6 +919,7 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
         unitPrice:   parseFloat(item.product.sale_price),
         total:       parseFloat(item.lineTotal.toFixed(2)),
         notes:       item.notes ?? null,
+        lineNo,
       }, client);
     }
 

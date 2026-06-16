@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import useSocket from './useSocket';
 import { playAlert, unlockAudio } from '../utils/sound';
 import { printOrder, printKitchen } from '../utils/print';
-import { getOrders, updateOrderStatus, cancelOrder,
+import { getOrders, getOrder, updateOrderStatus, cancelOrder,
          markOrderPaid as markOrderPaidApi,
          editOrderItems as editOrderItemsApi } from '../api/orders';
 import { getApiError } from '../utils/apiError';
@@ -191,16 +191,26 @@ export default function useOrders() {
     const o = norm(order);
     setOrders((prev) => prev.find((p) => p.id === o.id) ? prev : [o, ...prev]);
     if (soundRef.current) playAlert();
-    if (autoPrintRef.current) printOrder(o);
-    if (autoPrintKitchenRef.current) {
-      // Imprime comanda de cozinha; se tiver itens de bar, imprime separado
-      printKitchen(o, 'kitchen');
-      // Pequeno delay para não abrir duas janelas simultâneas
-      const hasBar = (o.items ?? []).some((i) => {
-        const t = i.printerTarget ?? i.printer_target ?? 'kitchen';
-        return t === 'bar' || t === 'both';
+    if (autoPrintRef.current || autoPrintKitchenRef.current) {
+      // Refetch para garantir itens hidratados — o payload do socket pode chegar sem itens
+      // (race condition entre evento e persistência, ou pedido externo).
+      getOrder(o.id).then(({ data }) => {
+        const hydrated = norm(data?.data ?? data ?? o);
+        if (!(hydrated.items ?? []).length) return; // sem itens → não imprime
+        if (autoPrintRef.current) printOrder(hydrated);
+        if (autoPrintKitchenRef.current) {
+          printKitchen(hydrated, 'kitchen');
+          const hasBar = (hydrated.items ?? []).some((i) => {
+            const t = i.printerTarget ?? i.printer_target ?? 'kitchen';
+            return t === 'bar' || t === 'both';
+          });
+          if (hasBar) setTimeout(() => printKitchen(hydrated, 'bar'), 800);
+        }
+      }).catch(() => {
+        // Refetch falhou — tenta com o payload original; printOrder e printKitchen têm guards próprios
+        if (autoPrintRef.current) printOrder(o);
+        if (autoPrintKitchenRef.current) printKitchen(o, 'kitchen');
       });
-      if (hasBar) setTimeout(() => printKitchen(o, 'bar'), 800);
     }
     // Agenda auto-confirmação se configurado e pedido em pending
     if (autoConfirmDelayRef.current > 0 && o.status === 'pending') {

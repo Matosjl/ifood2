@@ -82,7 +82,7 @@ class Order {
                     JOIN products cp ON cp.id = oicc.product_id
                     WHERE oicc.order_item_id = oi.id
                   )
-                ) ORDER BY oi.id
+                ) ORDER BY oi.line_no NULLS LAST, oi.id
               ) FILTER (WHERE oi.id IS NOT NULL) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
@@ -136,7 +136,7 @@ class Order {
                     JOIN products cp ON cp.id = oicc.product_id
                     WHERE oicc.order_item_id = oi.id
                   )
-                ) ORDER BY oi.id
+                ) ORDER BY oi.line_no NULLS LAST, oi.id
               ) FILTER (WHERE oi.id IS NOT NULL) AS items
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
@@ -204,15 +204,16 @@ class Order {
   }
 
   /** Insere um item no pedido. Chamar dentro de transaction. */
-  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes, unitCost = 0, totalCost = 0, variationLabel = null, variationPrice = null }, dbClient = db) {
+  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes, unitCost = 0, totalCost = 0, variationLabel = null, variationPrice = null, lineNo = null }, dbClient = db) {
     const { rows } = await dbClient.query(
       `INSERT INTO order_items
-         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes, unit_cost, total_cost, variation_label, variation_price)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes, unit_cost, total_cost, variation_label, variation_price, line_no)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [orderId, productId || null, productName, quantity, weightKg || null, unitPrice, total, notes || null,
        parseFloat(unitCost) || 0, parseFloat(totalCost) || 0,
-       variationLabel || null, variationPrice != null ? parseFloat(variationPrice) : null]
+       variationLabel || null, variationPrice != null ? parseFloat(variationPrice) : null,
+       lineNo != null ? parseInt(lineNo, 10) : null]
     );
     return rows[0];
   }
