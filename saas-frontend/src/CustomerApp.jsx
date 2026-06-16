@@ -19,14 +19,25 @@ const saveProfile  = (slug, p) => { try { localStorage.setItem(PROFILE_KEY(slug)
 
 const emptyCart = () => ({});
 
-const addToCart = (cart, product, addons = []) => {
+const addToCart = (cart, product, addons = [], extra = {}) => {
+  const { variationOptionIds, variationPrice, notes: itemNotes } = extra;
   const prev = cart[product.id];
-  if (prev && addons.length === 0 && (!prev.addons || prev.addons.length === 0)) {
+  // Merge incrementando qty apenas quando sem variação, sem addons, sem notas
+  if (prev && addons.length === 0 && !variationOptionIds && !itemNotes
+      && (!prev.addons || prev.addons.length === 0) && !prev.variationOptionIds) {
     return product.sale_type === 'kg'
       ? cart
       : { ...cart, [product.id]: { ...prev, qty: prev.qty + 1 } };
   }
-  return { ...cart, [product.id]: { product, qty: 1, weightKg: '', addons } };
+  return {
+    ...cart,
+    [product.id]: {
+      product, qty: 1, weightKg: '', addons,
+      variationOptionIds: variationOptionIds ?? undefined,
+      variationPrice: variationPrice != null ? parseFloat(variationPrice) : undefined,
+      itemNotes: itemNotes || undefined,
+    },
+  };
 };
 
 const removeFromCart = (cart, id) => { const n = { ...cart }; delete n[id]; return n; };
@@ -34,11 +45,23 @@ const removeFromCart = (cart, id) => { const n = { ...cart }; delete n[id]; retu
 const addonLinePrice = (addons = []) =>
   addons.reduce((s, a) => s + parseFloat(a.unit_price || 0) * (a.qty || 1), 0);
 
+const getVariationLabel = ({ product, variationOptionIds }) => {
+  if (!variationOptionIds?.length) return null;
+  const labels = [];
+  for (const grp of (product.variation_groups ?? [])) {
+    for (const opt of (grp.options ?? [])) {
+      if (variationOptionIds.includes(opt.id)) labels.push(opt.name);
+    }
+  }
+  return labels.join(', ') || null;
+};
+
 const cartTotal = (cart) =>
-  Object.values(cart).reduce((sum, { product, qty, weightKg, addons = [] }) => {
+  Object.values(cart).reduce((sum, { product, qty, weightKg, addons = [], variationPrice }) => {
+    const unit = parseFloat(variationPrice ?? product.sale_price);
     const base = product.sale_type === 'kg'
-      ? parseFloat(product.sale_price) * parseFloat(weightKg || 0)
-      : parseFloat(product.sale_price) * (qty || 0);
+      ? unit * parseFloat(weightKg || 0)
+      : unit * (qty || 0);
     return sum + base + addonLinePrice(addons) * (product.sale_type === 'kg' ? 1 : (qty || 0));
   }, 0);
 
@@ -1004,14 +1027,14 @@ export default function CustomerApp({ slug }) {
   // Chamado pelo ProductModal ao clicar em "Adicionar".
   // Se tem addons → fecha modal e abre AddonPicker.
   // Se não tem addons → define qty diretamente no carrinho.
-  const handleAddFromModal = useCallback((product, qty) => {
+  const handleAddFromModal = useCallback((product, qty, extra = {}) => {
     const groups = product.addon_groups ?? [];
     if (groups.length > 0) {
       setProductModal(null);
       setPickerProduct(product);
       setPickerGroups(groups);
     } else {
-      setCart(c => ({ ...c, [product.id]: { product, qty, weightKg: '', addons: [] } }));
+      setCart(c => addToCart(c, product, [], extra));
     }
   }, []);
 
@@ -1076,10 +1099,12 @@ export default function CustomerApp({ slug }) {
     setCheckoutError(null);
     setSubmitting(true);
 
-    const items = cartEntries.map(({ product, qty, weightKg, addons = [] }) => ({
+    const items = cartEntries.map(({ product, qty, weightKg, addons = [], variationOptionIds, itemNotes }) => ({
       productId: product.id,
       ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
       ...(addons.length > 0 ? { addons } : {}),
+      ...(variationOptionIds?.length > 0 ? { variationOptionIds } : {}),
+      ...(itemNotes ? { notes: itemNotes } : {}),
     }));
 
     let finalNotes = notes.trim();
@@ -1216,16 +1241,20 @@ export default function CustomerApp({ slug }) {
               <p className="text-xs font-bold text-orange-600 uppercase tracking-widest">Seu pedido</p>
             </div>
             <div className="px-4 py-3 space-y-3">
-              {cartEntries.map(({ product: p, qty, weightKg, addons = [] }) => {
-                const lineBase   = p.sale_type === 'kg' ? parseFloat(p.sale_price) * parseFloat(weightKg || 0) : parseFloat(p.sale_price) * qty;
+              {cartEntries.map(({ product: p, qty, weightKg, addons = [], variationPrice, variationOptionIds, itemNotes }) => {
+                const unit       = parseFloat(variationPrice ?? p.sale_price);
+                const lineBase   = p.sale_type === 'kg' ? unit * parseFloat(weightKg || 0) : unit * qty;
                 const lineExtras = addonLinePrice(addons) * (p.sale_type === 'kg' ? 1 : qty);
+                const varLabel   = getVariationLabel({ product: p, variationOptionIds });
                 return (
                   <div key={p.id} className="flex justify-between items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-800 truncate">{p.display_name ?? p.name}</p>
                       <p className="text-xs text-gray-400">
-                        {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(2)} kg × ${fmtBRL(p.sale_price)}/kg` : `${qty} × ${fmtBRL(p.sale_price)}`}
+                        {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(2)} kg × ${fmtBRL(unit)}/kg` : `${qty} × ${fmtBRL(unit)}`}
                       </p>
+                      {varLabel && <p className="text-xs text-amber-500 mt-0.5">Variação: {varLabel}</p>}
+                      {itemNotes && <p className="text-xs text-zinc-500 mt-0.5 italic">"{itemNotes}"</p>}
                       {addons.length > 0 && <p className="text-xs text-orange-500 mt-0.5">+ {addons.map(a => `${a.addon_name}${a.qty > 1 ? ` ×${a.qty}` : ''}`).join(', ')}</p>}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1769,7 +1798,10 @@ export default function CustomerApp({ slug }) {
                         <div className="flex items-center justify-between mt-2.5 gap-2"
                           onClick={(e) => e.stopPropagation()}>
                           <span className="text-amber-400 font-black text-base tabular-nums">
-                            {fmtBRL(product.sale_price)}{product.sale_type === 'kg' && <span className="text-xs font-semibold text-zinc-500">/kg</span>}
+                            {(product.variation_groups?.length > 0)
+                              ? <span>a partir de {fmtBRL(product.sale_price)}</span>
+                              : <>{fmtBRL(product.sale_price)}{product.sale_type === 'kg' && <span className="text-xs font-semibold text-zinc-500">/kg</span>}</>
+                            }
                           </span>
                           {!outOfStock && (
                             product.sale_type === 'kg' ? (
@@ -1841,17 +1873,21 @@ export default function CustomerApp({ slug }) {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
-              {cartEntries.map(({ product: p, qty, weightKg, addons = [] }) => {
-                const lineBase   = p.sale_type === 'kg' ? parseFloat(p.sale_price) * parseFloat(weightKg || 0) : parseFloat(p.sale_price) * qty;
+              {cartEntries.map(({ product: p, qty, weightKg, addons = [], variationPrice, variationOptionIds, itemNotes }) => {
+                const unit       = parseFloat(variationPrice ?? p.sale_price);
+                const lineBase   = p.sale_type === 'kg' ? unit * parseFloat(weightKg || 0) : unit * qty;
                 const lineExtras = addonLinePrice(addons) * (p.sale_type === 'kg' ? 1 : qty);
+                const varLabel   = getVariationLabel({ product: p, variationOptionIds });
                 return (
                   <div key={p.id} className="flex items-start gap-3 py-1">
                     {p.image_url && <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 shrink-0"><img src={p.image_url} alt={p.display_name ?? p.name} className="w-full h-full object-cover" /></div>}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-800 truncate">{p.display_name ?? p.name}</p>
                       <p className="text-xs text-gray-400">
-                        {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(3)} kg × ${fmtBRL(p.sale_price)}/kg` : `${qty} × ${fmtBRL(p.sale_price)}`}
+                        {p.sale_type === 'kg' ? `${parseFloat(weightKg || 0).toFixed(3)} kg × ${fmtBRL(unit)}/kg` : `${qty} × ${fmtBRL(unit)}`}
                       </p>
+                      {varLabel && <p className="text-xs text-amber-500 mt-0.5">Variação: {varLabel}</p>}
+                      {itemNotes && <p className="text-xs text-gray-400 italic mt-0.5">"{itemNotes}"</p>}
                       {addons.length > 0 && <p className="text-xs text-orange-500 mt-0.5">+ {addons.map(a => a.addon_name).join(', ')}</p>}
                     </div>
                     <div className="text-right shrink-0">
