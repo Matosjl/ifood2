@@ -57,6 +57,8 @@ class Order {
                   'unit_price',      oi.unit_price,
                   'total',           oi.total,
                   'notes',           oi.notes,
+                  'variation_label', oi.variation_label,
+                  'variation_price', oi.variation_price,
                   'printer_target',  COALESCE(c.printer_target, 'kitchen'),
                   'addons', (
                     SELECT COALESCE(json_agg(json_build_object(
@@ -109,6 +111,8 @@ class Order {
                   'unit_price',      oi.unit_price,
                   'total',           oi.total,
                   'notes',           oi.notes,
+                  'variation_label', oi.variation_label,
+                  'variation_price', oi.variation_price,
                   'printer_target',  COALESCE(c.printer_target, 'kitchen'),
                   'addons', (
                     SELECT COALESCE(json_agg(json_build_object(
@@ -200,14 +204,15 @@ class Order {
   }
 
   /** Insere um item no pedido. Chamar dentro de transaction. */
-  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes, unitCost = 0, totalCost = 0 }, dbClient = db) {
+  static async createItem({ orderId, productId, productName, quantity, weightKg, unitPrice, total, notes, unitCost = 0, totalCost = 0, variationLabel = null, variationPrice = null }, dbClient = db) {
     const { rows } = await dbClient.query(
       `INSERT INTO order_items
-         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes, unit_cost, total_cost)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         (order_id, product_id, product_name, quantity, weight_kg, unit_price, total, notes, unit_cost, total_cost, variation_label, variation_price)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [orderId, productId || null, productName, quantity, weightKg || null, unitPrice, total, notes || null,
-       parseFloat(unitCost) || 0, parseFloat(totalCost) || 0]
+       parseFloat(unitCost) || 0, parseFloat(totalCost) || 0,
+       variationLabel || null, variationPrice != null ? parseFloat(variationPrice) : null]
     );
     return rows[0];
   }

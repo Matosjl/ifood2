@@ -71,7 +71,9 @@ const create = asyncHandler(async (req, res) => {
   const idempotencyKey = req.headers['x-idempotency-key'] || uuidv4();
   const order = await enqueueAndWait(
     'create',
-    { tenantId: req.user.tenantId, payload: req.body, idempotencyKey },
+    // enforceRequiredVariation: true → canal manual exige escolha de grupos required.
+    // Canais online/externo não passam esse flag (default false).
+    { tenantId: req.user.tenantId, payload: { ...req.body, enforceRequiredVariation: true }, idempotencyKey },
     { idempotencyKey }
   );
   res.status(201).json({ success: true, data: order });
