@@ -64,7 +64,8 @@ const getMenu = asyncHandler(async (req, res) => {
 
   const { rows: products } = await db.query(
     `SELECT p.id, p.name, p.display_name, p.description, p.sale_type, p.sale_price,
-            p.stock_qty, p.image_url, p.featured, p.badge, p.sort_order, c.name AS category_name
+            p.stock_qty, p.image_url, p.featured, p.badge, p.sort_order,
+            p.is_combo, c.name AS category_name
      FROM   products p
      LEFT   JOIN categories c ON c.id = p.category_id
      WHERE  p.tenant_id = $1 AND p.active = true AND p.stock_qty > 0
@@ -106,9 +107,65 @@ const getMenu = asyncHandler(async (req, res) => {
     }
   }
 
+  // Busca grupos de variação (tamanho/opção) para todos os produtos de uma vez
+  let variationGroupsByProduct = {};
+  if (productIds.length > 0) {
+    const { rows: varRows } = await db.query(
+      `SELECT pvg.product_id,
+              json_agg(
+                json_build_object(
+                  'id',       pvg.id,
+                  'name',     pvg.name,
+                  'required', pvg.required,
+                  'options', (
+                    SELECT COALESCE(json_agg(
+                      json_build_object(
+                        'id',        pvo.id,
+                        'name',      pvo.name,
+                        'price',     pvo.price,
+                        'available', pvo.available
+                      ) ORDER BY pvo.sort_order ASC, pvo.price ASC
+                    ), '[]'::json)
+                    FROM product_variation_options pvo
+                    WHERE pvo.group_id = pvg.id AND pvo.available = true
+                  )
+                ) ORDER BY pvg.sort_order ASC
+              ) AS variation_groups
+       FROM   product_variation_groups pvg
+       WHERE  pvg.product_id = ANY($1::uuid[])
+       GROUP  BY pvg.product_id`,
+      [productIds]
+    );
+    for (const row of varRows) {
+      variationGroupsByProduct[row.product_id] = row.variation_groups ?? [];
+    }
+  }
+
+  // Busca composição dos combos (itens fixos) para exibir "o que vem"
+  let comboItemsByProduct = {};
+  if (productIds.length > 0) {
+    const { rows: comboRows } = await db.query(
+      `SELECT pc.combo_product_id,
+              json_agg(
+                json_build_object('name', cp.name, 'qty', pc.qty)
+                ORDER BY cp.name
+              ) AS combo_items
+       FROM   product_combos pc
+       JOIN   products cp ON cp.id = pc.child_product_id
+       WHERE  pc.combo_product_id = ANY($1::uuid[])
+       GROUP  BY pc.combo_product_id`,
+      [productIds]
+    );
+    for (const row of comboRows) {
+      comboItemsByProduct[row.combo_product_id] = row.combo_items ?? [];
+    }
+  }
+
   const productsWithAddons = products.map(p => ({
     ...p,
-    addon_groups: addonGroupsByProduct[p.id] ?? [],
+    addon_groups:     addonGroupsByProduct[p.id]     ?? [],
+    variation_groups: variationGroupsByProduct[p.id] ?? [],
+    combo_items:      comboItemsByProduct[p.id]      ?? [],
   }));
 
   const featured = productsWithAddons.filter(p => p.featured).slice(0, 8);

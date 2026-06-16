@@ -1,20 +1,23 @@
 /**
- * ProductModal — modal premium de detalhe de produto para o cardápio digital.
- * Abre deslizando de baixo para cima (mobile-first), com foto grande,
- * selos de confiança, seletor de quantidade e botão fixo de adicionar.
+ * ProductModal — modal de montagem de produto para o cardápio digital.
+ * Abre deslizando de baixo para cima (mobile-first).
  *
  * Props:
- *   product     – objeto do produto (do menu público)
+ *   product     – objeto do produto (menu público — inclui variation_groups, combo_items, addon_groups)
  *   cart        – estado atual do carrinho
  *   badgeConfig – menuData.badge_config (nomes personalizados de selos)
  *   onClose     – fecha sem adicionar
- *   onAdd       – (product, qty) => void — chamado ao confirmar adição
+ *   onAdd       – (product, qty, extra) => void
+ *                 extra = { variationOptionIds, variationPrice, notes }
+ *
+ * E1: seleção de tamanho/variação, exibição de composição de combo, campo de observação,
+ *     total ao vivo. Addons continuam via AddonPicker no CustomerApp (menor risco).
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-// ── Helpers (autocontidos para não criar dependência circular) ─────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 const fmtBRL = (n) => `R$ ${parseFloat(n ?? 0).toFixed(2).replace('.', ',')}`;
 
@@ -82,34 +85,70 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
   const [qty, setQty]   = useState(inCart?.qty ?? 1);
   const [added, setAdded] = useState(false);
 
-  const price     = parseFloat(product.sale_price ?? 0);
+  // E1: variação e observação
+  // selectedVars: { [groupId]: optionId }
+  const [selectedVars, setSelectedVars] = useState({});
+  const [notes, setNotes] = useState('');
+
+  const basePrice = parseFloat(product.sale_price ?? 0);
   const isKg      = product.sale_type === 'kg';
   const hasAddons = (product.addon_groups ?? []).length > 0;
-  const total     = price * qty;
+  const varGroups = product.variation_groups ?? [];
+  const comboItems = product.combo_items ?? [];
+  const hasVariation = varGroups.length > 0;
+  const hasComboItems = comboItems.length > 0;
   const imgUrl    = product.image_url;
   const grad      = getCategoryGradient(product.category_name ?? product.name);
   const emoji     = getProductEmoji(product.display_name ?? product.name);
   const badgeLabel = product.badge ? (badgeConfig[product.badge] ?? BADGE_DEFAULTS[product.badge]) : null;
   const badgeCls   = product.badge ? (BADGE_CLS[product.badge] ?? 'bg-amber-400 text-zinc-900') : null;
 
+  // Preço efetivo: se há variação e o usuário escolheu, usar o preço da opção (substitui base)
+  const effectivePrice = useMemo(() => {
+    if (!hasVariation) return basePrice;
+    // Pegar a primeira opção selecionada (E1: grupos independentes — cada um contribui independente)
+    // Para grupos de tamanho (radio), o preço É o preço da opção escolhida (não soma)
+    const firstGroup = varGroups[0];
+    if (!firstGroup) return basePrice;
+    const chosen = selectedVars[firstGroup.id];
+    if (!chosen) return basePrice;
+    const opt = firstGroup.options?.find(o => o.id === chosen);
+    return opt ? parseFloat(opt.price) : basePrice;
+  }, [hasVariation, varGroups, selectedVars, basePrice]);
+
+  const total = effectivePrice * qty;
+
+  // Validação: grupos required precisam de seleção para habilitar o botão
+  const requiredGroups = varGroups.filter(g => g.required);
+  const isValid = requiredGroups.every(g => !!selectedVars[g.id]);
+
   // Sincroniza qty com o carrinho se o produto já estava lá ao abrir
   useEffect(() => {
     if (inCart?.qty && !added) setQty(inCart.qty);
-  }, [inCart?.qty]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inCart?.qty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dec = () => setQty(q => Math.max(1, q - 1));
   const inc = () => setQty(q => q + 1);
 
+  const selectVar = useCallback((groupId, optionId) => {
+    setSelectedVars(prev => ({ ...prev, [groupId]: optionId }));
+  }, []);
+
   const handleAddClick = useCallback(() => {
-    if (added) return;
+    if (added || !isValid) return;
     setAdded(true);
-    onAdd(product, qty);
-    // Se tem addons, o parent fecha o modal e abre o AddonPicker imediatamente.
-    // Se não tem addons, esperamos o feedback visual antes de fechar.
+
+    const variationOptionIds = Object.values(selectedVars).filter(Boolean);
+    onAdd(product, qty, {
+      variationOptionIds: variationOptionIds.length > 0 ? variationOptionIds : undefined,
+      variationPrice: hasVariation && variationOptionIds.length > 0 ? effectivePrice : undefined,
+      notes: notes.trim() || undefined,
+    });
+
     if (!hasAddons) {
       setTimeout(onClose, 1050);
     }
-  }, [added, product, qty, hasAddons, onAdd, onClose]);
+  }, [added, isValid, selectedVars, product, qty, hasVariation, effectivePrice, notes, hasAddons, onAdd, onClose]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center">
@@ -157,13 +196,9 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
             </div>
           )}
 
-          {/* Fade inferior para transição suave ao conteúdo */}
           <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-zinc-950/50 to-transparent pointer-events-none" />
-
-          {/* Brilho dourado sutil na borda */}
           <div className="absolute inset-0 rounded-2xl ring-1 ring-amber-400/15 pointer-events-none" />
 
-          {/* Botão X */}
           <button
             onClick={onClose}
             className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/75 transition-colors"
@@ -174,7 +209,6 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
             </svg>
           </button>
 
-          {/* Badge do produto */}
           {badgeLabel && (
             <div className="absolute top-3 left-3">
               <span className={`text-[11px] font-black px-2.5 py-1 rounded-full shadow-lg ${badgeCls}`}>
@@ -193,9 +227,26 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
           </h2>
 
           {/* Descrição */}
-          <p className="text-sm text-zinc-400 mt-2 leading-relaxed">
-            {product.description || 'Clique em adicionar para incluir no carrinho.'}
-          </p>
+          {product.description && (
+            <p className="text-sm text-zinc-400 mt-2 leading-relaxed">
+              {product.description}
+            </p>
+          )}
+
+          {/* O que vem — composição do combo */}
+          {hasComboItems && (
+            <div className="mt-3 p-3 rounded-xl bg-white/[0.04] border border-white/[0.08]">
+              <p className="text-xs font-bold text-amber-400/80 uppercase tracking-wider mb-2">O que vem</p>
+              <ul className="space-y-1">
+                {comboItems.map((ci, i) => (
+                  <li key={i} className="flex items-center gap-2 text-sm text-zinc-300">
+                    <span className="text-zinc-600">•</span>
+                    <span>{parseFloat(ci.qty) !== 1 ? `${parseFloat(ci.qty)}× ` : ''}{ci.name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Selos de confiança */}
           <div className="flex flex-wrap gap-1.5 mt-3.5">
@@ -210,14 +261,60 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
             ))}
           </div>
 
-          {/* Preço */}
+          {/* ── E1: Seleção de tamanho/variação ── */}
+          {varGroups.map(group => (
+            <div key={group.id} className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-bold text-white">{group.name}</p>
+                {group.required
+                  ? <span className="text-[10px] font-black uppercase bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full">Obrigatório</span>
+                  : <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Opcional</span>
+                }
+              </div>
+              <div className="space-y-2">
+                {(group.options ?? []).map(opt => {
+                  const isSelected = selectedVars[group.id] === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => selectVar(group.id, opt.id)}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-left ${
+                        isSelected
+                          ? 'bg-amber-400/10 border-amber-400/50 ring-1 ring-amber-400/30'
+                          : 'bg-white/[0.03] border-white/[0.08] hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          isSelected ? 'border-amber-400 bg-amber-400' : 'border-zinc-600'
+                        }`}>
+                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-zinc-900" />}
+                        </div>
+                        <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-zinc-300'}`}>
+                          {opt.name}
+                        </span>
+                      </div>
+                      <span className={`text-sm font-black tabular-nums ${isSelected ? 'text-amber-400' : 'text-zinc-400'}`}>
+                        {fmtBRL(opt.price)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {group.required && !selectedVars[group.id] && (
+                <p className="text-xs text-amber-400/70 mt-1.5 pl-1">Escolha uma opção para continuar</p>
+              )}
+            </div>
+          ))}
+
+          {/* Preço dinâmico */}
           <div className="mt-5 flex items-baseline gap-2">
             <span className="text-3xl font-black text-amber-400 tabular-nums">
-              {fmtBRL(isKg ? price : total)}
+              {fmtBRL(isKg ? effectivePrice : total)}
             </span>
             {isKg
               ? <span className="text-sm text-zinc-500 font-semibold">/kg</span>
-              : qty > 1 && <span className="text-sm text-zinc-500">({fmtBRL(price)} cada)</span>
+              : qty > 1 && <span className="text-sm text-zinc-500">({fmtBRL(effectivePrice)} cada)</span>
             }
           </div>
 
@@ -246,7 +343,21 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
             </div>
           )}
 
-          {/* Aviso de personalização */}
+          {/* ── E1: Observação ── */}
+          <div className="mt-4">
+            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block mb-1.5">
+              Observação <span className="font-normal normal-case text-zinc-600">(opcional)</span>
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Ex: sem cebola, pouco sal, ponto da carne..."
+              rows={2}
+              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 focus:ring-1 focus:ring-amber-400/20 resize-none"
+            />
+          </div>
+
+          {/* Aviso de personalização de addons */}
           {hasAddons && (
             <div className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-400/[0.07] border border-amber-400/20">
               <span>🍟</span>
@@ -256,7 +367,6 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
             </div>
           )}
 
-          {/* Espaço extra para o botão fixo não cobrir conteúdo */}
           <div className="h-4" />
         </div>
 
@@ -278,14 +388,19 @@ export default function ProductModal({ product, cart, badgeConfig = {}, onClose,
                 key="addBtn"
                 whileTap={{ scale: 0.97 }}
                 onClick={handleAddClick}
-                className="w-full py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-zinc-900 font-black text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-400/25 transition-colors active:scale-95"
+                disabled={!isValid}
+                className={`w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 shadow-lg transition-colors active:scale-95 ${
+                  isValid
+                    ? 'bg-amber-400 hover:bg-amber-300 text-zinc-900 shadow-amber-400/25'
+                    : 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
+                }`}
               >
                 <span className="text-xl leading-none">+</span>
                 <span>
                   {isKg
                     ? 'Adicionar ao carrinho'
                     : hasAddons
-                      ? `Adicionar · ${fmtBRL(price)}`
+                      ? `Adicionar · ${fmtBRL(effectivePrice)}`
                       : `Adicionar${qty > 1 ? ` ${qty}×` : ''} · ${fmtBRL(total)}`
                   }
                 </span>
