@@ -2001,6 +2001,7 @@ export default function NewOrderModal({ onClose, onCreated }) {
         productId:   product.id,
         productName: product.name + varLabel,
         ...(product.sale_type === 'kg' ? { weightKg: parseFloat(weightKg) } : { quantity: qty }),
+        ...(variation?.length ? { variationOptionIds: variation.map(v => v.optionId) } : {}),
         ...(varPrice != null ? { unitPrice: varPrice } : {}),
         ...(addons?.length ? { addons } : {}),
         ...(choices?.length ? { choices } : {}),

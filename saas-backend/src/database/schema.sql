@@ -925,8 +925,11 @@ ON CONFLICT (slug) DO NOTHING;
 -- ── CMV (Custo de Mercadoria Vendida) ─────────────────────────────
 -- Snapshot do custo no momento da venda — permite cálculo histórico preciso
 -- mesmo que cost_price do produto mude depois.
-ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost  DECIMAL(10,2) NOT NULL DEFAULT 0;
-ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost       DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_cost      DECIMAL(10,2) NOT NULL DEFAULT 0;
+-- 011: snapshot da variação (tamanho) escolhida — ex. "Média", "Grande"
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS variation_label VARCHAR(120);
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS variation_price NUMERIC(10,2);
 
 -- Backfill: atualiza itens existentes com o custo atual do produto
 UPDATE order_items oi

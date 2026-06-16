@@ -439,10 +439,16 @@ export function printKitchen(order, target = null) {
   const tipoLabel  = isDelivery ? 'ENTREGA' : 'RETIRADA';
 
   const itemRows = items.map((item) => {
-    const qty  = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}`;
-    const name = item.productName ?? item.product_name ?? '';
-    const note = item.notes
+    const qty      = item.weightKg ? `${item.weightKg}kg` : `${item.quantity}`;
+    const name     = item.productName ?? item.product_name ?? '';
+    const varLabel = item.variation_label ?? item.variationLabel ?? null;
+    const note     = item.notes
       ? `<div class="item-obs">↳ ${item.notes}</div>` : '';
+
+    // Badge de variação (tamanho) — exibido com destaque para erro ser impossível
+    const varBadge = varLabel
+      ? `<div class="item-variation">${varLabel.toUpperCase()}</div>`
+      : '';
 
     // Choices do combo — cozinha precisa saber o sabor/tipo escolhido
     const choiceRows = (item.choices ?? []).map(c => {
@@ -463,6 +469,7 @@ export function printKitchen(order, target = null) {
           <span class="item-qty">${qty}x</span>
           <span class="item-name">${name}</span>
         </div>
+        ${varBadge}
         ${note}
         ${choiceRows}
         ${addonRows}
@@ -595,6 +602,17 @@ export function printKitchen(order, target = null) {
       font-style: italic;
       word-break: break-word;
       overflow-wrap: break-word;
+    }
+    /* Variação (tamanho) — badge em destaque para erro ser impossível de passar */
+    .item-variation {
+      font-size: ${is80 ? 18 : 13}px;
+      font-weight: 900;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      border: ${is80 ? 2 : 1}px solid #000;
+      display: inline-block;
+      padding: ${is80 ? '2px 8px' : '1px 5px'};
+      margin-top: ${is80 ? 3 : 2}px;
     }
 
     /* ── Observação do pedido ── */

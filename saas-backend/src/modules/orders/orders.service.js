@@ -159,6 +159,8 @@ const createOrder = async (tenantId, {
   loyaltyCustomerId = null, cashbackUsed = 0, tableNumber = null,
   deliveryLat = null, deliveryLng = null,
   cashChangeFor = null,
+  // Canal manual (atendente) enforça grupos required; online/externo preserva comportamento anterior.
+  enforceRequiredVariation = false,
 }) => {
   if (!items?.length) throw new AppError('O pedido deve ter pelo menos 1 item.', 400);
 
@@ -184,6 +186,32 @@ const createOrder = async (tenantId, {
       [productIds, tenantId]
     );
     const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+
+    // Carrega grupos de variação e opções escolhidas — servidor é a fonte de verdade de preço
+    const allVariationOptionIds = items.flatMap(i => i.variationOptionIds ?? []).filter(Boolean);
+    const variationOptionMap = {};  // optionId → { id, name, price, available, group_id, product_id }
+    const varGroupsByProduct = {}; // productId → [{ id, name, required }]
+
+    const { rows: varGroups } = await client.query(
+      `SELECT id, product_id, name, required
+       FROM product_variation_groups
+       WHERE product_id = ANY($1::uuid[]) AND tenant_id = $2`,
+      [productIds, tenantId]
+    );
+    for (const g of varGroups) {
+      if (!varGroupsByProduct[g.product_id]) varGroupsByProduct[g.product_id] = [];
+      varGroupsByProduct[g.product_id].push(g);
+    }
+    if (allVariationOptionIds.length > 0) {
+      const { rows: varOpts } = await client.query(
+        `SELECT pvo.id, pvo.name, pvo.price, pvo.available, pvo.group_id, pvg.product_id
+         FROM product_variation_options pvo
+         JOIN product_variation_groups pvg ON pvg.id = pvo.group_id
+         WHERE pvo.id = ANY($1::uuid[]) AND pvo.tenant_id = $2`,
+        [allVariationOptionIds, tenantId]
+      );
+      for (const opt of varOpts) variationOptionMap[opt.id] = opt;
+    }
 
     // D2: valida deliveryFee contra delivery_zones do tenant (canal online/delivery)
     // Se o bairro tem zona configurada e a taxa enviada diverge mais de R$0,50 → corrige
@@ -218,17 +246,53 @@ const createOrder = async (tenantId, {
       if (!product) throw new AppError(`Produto ${item.productId} nao encontrado.`, 404);
       if (!product.active) throw new AppError(`Produto "${product.name}" esta inativo.`, 400);
 
+      // Resolve variação — servidor valida e define o preço (cliente não é confiável)
+      let variationLabel = null;
+      let variationPrice = null;
+      const varOptionIds   = item.variationOptionIds ?? [];
+      const productVarGroups = varGroupsByProduct[item.productId] ?? [];
+
+      for (const optId of varOptionIds) {
+        const opt = variationOptionMap[optId];
+        if (!opt || !opt.available)
+          throw new AppError(`Opção de variação inválida ou indisponível.`, 400);
+        if (String(opt.product_id) !== String(item.productId))
+          throw new AppError(`Opção de variação não pertence ao produto "${product.name}".`, 400);
+      }
+      if (varOptionIds.length > 0) {
+        const resolvedOpts = varOptionIds.map(id => variationOptionMap[id]);
+        variationLabel = resolvedOpts.map(o => o.name).join(', ');
+        variationPrice = resolvedOpts.reduce((s, o) => s + parseFloat(o.price), 0);
+      }
+
+      // Grupo required sem escolha → rejeita apenas no canal manual.
+      // Online/externo preserva comportamento anterior (captura de variação via UI vem na Fase E1).
+      if (enforceRequiredVariation) {
+        const requiredGroups = productVarGroups.filter(g => g.required);
+        if (requiredGroups.length > 0) {
+          const chosenGroupIds = new Set(
+            varOptionIds.map(id => variationOptionMap[id]?.group_id).filter(Boolean)
+          );
+          for (const rg of requiredGroups) {
+            if (!chosenGroupIds.has(rg.id))
+              throw new AppError(`Produto "${product.name}" exige a escolha de "${rg.name}".`, 400);
+          }
+        }
+      }
+
+      const effectiveUnitPrice = variationPrice !== null ? variationPrice : parseFloat(product.sale_price);
+
       let qty, lineTotal;
       if (product.sale_type === 'kg') {
         if (!item.weightKg || item.weightKg <= 0)
           throw new AppError(`Produto "${product.name}" e vendido por kg. Informe weightKg.`, 400);
         qty       = item.weightKg;
-        lineTotal = parseFloat(product.sale_price) * item.weightKg;
+        lineTotal = effectiveUnitPrice * item.weightKg;
       } else {
         if (!item.quantity || item.quantity <= 0)
           throw new AppError(`Produto "${product.name}": quantity invalido.`, 400);
         qty       = item.quantity;
-        lineTotal = parseFloat(product.sale_price) * item.quantity;
+        lineTotal = effectiveUnitPrice * item.quantity;
       }
 
       // Soma preço dos complementos escolhidos
@@ -239,7 +303,7 @@ const createOrder = async (tenantId, {
       lineTotal += addonsTotal;
 
       orderTotal += lineTotal;
-      resolvedItems.push({ ...item, product, qty, lineTotal });
+      resolvedItems.push({ ...item, product, qty, lineTotal, variationLabel, variationPrice });
     }
 
     // Pré-carrega filhos de todos os combos presentes no pedido.
@@ -362,16 +426,22 @@ const createOrder = async (tenantId, {
 
       const soldQty   = item.product.sale_type === 'kg' ? (item.weightKg || 0) : (item.quantity || 1);
       const orderItem = await Order.createItem({
-        orderId:     order.id,
-        productId:   item.product.id,
-        productName: item.product.name,
-        quantity:    item.product.sale_type === 'unit' ? item.quantity : 1,
-        weightKg:    item.product.sale_type === 'kg'   ? item.weightKg : null,
-        unitPrice:   parseFloat(item.product.sale_price),
-        total:       parseFloat(item.lineTotal.toFixed(2)),
-        notes:       item.notes,
+        orderId:        order.id,
+        productId:      item.product.id,
+        productName:    item.variationLabel
+          ? `${item.product.name} (${item.variationLabel})`
+          : item.product.name,
+        quantity:       item.product.sale_type === 'unit' ? item.quantity : 1,
+        weightKg:       item.product.sale_type === 'kg'   ? item.weightKg : null,
+        unitPrice:      item.variationPrice !== null
+          ? item.variationPrice
+          : parseFloat(item.product.sale_price),
+        total:          parseFloat(item.lineTotal.toFixed(2)),
+        notes:          item.notes,
         unitCost,
-        totalCost:   parseFloat((unitCost * soldQty).toFixed(2)),
+        totalCost:      parseFloat((unitCost * soldQty).toFixed(2)),
+        variationLabel: item.variationLabel,
+        variationPrice: item.variationPrice,
       }, client);
 
       // Grava escolhas dos grupos de opção (necessário para reverter insumos no cancelamento)
