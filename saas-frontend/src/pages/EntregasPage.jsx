@@ -361,6 +361,7 @@ export default function EntregasPage() {
   const [orders,         setOrders]         = useState([]);
   const [drivers,        setDrivers]        = useState([]);
   const [loading,        setLoading]        = useState(true);
+  const [dayOffset,      setDayOffset]      = useState(0);      // 0 = hoje, 1 = ontem
   const [driverPos,      setDriverPos]      = useState(null);   // [lng, lat]
   const [geoError,       setGeoError]       = useState(null);
   // D6: coordenadas do restaurante — substitui CITY_FALLBACK hardcoded
@@ -380,8 +381,10 @@ export default function EntregasPage() {
   // ── Load delivery orders ──────────────────────────────────
   const loadOrders = useCallback(async () => {
     try {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const { data } = await getOrders({ limit: 100, startDate: today.toISOString() });
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - dayOffset);
+      const end = new Date(start); end.setHours(23, 59, 59, 999);
+      const { data } = await getOrders({ limit: 200, startDate: start.toISOString(), endDate: end.toISOString() });
       const deliveries = (data.data ?? [])
         .filter((o) => (o.delivery_type ?? o.deliveryType) === 'delivery' && o.status !== 'cancelled')
         .map(normOrder);
@@ -395,7 +398,7 @@ export default function EntregasPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  useEffect(() => { loadOrders(); }, [loadOrders, dayOffset]);
 
   // Poll every 30s for new ready orders
   useEffect(() => {
@@ -561,6 +564,22 @@ export default function EntregasPage() {
             {activeDeliveries.length} pendente{activeDeliveries.length !== 1 ? 's' : ''}
             {delivered.length > 0 && ` · ${delivered.length} entregue${delivered.length !== 1 ? 's' : ''}`}
           </p>
+        </div>
+        <div className="flex gap-1">
+          {[{ label: 'Hoje', offset: 0 }, { label: 'Ontem', offset: 1 }].map(({ label, offset }) => (
+            <button
+              key={offset}
+              onClick={() => setDayOffset(offset)}
+              className={[
+                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors',
+                dayOffset === offset
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {geoError && (
           <span className="text-xs text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded-lg">
