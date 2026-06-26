@@ -396,7 +396,7 @@ export default function EntregasPage() {
       });
     } catch { /* non-fatal */ }
     finally { setLoading(false); }
-  }, []);
+  }, [dayOffset]);
 
   useEffect(() => { loadOrders(); }, [loadOrders, dayOffset]);
 
