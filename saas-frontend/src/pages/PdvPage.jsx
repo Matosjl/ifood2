@@ -571,70 +571,6 @@ export default function PdvPage({ onNavigate }) {
   //   • Se foco fora de qualquer input: acumula buffer e processa no Enter
   //   • Local first: products[] por barcode exato
   //   • Fallback: GET /api/products/barcode/:code se não encontrado localmente
-  //   • Não dispara múltiplas buscas para o mesmo scan (guard de scanning)
-  const scanning = useRef(false);
-  useEffect(() => {
-    const onKey = async (e) => {
-      const active     = document.activeElement;
-      const tag        = active?.tagName?.toLowerCase();
-      const isEditable = (tag === 'input' || tag === 'textarea' || tag === 'select');
-      const isSearch   = active === searchRef.current;
-
-      if (isEditable && !isSearch) return;
-
-      if (e.key === 'Enter') {
-        const code = isSearch
-          ? (searchRef.current?.value ?? '').trim()
-          : scanBuffer.current.trim();
-
-        scanBuffer.current = '';
-        clearTimeout(scanTimer.current);
-
-        if (code.length < 2) return;
-        if (scanning.current) return; // evita disparo duplo
-        scanning.current = true;
-
-        try {
-          // 1. Busca local por barcode exato
-          let found = products.find((p) => p.barcode && p.barcode.trim() === code);
-
-          // 2. Fallback no backend se não encontrado localmente
-          if (!found) {
-            try {
-              const { data } = await getByBarcode(code);
-              found = data?.data ?? null;
-            } catch { /* produto não existe */ }
-          }
-
-          if (found) {
-            e.preventDefault();
-            handleAddProduct(found);
-            if (isSearch) setSearch('');
-            setToast({ msg: `Adicionado: ${found.name}`, type: 'success' });
-          } else {
-            setToast({ msg: `Produto não encontrado para o código: ${code}`, type: 'error' });
-          }
-        } finally {
-          scanning.current = false;
-        }
-        return;
-      }
-
-      // Acumula chars no buffer (apenas fora do campo de busca)
-      if (!isSearch && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        scanBuffer.current += e.key;
-        clearTimeout(scanTimer.current);
-        scanTimer.current = setTimeout(() => { scanBuffer.current = ''; }, 300);
-      }
-    };
-
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      clearTimeout(scanTimer.current);
-    };
-  }, [products, handleAddProduct]);
-
   // ── Derived / computed ────────────────────────────────────
   const cartEntries = Object.values(cart);
   const subtotal = cartTotal(cart);
@@ -718,6 +654,68 @@ export default function PdvPage({ onNavigate }) {
       return { ...prev, [product.id]: { product, qty: 1, weightKg: '', addons: [], notes: '', variation: null, choices: null } };
     });
   }, []);
+
+  // ── Scanner global de barcode ─────────────────────────────
+  // Deve ficar após handleAddProduct (evita TDZ no dep array em produção).
+  const scanning = useRef(false);
+  useEffect(() => {
+    const onKey = async (e) => {
+      const active     = document.activeElement;
+      const tag        = active?.tagName?.toLowerCase();
+      const isEditable = (tag === 'input' || tag === 'textarea' || tag === 'select');
+      const isSearch   = active === searchRef.current;
+
+      if (isEditable && !isSearch) return;
+
+      if (e.key === 'Enter') {
+        const code = isSearch
+          ? (searchRef.current?.value ?? '').trim()
+          : scanBuffer.current.trim();
+
+        scanBuffer.current = '';
+        clearTimeout(scanTimer.current);
+
+        if (code.length < 2) return;
+        if (scanning.current) return;
+        scanning.current = true;
+
+        try {
+          let found = products.find((p) => p.barcode && p.barcode.trim() === code);
+
+          if (!found) {
+            try {
+              const { data } = await getByBarcode(code);
+              found = data?.data ?? null;
+            } catch { /* produto não existe */ }
+          }
+
+          if (found) {
+            e.preventDefault();
+            handleAddProduct(found);
+            if (isSearch) setSearch('');
+            setToast({ msg: `Adicionado: ${found.name}`, type: 'success' });
+          } else {
+            setToast({ msg: `Produto não encontrado para o código: ${code}`, type: 'error' });
+          }
+        } finally {
+          scanning.current = false;
+        }
+        return;
+      }
+
+      if (!isSearch && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        scanBuffer.current += e.key;
+        clearTimeout(scanTimer.current);
+        scanTimer.current = setTimeout(() => { scanBuffer.current = ''; }, 300);
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      clearTimeout(scanTimer.current);
+    };
+  }, [products, handleAddProduct]);
 
   // Confirm variation
   const confirmVariation = () => {
