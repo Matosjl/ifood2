@@ -115,8 +115,20 @@ function NfceButton({ order, onUpdate }) {
 function DetailRow({ order, onNfceUpdate }) {
   return (
     <tr>
-      <td colSpan={8} className="px-4 pb-3">
+      <td colSpan={9} className="px-4 pb-3">
         <div className="bg-gray-800/60 rounded-xl p-3 border border-white/[0.05]">
+          {/* Motivo cancelamento */}
+          {order.status === 'cancelled' && (
+            <div className="mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+              <p className="text-xs font-semibold text-red-400 mb-0.5">Cancelado</p>
+              {order.cancel_reason
+                ? <p className="text-sm text-red-300">Motivo: {order.cancel_reason}</p>
+                : <p className="text-xs text-gray-600 italic">Motivo não registrado</p>}
+              {order.cancelled_at && (
+                <p className="text-xs text-gray-500 mt-0.5">{fmtDate(order.cancelled_at)}</p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             {/* Items */}
             <div>
@@ -137,7 +149,28 @@ function DetailRow({ order, onNfceUpdate }) {
               {order.customer_name  && <p className="text-gray-300"><span className="text-gray-500">Cliente: </span>{order.customer_name}</p>}
               {order.customer_phone && <p className="text-gray-300"><span className="text-gray-500">Tel: </span>{order.customer_phone}</p>}
               {order.notes          && <p className="text-gray-300"><span className="text-gray-500">Obs: </span>{order.notes}</p>}
-              <p className="text-gray-400 text-xs mt-2">Criado: {fmtDate(order.created_at)}</p>
+              {order.adjustment_value > 0 && (
+                <p className="text-gray-300">
+                  <span className="text-gray-500">{order.adjustment_type === 'discount' ? 'Desconto' : 'Acréscimo'}: </span>
+                  {fmtBRL(order.adjustment_value)}
+                  {order.adjustment_reason && <span className="text-gray-500"> — {order.adjustment_reason}</span>}
+                </p>
+              )}
+              <p className="text-gray-400 text-xs mt-2">
+                Criado: {fmtDate(order.created_at)}
+                {order.created_by_name && <span className="text-gray-500"> por {order.created_by_name}</span>}
+              </p>
+              {order.cancelled_by_name && (
+                <p className="text-gray-400 text-xs">
+                  Cancelado por: <span className="text-red-400">{order.cancelled_by_name}</span>
+                </p>
+              )}
+              {order.last_edited_by_name && (
+                <p className="text-gray-400 text-xs">
+                  Editado por: <span className="text-blue-400">{order.last_edited_by_name}</span>
+                  {order.last_edited_at && <span className="text-gray-500"> em {fmtDate(order.last_edited_at)}</span>}
+                </p>
+              )}
               <div className="flex gap-2 mt-2">
                 <button
                   onClick={() => printOrder({
@@ -196,6 +229,7 @@ export default function HistoricoPage() {
   // Filters
   const [status,    setStatus]    = useState('');
   const [channel,   setChannel]   = useState('');
+  const [search,    setSearch]    = useState('');
   const [startDate, setStartDate] = useState(weekAgoISO());
   const [endDate,   setEndDate]   = useState(todayISO());
 
@@ -206,6 +240,7 @@ export default function HistoricoPage() {
         page: pg, limit: PAGE_SIZE,
         ...(status    && { status }),
         ...(channel   && { channel }),
+        ...(search    && { search }),
         ...(startDate && { startDate }),
         ...(endDate   && { endDate }),
       };
@@ -219,7 +254,7 @@ export default function HistoricoPage() {
     } finally {
       setLoading(false);
     }
-  }, [status, channel, startDate, endDate]);
+  }, [status, channel, search, startDate, endDate]);
 
   // Reload when filters change
   useEffect(() => { load(1, false); }, [load]);
@@ -278,12 +313,20 @@ export default function HistoricoPage() {
             ))}
           </select>
 
-          {/* Channel */}
+          {/* Canal */}
           <input
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
             placeholder="Canal (ifood, mesa…)"
-            className="input text-sm py-1.5 w-40"
+            className="input text-sm py-1.5 w-36"
+          />
+
+          {/* Busca por cliente/telefone */}
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cliente ou telefone…"
+            className="input text-sm py-1.5 w-44"
           />
 
           {/* Summary */}
@@ -314,11 +357,12 @@ export default function HistoricoPage() {
                 <tr className="text-left text-xs text-gray-500 border-b border-white/[0.06]">
                   <th className="pb-2.5 pr-3 font-semibold w-6"></th>
                   <th className="pb-2.5 pr-4 font-semibold">#</th>
-                  <th className="pb-2.5 pr-4 font-semibold">Canal</th>
+                  <th className="pb-2.5 pr-4 font-semibold hidden lg:table-cell">Canal</th>
                   <th className="pb-2.5 pr-4 font-semibold">Cliente</th>
-                  <th className="pb-2.5 pr-4 font-semibold">Itens</th>
+                  <th className="pb-2.5 pr-4 font-semibold hidden md:table-cell">Telefone</th>
                   <th className="pb-2.5 pr-4 font-semibold text-right">Total</th>
                   <th className="pb-2.5 pr-4 font-semibold">Status</th>
+                  <th className="pb-2.5 pr-4 font-semibold hidden md:table-cell">Pagamento</th>
                   <th className="pb-2.5 font-semibold">Data</th>
                 </tr>
               </thead>
@@ -342,9 +386,9 @@ export default function HistoricoPage() {
                         </svg>
                       </td>
                       <td className="py-2.5 pr-4 font-black text-white tabular-nums">#{o.order_number}</td>
-                      <td className="py-2.5 pr-4 text-gray-400 capitalize">{o.channel ?? '—'}</td>
+                      <td className="py-2.5 pr-4 text-gray-400 capitalize hidden lg:table-cell">{o.channel ?? '—'}</td>
                       <td className="py-2.5 pr-4 text-gray-300">{o.customer_name || <span className="text-gray-600 italic">—</span>}</td>
-                      <td className="py-2.5 pr-4 text-gray-400">{(o.items ?? []).length} item{(o.items ?? []).length !== 1 ? 's' : ''}</td>
+                      <td className="py-2.5 pr-4 text-gray-500 text-xs hidden md:table-cell">{o.customer_phone || '—'}</td>
                       <td className={`py-2.5 pr-4 text-right font-semibold tabular-nums ${isRevenue ? 'text-green-400' : 'text-gray-500'}`}>
                         {fmtBRL(o.total)}
                       </td>
@@ -352,6 +396,14 @@ export default function HistoricoPage() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${meta.cls}`}>
                           {meta.label}
                         </span>
+                        {o.status === 'cancelled' && o.cancel_reason && (
+                          <p className="text-[10px] text-red-400/70 mt-0.5 truncate max-w-[120px]" title={o.cancel_reason}>
+                            {o.cancel_reason}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4 text-gray-500 text-xs hidden md:table-cell capitalize">
+                        {o.payment_method ?? '—'}
                       </td>
                       <td className="py-2.5 text-gray-500 text-xs tabular-nums whitespace-nowrap">
                         {fmtDate(o.created_at)}

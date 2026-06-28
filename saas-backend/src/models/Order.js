@@ -8,7 +8,7 @@ const STATUS_TRANSITIONS = {
   preparing:  ['ready',     'cancelled'],
   ready:      ['preparing', 'delivered', 'delivering', 'cancelled'], // delivery: saiu para entrega
   delivering: ['delivered', 'cancelled'],               // motoboy confirma entrega
-  delivered:  [],
+  delivered:  ['cancelled'],
   cancelled:  [],
 };
 
@@ -20,7 +20,7 @@ class Order {
    * @param {object} filters - { status, channel, startDate, endDate, page, limit }
    */
   static async findAll(tenantId, filters = {}, dbClient = db) {
-    const { status, channel, startDate, endDate, page = 1, limit = 50 } = filters;
+    const { status, channel, search, startDate, endDate, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
     const params = [tenantId];
     const conditions = ['o.tenant_id = $1'];
@@ -32,6 +32,10 @@ class Order {
     if (channel) {
       params.push(channel);
       conditions.push(`o.channel = $${params.length}`);
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(o.customer_name ILIKE $${params.length} OR o.customer_phone ILIKE $${params.length})`);
     }
     if (startDate) {
       params.push(startDate);
@@ -47,6 +51,15 @@ class Order {
     params.push(limit, offset);
     const { rows } = await dbClient.query(
       `SELECT o.*,
+              (SELECT name FROM users WHERE id = o.created_by)                AS created_by_name,
+              (SELECT name FROM users WHERE id = o.cancelled_by)              AS cancelled_by_name,
+              (SELECT u.name FROM order_audit_logs al
+               JOIN users u ON u.id = al.user_id
+               WHERE al.order_id = o.id AND al.action IN ('items_edited','adjustment_applied')
+               ORDER BY al.created_at DESC LIMIT 1)                          AS last_edited_by_name,
+              (SELECT al.created_at FROM order_audit_logs al
+               WHERE al.order_id = o.id AND al.action IN ('items_edited','adjustment_applied')
+               ORDER BY al.created_at DESC LIMIT 1)                          AS last_edited_at,
               json_agg(
                 json_build_object(
                   'id',              oi.id,
@@ -137,7 +150,19 @@ class Order {
                     WHERE oicc.order_item_id = oi.id
                   )
                 ) ORDER BY oi.line_no NULLS LAST, oi.id
-              ) FILTER (WHERE oi.id IS NOT NULL) AS items
+              ) FILTER (WHERE oi.id IS NOT NULL) AS items,
+              COALESCE(
+                (SELECT json_agg(json_build_object(
+                  'id',             op.id,
+                  'method',         op.method,
+                  'amount',         op.amount,
+                  'received_amount', op.received_amount,
+                  'change_amount',  op.change_amount,
+                  'created_at',     op.created_at
+                ) ORDER BY op.created_at),
+                '[]'::json)
+                FROM order_payments op WHERE op.order_id = o.id
+              ) AS payments
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id
        LEFT   JOIN products p   ON p.id = oi.product_id
@@ -177,7 +202,7 @@ class Order {
       channel, total, notes, deliveryType = 'pickup', paymentMethod = 'cash',
       deliveryFee = 0, neighborhood = null, initialStatus = 'pending', idempotencyKey = null,
       loyaltyCustomerId = null, cashbackEarned = 0, cashbackUsed = 0, tableNumber = null,
-      deliveryLat = null, deliveryLng = null, cashChangeFor = null },
+      deliveryLat = null, deliveryLng = null, cashChangeFor = null, createdBy = null },
     dbClient = db
   ) {
     const { rows } = await dbClient.query(
@@ -185,8 +210,8 @@ class Order {
          (tenant_id, order_number, customer_name, customer_phone, customer_address,
           channel, total, notes, delivery_type, payment_method, delivery_fee, neighborhood, status, idempotency_key,
           loyalty_customer_id, cashback_earned, cashback_used, table_number,
-          delivery_lat, delivery_lng, cash_change_for)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          delivery_lat, delivery_lng, cash_change_for, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING *`,
       [tenantId, orderNumber, customerName || null, customerPhone || null,
        customerAddress || null, channel || 'manual', total, notes || null,
@@ -198,7 +223,8 @@ class Order {
        tableNumber || null,
        deliveryLat  ? parseFloat(deliveryLat)  : null,
        deliveryLng  ? parseFloat(deliveryLng)  : null,
-       cashChangeFor ? parseFloat(cashChangeFor) : null]
+       cashChangeFor ? parseFloat(cashChangeFor) : null,
+       createdBy || null]
     );
     return rows[0];
   }

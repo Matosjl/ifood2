@@ -1088,6 +1088,9 @@ export default function CustomerApp({ slug }) {
     // D1: bloqueia submit sem taxa calculada (endereço digitado manualmente sem confirmar mapa)
     if (deliveryType === 'delivery' && deliveryFeeMap === null)
       return setCheckoutError('Confirme o endereço no mapa para calcular a taxa de entrega.');
+    // D1b: bloqueia se endereço confirmado mas fora de todos os raios de entrega
+    if (deliveryType === 'delivery' && outsideZone)
+      return setCheckoutError('Endereço fora da área de entrega. Escolha outro endereço ou fale com a loja.');
     if (cartEntries.length === 0) return setCheckoutError('Carrinho vazio.');
 
     // Valida peso para produtos por kg

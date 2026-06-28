@@ -33,6 +33,7 @@ import AvaliarPage       from './pages/AvaliarPage';
 import AvaliacoesPage    from './pages/AvaliacoesPage';
 import ReservasPage      from './pages/ReservasPage';
 import MesasPage         from './pages/MesasPage';
+import PdvPage           from './pages/PdvPage';
 import OfflineBanner     from './components/OfflineBanner';
 import TimelinePanel    from './components/TimelinePanel';
 
@@ -176,6 +177,7 @@ export default function App() {
             <PlansPage />
           ) : (
             <>
+              {page === 'pdv'        && <PdvPage onNavigate={setPage} />}
               {page === 'orders'     && <DashboardPage onNavigate={setPage} />}
               {page === 'kds'        && <KdsPage />}
               {page === 'mesas'      && <MesasPage />}

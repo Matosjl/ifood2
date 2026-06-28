@@ -9,8 +9,48 @@ const PAYMENT_LABELS = {
   debit:   'Cartão Débito',
   card:    'Cartão',
   voucher: 'Vale Refeição',
+  fiado:   'Fiado / A receber',
+  pending: 'A definir',
   other:   'Outro',
+  mixed:   'Pagamento dividido',
 };
+
+function buildPaymentBlock(order) {
+  const payments = order.payments ?? [];
+  const method   = order.paymentMethod ?? order.payment_method ?? 'cash';
+
+  if (payments.length > 1 || method === 'mixed') {
+    // Pagamento dividido: mostra cada linha com método e valor
+    const rows = payments.map((p) => {
+      const label  = PAYMENT_LABELS[p.method] ?? p.method;
+      const amount = parseFloat(p.amount || 0).toFixed(2);
+      let html = `<div class="pay-row"><span>${label}</span><span>R$ ${amount}</span></div>`;
+      if (p.method === 'cash' && p.received_amount) {
+        const received = parseFloat(p.received_amount).toFixed(2);
+        const change   = parseFloat(p.change_amount ?? 0);
+        html += `<div class="pay-sub">Recebido: R$ ${received}</div>`;
+        if (change > 0.005) html += `<div class="pay-sub">Troco: R$ ${change.toFixed(2)}</div>`;
+      }
+      if (p.method === 'fiado') {
+        html += `<div class="pay-sub">A receber do cliente</div>`;
+      }
+      return html;
+    }).join('');
+    return `<div class="pagamento-block"><p class="pay-title">Pagamentos:</p>${rows}</div>`;
+  }
+
+  // Pagamento único — usa payments[0] quando disponível (tem troco estruturado)
+  const p     = payments[0] ?? null;
+  const label = PAYMENT_LABELS[method] ?? method;
+  let html    = `<p class="pagamento">Pagamento: ${label}</p>`;
+  if (p && p.method === 'cash' && p.received_amount) {
+    const change = parseFloat(p.change_amount ?? 0);
+    if (change > 0.005) {
+      html += `<p class="pagamento">Troco: R$ ${change.toFixed(2)}</p>`;
+    }
+  }
+  return html;
+}
 
 function extractTroco(notes) {
   if (!notes) return null;
@@ -70,15 +110,19 @@ export function printOrder(order) {
   const date   = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const time   = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  const troco      = extractTroco(order.notes);
-  const cleanNotes = notesWithoutTroco(order.notes);
+  // Troco: usa dados estruturados de payments[] quando disponível,
+  // cai no fallback de extração das notes para pedidos legados.
+  const payments      = order.payments ?? [];
+  const hasCashPay    = payments.some((p) => p.method === 'cash' && p.received_amount);
+  const troco         = hasCashPay ? null : extractTroco(order.notes);
+  const cleanNotes    = notesWithoutTroco(order.notes);
   const delivType  = order.deliveryType ?? order.delivery_type ?? '';
   const isDelivery = delivType === 'delivery' ||
                      (parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0) > 0);
-  const neighborhood = order.neighborhood ?? null;
-  const address      = order.customerAddress ?? order.customer_address ?? '';
-  const payment      = PAYMENT_LABELS[order.paymentMethod ?? order.payment_method] ?? 'Dinheiro';
-  const deliveryFee  = parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0);
+  const neighborhood  = order.neighborhood ?? null;
+  const address       = order.customerAddress ?? order.customer_address ?? '';
+  const paymentHtml   = buildPaymentBlock(order);
+  const deliveryFee   = parseFloat(order.deliveryFee ?? order.delivery_fee ?? 0);
   const channel      = order.channel && order.channel !== 'manual'
     ? `<div class="channel">${order.channel.toUpperCase()}</div>` : '';
 
@@ -321,6 +365,30 @@ export function printOrder(order) {
       font-weight: bold;
       margin: 3px 0;
     }
+    .pagamento-block {
+      margin: 3px 0;
+    }
+    .pay-title {
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+    .pay-row {
+      display: table;
+      width: 100%;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .pay-row span { display: table-cell; }
+    .pay-row span:last-child { text-align: right; white-space: nowrap; }
+    .pay-sub {
+      font-size: 10px;
+      font-weight: bold;
+      padding-left: 8px;
+      margin-bottom: 1px;
+    }
     .obs-box {
       border: 1px dashed #000;
       padding: 3px 5px;
@@ -390,7 +458,7 @@ export function printOrder(order) {
     ${isDelivery && address      ? `<p class="endereco">${address}</p>` : ''}
   </div>
 
-  <p class="pagamento">Pagamento: ${payment}</p>
+  ${paymentHtml}
 
   <div class="hr-solid"></div>
   <p class="obrigado">Obrigado pela preferencia!</p>

@@ -125,13 +125,13 @@ const processors = {
    * cancel — Cancela pedido e devolve estoque se ja estava em producao.
    */
   async cancel(job) {
-    const { orderId, tenantId, cancelReason } = job.data;
+    const { orderId, tenantId, cancelReason, userId } = job.data;
     const meta = { jobId: job.id, orderId, tenantId };
 
     logger.info('Cancelando pedido', meta);
 
     return safe(async () => {
-      const order = await service.cancelOrder(orderId, tenantId, cancelReason ?? null);
+      const order = await service.cancelOrder(orderId, tenantId, cancelReason ?? null, userId ?? null);
 
       logger.info('Pedido cancelado e estoque devolvido', meta);
 

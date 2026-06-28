@@ -62,6 +62,12 @@ async function saveConfig(tenantId, appId) {
 }
 
 // ── Generate QR code for an order ────────────────────────────
+//
+// NOTA: Esta função gera uma cobrança pelo TOTAL do pedido via correlationID=orderId.
+// Para pedidos com pagamento dividido (payment_method='mixed'), o PIX dentro de um split
+// é tratado como confirmação manual pelo atendente — o operador verifica o PIX no celular
+// e confirma manualmente. NÃO chame esta função para cobrar apenas uma parcela do split.
+// Futuramente: suporte a correlationID=order_payment_id para rastrear parcelas individualmente.
 
 async function generatePixCharge(tenantId, orderId) {
   const appId = await getConfig(tenantId);
@@ -185,8 +191,13 @@ async function handleWebhook(rawBody, signature, webhookSecret) {
     params.push('confirmed');
   }
 
-  updates.push(`payment_method = $${params.length + 1}`);
-  params.push('pix');
+  // Não sobrescrever payment_method em pedidos com pagamento dividido (mixed).
+  // Para esses pedidos, o PIX era apenas uma das parcelas — a informação de split
+  // está em order_payments e não deve ser perdida.
+  if (order.payment_method !== 'mixed') {
+    updates.push(`payment_method = $${params.length + 1}`);
+    params.push('pix');
+  }
   updates.push(`paid_at = $${params.length + 1}`);
   params.push(now);
 

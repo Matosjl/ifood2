@@ -10,6 +10,31 @@ const { createIncident } = require('../incidents/incidents.service');
 
 const logger = createLogger('orders.deductForOrder');
 
+// ── Haversine (distância em km) — Guard D2 radius zones ────────
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R   = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a   = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// ── Audit log helper ───────────────────────────────────────────
+// Não-crítico: falha silenciosa para não bloquear operação principal.
+const writeAuditLog = async (tenantId, orderId, userId, action, changes) => {
+  try {
+    await db.query(
+      `INSERT INTO order_audit_logs (tenant_id, order_id, user_id, action, changes)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tenantId, orderId, userId || null, action, JSON.stringify(changes)]
+    );
+  } catch (err) {
+    console.error('[audit_log] falha ao registrar:', err.message);
+  }
+};
+
 // ── Cashback helpers (compartilhados com public.controller) ───
 
 /** Normaliza telefone: mantém apenas dígitos */
@@ -152,6 +177,8 @@ const getOrder = async (id, tenantId) => {
  *  1. Verificacao pre-transacao (fast path — evita trabalho redundante)
  *  2. Restricao UNIQUE no DB (captura requisicoes concorrentes com mesmo key)
  */
+const VALID_PAYMENT_METHODS = ['cash', 'pix', 'credit', 'debit', 'fiado', 'voucher', 'pending', 'other', 'mixed'];
+
 const createOrder = async (tenantId, {
   customerName, customerPhone, customerAddress,
   channel = 'manual', notes, items, deliveryType = 'pickup', paymentMethod = 'cash',
@@ -159,6 +186,16 @@ const createOrder = async (tenantId, {
   loyaltyCustomerId = null, cashbackUsed = 0, tableNumber = null,
   deliveryLat = null, deliveryLng = null,
   cashChangeFor = null,
+  // Desconto aplicado pelo operador no PDV
+  adjustmentType = null, adjustmentValue = 0,
+  // Fiado legado (pagamento único — mantido para compatibilidade)
+  fiadoClienteId = null,
+  // Pagamento dividido: array de métodos/valores (PDV split payment)
+  // Cada item: { method, amount, received_amount?, change_amount?, fiado_cliente_id? }
+  payments = null,
+  // Contexto do operador (injetados pelo controller, não vêm do cliente)
+  userId = null,
+  cashRegisterId = null,
   // Canal manual (atendente) enforça grupos required; online/externo preserva comportamento anterior.
   enforceRequiredVariation = false,
 }) => {
@@ -213,25 +250,74 @@ const createOrder = async (tenantId, {
       for (const opt of varOpts) variationOptionMap[opt.id] = opt;
     }
 
-    // D2: valida deliveryFee contra delivery_zones do tenant (canal online/delivery)
-    // Se o bairro tem zona configurada e a taxa enviada diverge mais de R$0,50 → corrige
-    if (deliveryType === 'delivery' && neighborhood) {
-      const { rows: tenantZones } = await client.query(
-        `SELECT delivery_zones FROM tenants WHERE id = $1`, [tenantId]
+    // D2: valida deliveryFee contra delivery_zones do tenant (canal online/delivery).
+    // Cobre dois tipos de zona: 'named' (por bairro) e 'radius' (por distância Haversine).
+    if (deliveryType === 'delivery') {
+      const { rows: tenantRows } = await client.query(
+        `SELECT delivery_zones, delivery_zone_type, restaurant_lat, restaurant_lng
+         FROM tenants WHERE id = $1`, [tenantId]
       );
-      const zones = tenantZones[0]?.delivery_zones;
+      const tenantRow = tenantRows[0];
+      const zones     = tenantRow?.delivery_zones;
+      const zoneType  = tenantRow?.delivery_zone_type ?? 'named';
+
       if (Array.isArray(zones) && zones.length > 0) {
-        const zone = zones.find(
-          (z) => z.name?.toLowerCase() === neighborhood?.toLowerCase()
-        );
-        if (zone) {
-          const zoneFee = parseFloat(zone.fee) || 0;
-          const sentFee = parseFloat(deliveryFee) || 0;
-          if (Math.abs(sentFee - zoneFee) > 0.50) {
-            logger.warn('D2: delivery_fee diverge da zona — corrigido pelo backend', {
-              tenantId, neighborhood, sent: sentFee, zone: zoneFee,
+        if (zoneType === 'radius') {
+          // ── Radius: valida por distância do restaurante ──────────
+          const rLat = parseFloat(tenantRow.restaurant_lat);
+          const rLng = parseFloat(tenantRow.restaurant_lng);
+          const cLat = parseFloat(deliveryLat);
+          const cLng = parseFloat(deliveryLng);
+
+          // Radius exige coordenadas — sem elas não é possível calcular a zona correta
+          if (isNaN(cLat) || isNaN(cLng)) {
+            throw new AppError(
+              'Endereço sem coordenadas válidas para cálculo da entrega. Confirme o endereço no mapa.',
+              400
+            );
+          }
+          if (isNaN(rLat) || isNaN(rLng)) {
+            throw new AppError(
+              'Restaurante sem localização configurada. Entre em contato com a loja.',
+              400
+            );
+          }
+
+          const dist   = haversineKm(rLat, rLng, cLat, cLng);
+          const sorted = [...zones].sort((a, b) => (a.radius_km ?? 99) - (b.radius_km ?? 99));
+          const zone   = sorted.find((z) => dist <= (z.radius_km ?? 99));
+
+          if (!zone) {
+            throw new AppError(
+              'Endereço fora da área de entrega. Escolha outro endereço ou fale com a loja.',
+              400
+            );
+          }
+
+          const expectedFee = parseFloat(zone.fee) || 0;
+          const sentFee     = parseFloat(deliveryFee) || 0;
+          if (Math.abs(sentFee - expectedFee) > 0.50) {
+            logger.warn('D2-radius: delivery_fee diverge da zona — corrigido', {
+              tenantId, distKm: dist.toFixed(2), sent: sentFee, expected: expectedFee,
             });
-            deliveryFee = zoneFee;
+            deliveryFee = expectedFee;
+          }
+        } else {
+          // ── Named: valida por bairro/nome ───────────────────────
+          if (neighborhood) {
+            const zone = zones.find(
+              (z) => z.name?.toLowerCase() === neighborhood?.toLowerCase()
+            );
+            if (zone) {
+              const zoneFee = parseFloat(zone.fee) || 0;
+              const sentFee = parseFloat(deliveryFee) || 0;
+              if (Math.abs(sentFee - zoneFee) > 0.50) {
+                logger.warn('D2-named: delivery_fee diverge da zona — corrigido', {
+                  tenantId, neighborhood, sent: sentFee, zone: zoneFee,
+                });
+                deliveryFee = zoneFee;
+              }
+            }
           }
         }
       }
@@ -387,13 +473,72 @@ const createOrder = async (tenantId, {
       }
     }
 
+    // Desconto do operador (PDV) — aplicado após cálculo dos itens
+    if (adjustmentType === 'discount' && parseFloat(adjustmentValue) > 0) {
+      orderTotal = Math.max(0, orderTotal - parseFloat(adjustmentValue));
+    }
+
+    // ── Resolver pagamentos (split ou único) ──────────────────
+    let resolvedPayments;
+    let primaryPaymentMethod;
+
+    if (Array.isArray(payments) && payments.length > 0) {
+      // Normaliza campos snake_case / camelCase vindos do frontend
+      const norm = payments.map(p => ({
+        method:           p.method,
+        amount:           parseFloat(p.amount) || 0,
+        received_amount:  parseFloat(p.received_amount ?? p.receivedAmount) || null,
+        change_amount:    parseFloat(p.change_amount   ?? p.changeAmount)   || null,
+        fiado_cliente_id: p.fiado_cliente_id ?? p.fiadoClienteId ?? null,
+      }));
+
+      // Valida soma
+      const paymentsSum = norm.reduce((s, p) => s + p.amount, 0);
+      if (Math.abs(paymentsSum - orderTotal) > 0.02) {
+        throw new AppError(
+          `Soma dos pagamentos (R$ ${paymentsSum.toFixed(2)}) não corresponde ao total do pedido (R$ ${orderTotal.toFixed(2)}).`,
+          400
+        );
+      }
+
+      // Valida cada parcela
+      for (const p of norm) {
+        if (!VALID_PAYMENT_METHODS.includes(p.method))
+          throw new AppError(`Método de pagamento inválido: "${p.method}".`, 400);
+        if (p.amount <= 0)
+          throw new AppError('Cada parcela de pagamento deve ter valor > 0.', 400);
+        if (p.method === 'fiado' && !p.fiado_cliente_id)
+          throw new AppError('Pagamento fiado exige cliente (fiado_cliente_id).', 400);
+      }
+
+      resolvedPayments = norm;
+      const methods = [...new Set(norm.map(p => p.method))];
+      primaryPaymentMethod = methods.length === 1 ? methods[0] : 'mixed';
+
+    } else {
+      // Legado: pagamento único (sem payments[])
+      primaryPaymentMethod = paymentMethod;
+      resolvedPayments = [{
+        method:           paymentMethod,
+        amount:           orderTotal,
+        received_amount:  cashChangeFor ? parseFloat(cashChangeFor) : null,
+        change_amount:    cashChangeFor ? Math.max(0, parseFloat(cashChangeFor) - orderTotal) : null,
+        fiado_cliente_id: fiadoClienteId || null,
+      }];
+    }
+
+    const isSplitPayment = resolvedPayments.length > 1 ||
+      (resolvedPayments.length === 1 && resolvedPayments[0].method !== paymentMethod);
+
     const orderNumber = await Order.nextOrderNumber(tenantId, client);
 
     const order = await Order.createOrder({
       tenantId, orderNumber,
       customerName, customerPhone, customerAddress,
       channel, total: parseFloat(orderTotal.toFixed(2)), notes,
-      deliveryType, paymentMethod, deliveryFee: parseFloat(deliveryFee) || 0,
+      deliveryType,
+      paymentMethod: primaryPaymentMethod,
+      deliveryFee: parseFloat(deliveryFee) || 0,
       neighborhood: neighborhood || null,
       initialStatus, idempotencyKey,
       loyaltyCustomerId: loyaltyCustomerId || null,
@@ -402,7 +547,16 @@ const createOrder = async (tenantId, {
       deliveryLat: deliveryLat || null,
       deliveryLng: deliveryLng || null,
       cashChangeFor: cashChangeFor ? parseFloat(cashChangeFor) : null,
+      createdBy: userId || null,
     }, client);
+
+    // Marca split se necessário (coluna informativa para UI)
+    if (isSplitPayment) {
+      await client.query(
+        `UPDATE orders SET has_split_payment = true WHERE id = $1`,
+        [order.id]
+      );
+    }
 
     for (const [lineNo, item] of resolvedItems.entries()) {
       // Custo unitário:
@@ -485,6 +639,48 @@ const createOrder = async (tenantId, {
         reason:      `Pedido #${orderNumber}`,
         orderId:     order.id,
       }, client);
+    }
+
+    // ── order_payments: um registro por método, dentro da transação ──
+    for (const p of resolvedPayments) {
+      await client.query(
+        `INSERT INTO order_payments
+           (tenant_id, order_id, cash_register_id, method, amount,
+            received_amount, change_amount, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          tenantId,
+          order.id,
+          cashRegisterId || null,
+          p.method,
+          parseFloat(p.amount.toFixed(2)),
+          p.received_amount ? parseFloat(p.received_amount) : null,
+          p.change_amount   ? parseFloat(p.change_amount)   : null,
+          userId || null,
+        ]
+      );
+    }
+
+    // ── fiado_compras: uma por parcela fiada — dentro da transação ──
+    for (const p of resolvedPayments) {
+      if (p.method !== 'fiado' || !p.fiado_cliente_id) continue;
+      const { rows: fiadoCli } = await client.query(
+        `SELECT bloqueado FROM fiado_clientes WHERE id = $1 AND tenant_id = $2`,
+        [p.fiado_cliente_id, tenantId]
+      );
+      if (!fiadoCli[0]) throw new AppError('Cliente fiado não encontrado.', 404);
+      if (fiadoCli[0].bloqueado) throw new AppError('Cliente bloqueado para compras fiadas.', 403);
+      await client.query(
+        `INSERT INTO fiado_compras (tenant_id, cliente_id, order_id, descricao, valor, tipo)
+         VALUES ($1, $2, $3, $4, $5, 'compra')`,
+        [
+          tenantId,
+          p.fiado_cliente_id,
+          order.id,
+          `Compra fiada — Pedido #${orderNumber}`,
+          parseFloat(p.amount.toFixed(2)),
+        ]
+      );
     }
 
     await client.query('COMMIT');
@@ -697,8 +893,20 @@ const createExternalOrder = async (tenantId, {
 
 // ── Status ────────────────────────────────────────────────────
 
-const updateStatus = async (id, tenantId, status) => {
+const updateStatus = async (id, tenantId, status, userId = null) => {
+  // Captura status anterior para o audit_log (query leve — usa índice primário)
+  const { rows: prev } = await db.query(
+    `SELECT status FROM orders WHERE id = $1 AND tenant_id = $2`, [id, tenantId]
+  );
+  const previousStatus = prev[0]?.status ?? null;
+
   const updatedOrder = await Order.updateStatus(id, tenantId, status);
+
+  // Audit log de mudança de status (fora de transaction — falha silenciosa)
+  writeAuditLog(tenantId, id, userId, 'status_changed', {
+    from: previousStatus,
+    to:   status,
+  });
 
   // Sincroniza cache Redis imediatamente — remove pedidos terminais (delivered/cancelled)
   // para que reconexão do socket não ressuscite pedidos já concluídos.
@@ -756,13 +964,32 @@ const updateStatus = async (id, tenantId, status) => {
 /**
  * Cancela o pedido e devolve estoque se ja estava em producao.
  * Se insumos_deducted = true, reverte também os insumos (inclui filhos de combos).
- * @param {string|null} reason - Motivo do cancelamento (armazenado em orders.cancel_reason)
+ * @param {string|null} reason  - Motivo do cancelamento (obrigatório)
+ * @param {string|null} userId  - Usuário que cancelou (para audit trail)
  */
-const cancelOrder = async (id, tenantId, reason = null) => {
+const cancelOrder = async (id, tenantId, reason = null, userId = null) => {
+  if (!reason?.trim()) {
+    throw new AppError('Motivo do cancelamento é obrigatório.', 400);
+  }
+
   const order = await Order.findById(id, tenantId);
   if (!order) throw new AppError('Pedido nao encontrado.', 404);
 
+  // Bloqueia cancelamento de pedido já pago — necessário registrar estorno primeiro
+  if (order.paid_at) {
+    throw new AppError(
+      'Este pedido já possui pagamento registrado. Para cancelar, é necessário registrar estorno/ajuste financeiro.',
+      400
+    );
+  }
+
   const updated = await Order.updateStatus(id, tenantId, 'cancelled', reason);
+
+  // Salva cancelled_by e cancelled_at
+  await db.query(
+    `UPDATE orders SET cancelled_by = $2, cancelled_at = NOW() WHERE id = $1`,
+    [id, userId || null]
+  );
 
   if (!['delivered', 'cancelled'].includes(order.status)) {
     const client = await db.getClient();
@@ -801,6 +1028,12 @@ const cancelOrder = async (id, tenantId, reason = null) => {
   // Remove do cache Redis (status = cancelled → hdel automático via upsertOrder)
   orderCache.upsertOrder(tenantId, updated).catch(() => {});
 
+  // Audit log
+  writeAuditLog(tenantId, id, userId, 'cancelled', {
+    previous_status: order.status,
+    reason: reason.trim(),
+  });
+
   return updated;
 };
 
@@ -817,19 +1050,28 @@ const markAsPaid = async (id, tenantId, paymentMethod) => {
 
 // ── Edição de itens ───────────────────────────────────────────
 
+// Tipos que NÃO cobram taxa — nunca aceitar delivery_fee > 0 para eles.
+const NON_DELIVERY_TYPES = new Set(['pickup', 'balcao', 'mesa', 'comanda', 'table']);
+
 /**
  * Substitui os itens de um pedido ainda editável (pending/confirmed/preparing).
  * Devolve o estoque dos itens antigos e desconta o dos novos.
  * Atualiza order.total.
  */
-const editOrderItems = async (id, tenantId, newItemsPayload) => {
+const editOrderItems = async (id, tenantId, newItemsPayload, userId = null, deliveryOverride = null) => {
   const order = await Order.findById(id, tenantId);
   if (!order) throw new AppError('Pedido não encontrado.', 404);
 
-  const editableStatuses = ['pending', 'confirmed', 'preparing'];
+  const editableStatuses = ['pending', 'confirmed', 'preparing', 'ready'];
   if (!editableStatuses.includes(order.status)) {
     throw new AppError(
-      `Itens só podem ser editados em pedidos Pendentes ou Em Preparo (status atual: ${order.status}).`,
+      `Itens só podem ser editados em pedidos Pendentes, Em Preparo ou Prontos (status atual: ${order.status}).`,
+      400
+    );
+  }
+  if (order.paid_at) {
+    throw new AppError(
+      'Este pedido já está pago. Para alterar valor, é necessário fazer ajuste financeiro ou cancelamento.',
       400
     );
   }
@@ -865,11 +1107,15 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
     const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
 
     // 3. Valida e calcula totais
-    //    Total deve incluir a taxa de entrega; editOrderItems nao altera
-    //    entrega, entao preserva a delivery_fee atual (0 se nao for delivery).
-    const preservedDeliveryFee = order.delivery_type === 'delivery'
-      ? (parseFloat(order.delivery_fee) || 0)
-      : 0;
+    //    Se o frontend enviou deliveryOverride, usa os novos valores (evita estado
+    //    intermediário errado no socket quando o tipo de entrega muda na edição).
+    //    Tipos não-entrega SEMPRE resultam em fee=0 (não confiar no frontend).
+    const effectiveDeliveryType = deliveryOverride?.deliveryType ?? order.delivery_type;
+    const preservedDeliveryFee = NON_DELIVERY_TYPES.has(effectiveDeliveryType)
+      ? 0
+      : (deliveryOverride?.deliveryFee != null
+          ? Math.max(0, parseFloat(deliveryOverride.deliveryFee) || 0)
+          : Math.max(0, parseFloat(order.delivery_fee) || 0));
     let orderTotal = preservedDeliveryFee;
     const resolvedItems = [];
     for (const item of newItemsPayload) {
@@ -891,6 +1137,16 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
       }
       orderTotal += lineTotal;
       resolvedItems.push({ ...item, product, qty, lineTotal });
+    }
+
+    // Reaplica ajuste existente (desconto/acréscimo já salvo) para não perder na edição de itens
+    const existingAdjValue = parseFloat(order.adjustment_value) || 0;
+    if (existingAdjValue > 0) {
+      if (order.adjustment_type === 'discount') {
+        orderTotal = Math.max(0, orderTotal - existingAdjValue);
+      } else {
+        orderTotal += existingAdjValue;
+      }
     }
 
     // 4. Desconta estoque dos novos itens
@@ -930,7 +1186,25 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
     );
 
     await client.query('COMMIT');
-    return Order.findById(id, tenantId);
+    const updated = await Order.findById(id, tenantId);
+
+    // Audit log (fora da transaction — falha silenciosa)
+    const oldIds    = new Set((order.items ?? []).map((i) => i.product_id).filter(Boolean));
+    const newIds    = new Set(newItemsPayload.map((i) => i.productId));
+    const oldFeeAudit = Math.max(0, parseFloat(order.delivery_fee) || 0);
+    writeAuditLog(tenantId, id, userId, 'items_edited', {
+      previous_item_count: (order.items ?? []).length,
+      new_item_count:      newItemsPayload.length,
+      added:   [...newIds ].filter((x) => !oldIds.has(x)),
+      removed: [...oldIds ].filter((x) => !newIds.has(x)),
+      new_total: parseFloat(orderTotal.toFixed(2)),
+      ...(preservedDeliveryFee !== oldFeeAudit ? {
+        delivery_fee_previous: oldFeeAudit,
+        delivery_fee_new:      preservedDeliveryFee,
+      } : {}),
+    });
+
+    return updated;
 
   } catch (err) {
     await client.query('ROLLBACK');
@@ -949,66 +1223,76 @@ const editOrderItems = async (id, tenantId, newItemsPayload) => {
 const updateOrderInfo = async (id, tenantId, {
   deliveryType, neighborhood, customerAddress, deliveryFee,
   notes, adjustmentType, adjustmentValue, adjustmentReason,
+  userId = null,
 }) => {
   const order = await Order.findById(id, tenantId);
   if (!order) throw new AppError('Pedido não encontrado.', 404);
 
+  // Valida motivo quando há ajuste de valor
+  const adjVal = adjustmentValue !== undefined ? (parseFloat(adjustmentValue) || 0) : 0;
+  if (adjustmentValue !== undefined && adjVal > 0 && !adjustmentReason?.trim()) {
+    throw new AppError('Motivo é obrigatório para desconto ou acréscimo.', 400);
+  }
+
   const setClauses = [];
   const params     = [id, tenantId];
-
   const push = (val) => { params.push(val); return `$${params.length}`; };
 
   if (deliveryType    !== undefined) setClauses.push(`delivery_type = ${push(deliveryType)}`);
   if (neighborhood    !== undefined) setClauses.push(`neighborhood  = ${push(neighborhood || null)}`);
   if (customerAddress !== undefined) setClauses.push(`customer_address = ${push(customerAddress || null)}`);
-  // -- Recalculo de total: total = soma_itens + delivery_fee - desc + acresc --
-  // Regra: delivery_type != 'delivery' => delivery_fee = 0.
+
+  // Regra de negócio: tipos não-entrega → delivery_fee obrigatoriamente 0.
+  // Impede que frontend envie fee=10 para pedido de retirada/balcão/mesa.
   const effectiveType = deliveryType !== undefined ? deliveryType : order.delivery_type;
   let effectiveFee;
-  if (effectiveType !== 'delivery')   effectiveFee = 0;
-  else if (deliveryFee !== undefined) effectiveFee = parseFloat(deliveryFee) || 0;
-  else                                effectiveFee = parseFloat(order.delivery_fee) || 0;
+  if (NON_DELIVERY_TYPES.has(effectiveType)) {
+    effectiveFee = 0;
+  } else if (deliveryFee !== undefined) {
+    effectiveFee = Math.max(0, parseFloat(deliveryFee) || 0);
+  } else {
+    effectiveFee = Math.max(0, parseFloat(order.delivery_fee) || 0);
+  }
 
-  // Persiste a taxa quando entrega/taxa foram tocadas (zera em retirada/mesa).
   if (deliveryFee !== undefined || deliveryType !== undefined) {
     setClauses.push(`delivery_fee = ${push(effectiveFee)}`);
   }
 
-  // Recalcula o total apenas quando algo que o afeta mudou (taxa, tipo de
-  // entrega ou ajuste). Edicao so de observacoes nao mexe no total.
+  // Recalcula total quando taxa, tipo de entrega ou ajuste mudou.
+  // adjustmentValue=0 também dispara para zerar desconto existente.
   const totalAfetado =
     deliveryFee !== undefined ||
     deliveryType !== undefined ||
-    (adjustmentValue && parseFloat(adjustmentValue) > 0);
+    adjustmentValue !== undefined;
 
+  let newTotal = null;
   if (totalAfetado) {
     const { rows: [sub] } = await db.query(
       `SELECT COALESCE(SUM(total), 0)::float AS subtotal FROM order_items WHERE order_id = $1`,
       [id]
     );
     const subtotal = parseFloat(sub.subtotal) || 0;
-
-    let newTotal = subtotal + effectiveFee;
-    if (adjustmentValue && parseFloat(adjustmentValue) > 0) {
-      const delta = parseFloat(adjustmentValue);
+    newTotal = subtotal + effectiveFee;
+    if (adjustmentValue !== undefined && adjVal > 0) {
       newTotal = adjustmentType === 'discount'
-        ? Math.max(0, newTotal - delta)
-        : newTotal + delta;
+        ? newTotal - adjVal
+        : newTotal + adjVal;
     }
+    // Total nunca pode ser negativo
+    newTotal = Math.max(0, newTotal);
     setClauses.push(`total = ${push(parseFloat(newTotal.toFixed(2)))}`);
   }
 
-  // Mescla observações
-  const adjNote = adjustmentValue && parseFloat(adjustmentValue) > 0
-    ? `[${adjustmentType === 'discount' ? 'Desconto' : 'Acréscimo'}: ${
-        adjustmentType === 'discount' ? '-' : '+'
-      }R$${parseFloat(adjustmentValue).toFixed(2)}${adjustmentReason ? ' — ' + adjustmentReason : ''}]`
-    : '';
+  // Salva ajuste em colunas dedicadas (não mais nas notes)
+  if (adjustmentValue !== undefined) {
+    setClauses.push(`adjustment_type   = ${push(adjVal > 0 ? (adjustmentType || 'discount') : null)}`);
+    setClauses.push(`adjustment_value  = ${push(adjVal > 0 ? adjVal : null)}`);
+    setClauses.push(`adjustment_reason = ${push(adjVal > 0 ? (adjustmentReason?.trim() || null) : null)}`);
+  }
 
-  const existingNotes = order.notes ?? '';
-  const updatedNotes  = notes !== undefined ? notes : existingNotes;
-  const finalNotes    = [updatedNotes, adjNote].filter(Boolean).join(' | ') || null;
-  setClauses.push(`notes = ${push(finalNotes)}`);
+  // Observações do pedido (sem concatenar o ajuste)
+  const updatedNotes = notes !== undefined ? (notes || null) : (order.notes ?? null);
+  setClauses.push(`notes = ${push(updatedNotes)}`);
 
   if (setClauses.length === 0) return order;
 
@@ -1017,7 +1301,34 @@ const updateOrderInfo = async (id, tenantId, {
     `UPDATE orders SET ${setClauses.join(', ')} WHERE id = $1 AND tenant_id = $2`,
     params
   );
-  return Order.findById(id, tenantId);
+
+  const result = await Order.findById(id, tenantId);
+
+  // ── Audit logs (fora de transaction — falha silenciosa) ───────
+
+  // Mudança de taxa de entrega
+  const oldFee  = Math.max(0, parseFloat(order.delivery_fee) || 0);
+  const feeChanged = (deliveryFee !== undefined || deliveryType !== undefined) &&
+                     effectiveFee !== oldFee;
+  if (feeChanged) {
+    writeAuditLog(tenantId, id, userId, 'delivery_fee_changed', {
+      previous_delivery_type: order.delivery_type,
+      new_delivery_type:      effectiveType,
+      previous_fee:           oldFee,
+      new_fee:                effectiveFee,
+    });
+  }
+
+  // Ajuste de valor (desconto/acréscimo)
+  if (adjustmentValue !== undefined && adjVal > 0) {
+    writeAuditLog(tenantId, id, userId, 'adjustment_applied', {
+      type:   adjustmentType,
+      value:  adjVal,
+      reason: adjustmentReason?.trim() ?? null,
+    });
+  }
+
+  return result;
 };
 
 /**

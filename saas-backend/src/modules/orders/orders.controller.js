@@ -23,9 +23,9 @@ const handleValidation = (req) => {
  * Query: status, channel, startDate, endDate, page, limit
  */
 const list = asyncHandler(async (req, res) => {
-  const { status, channel, startDate, endDate, page, limit } = req.query;
+  const { status, channel, search, startDate, endDate, page, limit } = req.query;
   const orders = await service.listOrders(req.user.tenantId, {
-    status, channel, startDate, endDate,
+    status, channel, search, startDate, endDate,
     page:  parseInt(page) || 1,
     limit: Math.min(parseInt(limit) || 50, 200),
   });
@@ -71,9 +71,16 @@ const create = asyncHandler(async (req, res) => {
   const idempotencyKey = req.headers['x-idempotency-key'] || uuidv4();
   const order = await enqueueAndWait(
     'create',
-    // enforceRequiredVariation: true → canal manual exige escolha de grupos required.
-    // Canais online/externo não passam esse flag (default false).
-    { tenantId: req.user.tenantId, payload: { ...req.body, enforceRequiredVariation: true }, idempotencyKey },
+    {
+      tenantId: req.user.tenantId,
+      payload: {
+        ...req.body,
+        enforceRequiredVariation: true,
+        userId:          req.user.userId,    // para order_payments.created_by
+        cashRegisterId:  caixaRows[0].id,    // para order_payments.cash_register_id
+      },
+      idempotencyKey,
+    },
     { idempotencyKey }
   );
   res.status(201).json({ success: true, data: order });
@@ -103,16 +110,21 @@ const updateStatus = asyncHandler(async (req, res) => {
       throw new AppError('Apenas owner ou manager podem cancelar pedidos.', 403);
     }
     const { cancelReason } = req.body;
+    if (!cancelReason?.trim()) {
+      throw new AppError('Motivo do cancelamento é obrigatório.', 400);
+    }
     const order = await enqueueAndWait('cancel', {
       orderId:      req.params.id,
       tenantId:     req.user.tenantId,
-      cancelReason: cancelReason ?? null,
+      cancelReason: cancelReason.trim(),
+      userId:       req.user.userId ?? req.user.id ?? null,
     });
     return res.json({ success: true, data: order });
   }
 
   // Todos os outros status: direto no banco, sem fila, sem timeout
-  const order = await service.updateStatus(req.params.id, req.user.tenantId, status);
+  const userId = req.user.userId ?? req.user.id ?? null;
+  const order = await service.updateStatus(req.params.id, req.user.tenantId, status, userId);
   if (!order) throw new AppError('Pedido nao encontrado.', 404);
 
   // Notifica todos os clientes conectados (evita estado dessincronizado no frontend)
@@ -126,9 +138,15 @@ const updateStatus = asyncHandler(async (req, res) => {
 
 /** DELETE /api/orders/:id — cancela e devolve estoque */
 const cancel = asyncHandler(async (req, res) => {
+  const { cancelReason } = req.body ?? {};
+  if (!cancelReason?.trim()) {
+    throw new AppError('Motivo do cancelamento é obrigatório.', 400);
+  }
   const order = await enqueueAndWait('cancel', {
-    orderId:  req.params.id,
-    tenantId: req.user.tenantId,
+    orderId:      req.params.id,
+    tenantId:     req.user.tenantId,
+    cancelReason: cancelReason.trim(),
+    userId:       req.user.userId ?? req.user.id ?? null,
   });
   res.json({ success: true, data: order, message: 'Pedido cancelado. Estoque devolvido.' });
 });
@@ -157,7 +175,12 @@ const setPaid = asyncHandler(async (req, res) => {
  */
 const updateItems = asyncHandler(async (req, res) => {
   handleValidation(req);
-  const order = await service.editOrderItems(req.params.id, req.user.tenantId, req.body.items);
+  const userId = req.user.userId ?? req.user.id ?? null;
+  const { items, deliveryType, deliveryFee } = req.body;
+  const deliveryOverride = (deliveryType !== undefined || deliveryFee !== undefined)
+    ? { deliveryType, deliveryFee }
+    : null;
+  const order = await service.editOrderItems(req.params.id, req.user.tenantId, items, userId, deliveryOverride);
   eventService.orderUpdated(req.user.tenantId, order);
   res.json({ success: true, data: order });
 });
@@ -312,6 +335,7 @@ const updateInfo = asyncHandler(async (req, res) => {
   const order = await service.updateOrderInfo(req.params.id, req.user.tenantId, {
     deliveryType, neighborhood, customerAddress, deliveryFee,
     notes, adjustmentType, adjustmentValue, adjustmentReason,
+    userId: req.user.userId ?? req.user.id ?? null,
   });
 
   eventService.orderUpdated(req.user.tenantId, order);

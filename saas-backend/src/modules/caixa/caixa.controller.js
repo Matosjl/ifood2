@@ -97,36 +97,13 @@ const closeCaixa = asyncHandler(async (req, res) => {
   const caixa = caixas[0];
   if (!caixa) throw new AppError('Nenhum caixa aberto encontrado.', 404);
 
-  // ── Vendas por método de pagamento ────────────────────────────
-  const { rows: summary } = await db.query(
+  // ── Agregados de ordem (total_orders, faturamento_bruto, driver_fees) ──
+  const { rows: orderAgg } = await db.query(
     `SELECT
-       COUNT(*)::int                                                                AS total_orders,
-       -- faturamento_bruto: soma de TODOS os pedidos billable no período.
-       -- Inclui fiado, pending e PIX não confirmado. Valor informativo — NÃO vai pro banco virtual.
-       COALESCE(SUM(o.total), 0)::float                                            AS faturamento_bruto,
-       -- total_revenue: recebido confirmado — usado no banco_transactions e em cash_registers.total_revenue.
-       -- Exclui: fiado (contas a receber), pending (sem pagamento), PIX com paid_at NULL (não confirmado).
-       -- PIX manual confirmado (markAsPaid): paid_at IS NOT NULL, pix_paid_at pode ser NULL → incluído.
-       -- PIX OpenPix webhook confirmado: paid_at IS NOT NULL, pix_paid_at IS NOT NULL → incluído.
-       -- PIX pendente (QR gerado ou forma selecionada sem pagar): paid_at IS NULL → excluído.
-       COALESCE(SUM(o.total) FILTER (
-         WHERE o.payment_method NOT IN ('fiado', 'pending')
-           AND (o.payment_method != 'pix' OR o.paid_at IS NOT NULL)
-       ), 0)::float                                                                AS total_revenue,
+       COUNT(*)::int                                                                  AS total_orders,
+       COALESCE(SUM(o.total), 0)::float                                              AS faturamento_bruto,
        COALESCE(SUM(COALESCE(d.driver_fee, 0))
-         FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                   AS total_driver_fees,
-       -- Por método
-       COALESCE(SUM(CASE WHEN o.payment_method='cash'
-         THEN o.total - COALESCE(d.driver_fee,0) ELSE 0 END),0)::float            AS cash,
-       -- PIX confirmado: paid_at IS NOT NULL (cobre PIX manual via markAsPaid e PIX via webhook OpenPix).
-       COALESCE(SUM(CASE WHEN o.payment_method='pix' AND o.paid_at IS NOT NULL THEN o.total ELSE 0 END),0)::float AS pix,
-       -- PIX pendente: paid_at IS NULL — informativo, não entra no recebido nem no banco virtual.
-       COALESCE(SUM(CASE WHEN o.payment_method='pix' AND o.paid_at IS NULL     THEN o.total ELSE 0 END),0)::float AS pix_pendente,
-       COALESCE(SUM(CASE WHEN o.payment_method='credit'  THEN o.total ELSE 0 END),0)::float AS credit,
-       COALESCE(SUM(CASE WHEN o.payment_method='debit'   THEN o.total ELSE 0 END),0)::float AS debit,
-       COALESCE(SUM(CASE WHEN o.payment_method='voucher' THEN o.total ELSE 0 END),0)::float AS voucher,
-       COALESCE(SUM(CASE WHEN o.payment_method='other'   THEN o.total ELSE 0 END),0)::float AS other,
-       COALESCE(SUM(CASE WHEN o.payment_method='fiado'   THEN o.total ELSE 0 END),0)::float AS fiado
+         FILTER (WHERE o.delivery_type = 'delivery'), 0)::float                     AS total_driver_fees
      FROM orders o
      LEFT JOIN deliveries d ON d.order_id = o.id AND d.status = 'delivered'
      WHERE o.tenant_id = $1
@@ -134,6 +111,77 @@ const closeCaixa = asyncHandler(async (req, res) => {
        AND o.created_at >= $2`,
     [tenantId, caixa.opened_at]
   );
+
+  // ── Breakdown por método (order_payments para pedidos novos + fallback legado) ─
+  //
+  // Pedidos COM order_payments: somamos por method em order_payments.
+  //   PDV PIX é imediatamente confirmado — não precisa de paid_at check.
+  //
+  // Pedidos SEM order_payments (legado, canal online):
+  //   Mantém lógica original: PIX só conta se paid_at IS NOT NULL.
+  //   PIX pendente → 'pix_pendente' para exclusão do total_revenue.
+  const { rows: payBreakdown } = await db.query(
+    `SELECT method, COALESCE(SUM(amount), 0)::float AS total
+     FROM (
+       -- Pedidos novos: lê de order_payments (um registro por método)
+       SELECT op.method, op.amount
+       FROM orders o
+       JOIN order_payments op ON op.order_id = o.id
+       WHERE o.tenant_id = $1
+         AND o.status IN ${BILLABLE_SQL}
+         AND o.created_at >= $2
+
+       UNION ALL
+
+       -- Pedidos legados sem order_payments: usa orders.payment_method
+       SELECT
+         CASE
+           WHEN o.payment_method = 'pix' AND o.paid_at IS NULL THEN 'pix_pendente'
+           ELSE o.payment_method
+         END AS method,
+         o.total AS amount
+       FROM orders o
+       WHERE o.tenant_id = $1
+         AND o.status IN ${BILLABLE_SQL}
+         AND o.created_at >= $2
+         AND NOT EXISTS (
+           SELECT 1 FROM order_payments op WHERE op.order_id = o.id
+         )
+     ) combined
+     GROUP BY method`,
+    [tenantId, caixa.opened_at]
+  );
+
+  // Indexa resultado por método
+  const byMethod = {};
+  payBreakdown.forEach(r => { byMethod[r.method] = parseFloat(r.total || 0); });
+
+  const os = orderAgg[0];
+
+  // Constrói objeto `summary` compatível com o restante do código
+  const summary = [{
+    total_orders:     parseInt(os.total_orders, 10),
+    faturamento_bruto: parseFloat(os.faturamento_bruto),
+    total_driver_fees: parseFloat(os.total_driver_fees),
+    // Por método — dinheiro exclui driver_fee (permanece na maquininha)
+    cash:         byMethod['cash']         || 0,
+    pix:          byMethod['pix']          || 0,
+    pix_pendente: byMethod['pix_pendente'] || 0,
+    credit:       byMethod['credit']       || 0,
+    debit:        byMethod['debit']        || 0,
+    voucher:      byMethod['voucher']      || 0,
+    other:        byMethod['other']        || 0,
+    fiado:        byMethod['fiado']        || 0,
+    // total_revenue: tudo confirmado exceto fiado e pending
+    total_revenue: (
+      (byMethod['cash']    || 0) +
+      (byMethod['pix']     || 0) +
+      (byMethod['credit']  || 0) +
+      (byMethod['debit']   || 0) +
+      (byMethod['voucher'] || 0) +
+      (byMethod['other']   || 0)
+    ),
+  }];
 
   // ── Sangrias e suprimentos do caixa ───────────────────────────
   const { rows: movs } = await db.query(

@@ -78,6 +78,10 @@ const norm = (o) => ({
   deliveryFee:  parseFloat(o.deliveryFee ?? o.delivery_fee ?? 0),
   neighborhood: o.neighborhood ?? null,
   paidAt:      o.paidAt      ?? o.paid_at      ?? null,
+  adjustmentType:   o.adjustmentType   ?? o.adjustment_type   ?? null,
+  adjustmentValue:  o.adjustmentValue  != null ? parseFloat(o.adjustmentValue)
+                  : o.adjustment_value != null ? parseFloat(o.adjustment_value) : null,
+  adjustmentReason: o.adjustmentReason ?? o.adjustment_reason ?? null,
   tableNumber:        o.tableNumber        ?? o.table_number         ?? null,
   cashChangeFor:       o.cashChangeFor      != null ? parseFloat(o.cashChangeFor)      : (o.cash_change_for      != null ? parseFloat(o.cash_change_for)      : null),
   cashChangeRequired:  o.cashChangeRequired != null ? parseFloat(o.cashChangeRequired) : (o.cash_change_required != null ? parseFloat(o.cash_change_required) : null),

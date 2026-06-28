@@ -34,11 +34,14 @@ export const markOrderPaid = (id, paymentMethod) =>
 
 /**
  * Substitui os itens de um pedido editável.
+ * deliveryOverride: { deliveryType?, deliveryFee? } — envia o novo tipo/taxa junto
+ * para que o backend calcule o total correto já na primeira emissão de socket.
  * @param {string} id
  * @param {Array<{productId, quantity?, weightKg?, notes?}>} items
+ * @param {{ deliveryType?: string, deliveryFee?: number }} [deliveryOverride]
  */
-export const editOrderItems = (id, items) =>
-  api.patch(`/orders/${id}/items`, { items });
+export const editOrderItems = (id, items, deliveryOverride = {}) =>
+  api.patch(`/orders/${id}/items`, { items, ...deliveryOverride });
 
 /**
  * Atualiza entrega, endereço, taxa e aplica desconto/acréscimo de valor.

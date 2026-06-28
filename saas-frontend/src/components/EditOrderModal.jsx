@@ -1,20 +1,30 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getProducts, editOrderItems, updateOrderInfo, markOrderPaid as markOrderPaidApi } from '../api/orders';
 import { NEIGHBORHOODS, PAY_OPTIONS, fmt } from '../constants/orders';
-import { addToCart, removeFromCart, cartTotal, groupByCategory } from '../utils/cart';
+import { cartTotal, groupByCategory } from '../utils/cart';
 import { listFiadoClientes, createFiadoCompra } from '../api/fiado';
 
-// ── Constrói cart inicial a partir dos itens do pedido ────────
-const buildInitialCart = (orderItems, products) => {
-  const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
+// ── buildInitialCart usa item.id como chave para suportar o mesmo produto
+//    múltiplas vezes com observações diferentes. Produtos removidos/inativos
+//    são representados com um objeto sintético para exibição.
+const buildInitialCart = (orderItems, catalogProducts) => {
+  const productMap = Object.fromEntries(catalogProducts.map((p) => [p.id, p]));
   const cart = {};
   for (const item of orderItems) {
-    const product = productMap[item.productId];
-    if (!product) continue;
-    cart[product.id] = {
+    const catalog = productMap[item.productId];
+    const product = catalog ?? {
+      id:         item.productId,
+      name:       item.productName ?? 'Produto removido',
+      sale_price: item.unitPrice ?? 0,
+      sale_type:  item.weightKg != null ? 'kg' : 'unit',
+      active:     false,
+      _removed:   true,
+    };
+    const lineKey = item.id;
+    cart[lineKey] = {
       product,
       qty:      item.quantity ?? 1,
-      weightKg: item.weightKg ? String(item.weightKg) : '',
+      weightKg: item.weightKg != null ? String(item.weightKg) : '',
       notes:    item.notes ?? '',
     };
   }
@@ -33,14 +43,16 @@ const STATUS_LABEL = {
 
 // ── Componente principal ──────────────────────────────────────
 export default function EditOrderModal({ order, onClose, onSave, onOrderChanged }) {
+  const isPaid = !!(order.paidAt);
+
   // Catálogo
-  const [products,    setProducts]    = useState([]);
-  const [loadingProds,setLoadingProds]= useState(true);
-  const [search,      setSearch]      = useState('');
+  const [products,     setProducts]     = useState([]);
+  const [loadingProds, setLoadingProds] = useState(true);
+  const [search,       setSearch]       = useState('');
   const [activeCategory, setActiveCategory] = useState(null);
 
-  // Carrinho
-  const [cart,        setCart]        = useState({});
+  // Carrinho: { [lineKey]: { product, qty, weightKg, notes } }
+  const [cart, setCart] = useState({});
 
   // Pedido
   const [deliveryType,  setDeliveryType]  = useState(order.deliveryType ?? 'pickup');
@@ -48,10 +60,16 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
   const [address,       setAddress]       = useState(order.customerAddress ?? '');
   const [deliveryFee,   setDeliveryFee]   = useState(String(order.deliveryFee ?? 0));
   const [payMethod,     setPayMethod]     = useState(order.paymentMethod ?? 'cash');
-  const [adjType,       setAdjType]       = useState('discount');
-  const [adjValue,      setAdjValue]      = useState('');
-  const [adjReason,     setAdjReason]     = useState('');
-  const [orderNotes,    setOrderNotes]    = useState(order.notes ?? '');
+
+  // Ajuste — pré-populado do pedido existente
+  const [adjType,   setAdjType]   = useState(order.adjustmentType ?? 'discount');
+  const [adjValue,  setAdjValue]  = useState(
+    order.adjustmentValue != null && order.adjustmentValue > 0
+      ? String(order.adjustmentValue)
+      : ''
+  );
+  const [adjReason, setAdjReason] = useState(order.adjustmentReason ?? '');
+  const [orderNotes, setOrderNotes] = useState(order.notes ?? '');
 
   // Fiado
   const [fiadoClienteId, setFiadoClienteId] = useState('');
@@ -101,7 +119,6 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
       adjType, adjValue, adjReason, orderNotes, fiadoClienteId]);
 
   // ── Catálogo: filtros ───────────────────────────────────────
-  // groupByCategory retorna [{name, items}] — não um dicionário
   const categories = useMemo(() => groupByCategory(products), [products]);
 
   const filteredProducts = useMemo(() => {
@@ -115,17 +132,55 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
     return products;
   }, [products, search, activeCategory, categories]);
 
-  // ── Handlers do cart ───────────────────────────────────────
-  const handleAdd    = useCallback((p) => setCart((c) => addToCart(c, p)), []);
-  const handleQty    = useCallback((id, qty) => {
-    if (qty <= 0) setCart((c) => removeFromCart(c, id));
-    else          setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
+  // ── Handlers do cart (usam lineKey, não product.id) ────────
+  const handleAdd = useCallback((product) => {
+    setCart((c) => {
+      // Produto kg sempre cria nova linha
+      if (product.sale_type === 'kg') {
+        const lineKey = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        return { ...c, [lineKey]: { product, qty: 1, weightKg: '', notes: '' } };
+      }
+      // Produto unitário: incrementa linha existente sem obs, caso contrário cria nova
+      const existingKey = Object.keys(c).find(
+        (k) => c[k].product.id === product.id && !c[k].notes
+      );
+      if (existingKey) {
+        return { ...c, [existingKey]: { ...c[existingKey], qty: c[existingKey].qty + 1 } };
+      }
+      const lineKey = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      return { ...c, [lineKey]: { product, qty: 1, weightKg: '', notes: '' } };
+    });
   }, []);
-  const handleWeight = useCallback((id, w) => setCart((c) => ({ ...c, [id]: { ...c[id], weightKg: w } })), []);
-  const handleNotes  = useCallback((id, n) => setCart((c) => ({ ...c, [id]: { ...c[id], notes: n } })), []);
-  const handleRemove = useCallback((id) => setCart((c) => removeFromCart(c, id)), []);
 
-  const cartEntries = Object.values(cart);
+  const handleQty = useCallback((lineKey, qty) => {
+    if (qty <= 0) {
+      setCart((c) => { const n = { ...c }; delete n[lineKey]; return n; });
+    } else {
+      setCart((c) => ({ ...c, [lineKey]: { ...c[lineKey], qty } }));
+    }
+  }, []);
+
+  const handleWeight = useCallback((lineKey, w) =>
+    setCart((c) => ({ ...c, [lineKey]: { ...c[lineKey], weightKg: w } })), []);
+
+  const handleNotes = useCallback((lineKey, n) =>
+    setCart((c) => ({ ...c, [lineKey]: { ...c[lineKey], notes: n } })), []);
+
+  const handleRemove = useCallback((lineKey) =>
+    setCart((c) => { const n = { ...c }; delete n[lineKey]; return n; }), []);
+
+  // Duplica uma linha com qty=1 e obs em branco (para anotar obs diferente)
+  const handleSplit = useCallback((lineKey) => {
+    setCart((c) => {
+      const entry = c[lineKey];
+      if (!entry) return c;
+      const newKey = `split_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      return { ...c, [newKey]: { ...entry, qty: 1, notes: '' } };
+    });
+  }, []);
+
+  const cartEntries = Object.entries(cart); // [[lineKey, entry], ...]
+  const hasRemovedProducts = cartEntries.some(([, e]) => e.product._removed);
 
   // Total com ajuste
   const subtotal = cartTotal(cart);
@@ -137,21 +192,36 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
 
   // ── Salvar tudo de uma vez ──────────────────────────────────
   const handleSaveAll = async () => {
+    if (isPaid) {
+      setError('Este pedido já está pago. Não é possível editar.');
+      return;
+    }
     if (cartEntries.length === 0) { setError('Adicione pelo menos 1 item.'); return; }
+    if (hasRemovedProducts) {
+      setError('Remova os produtos indisponíveis (marcados em vermelho) antes de salvar.');
+      return;
+    }
+    if (adj > 0 && !adjReason.trim()) {
+      setError('Motivo é obrigatório para desconto ou acréscimo.');
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
       // 1. Itens
-      const items = cartEntries.map(({ product, qty, weightKg, notes }) => ({
+      const items = cartEntries.map(([, { product, qty, weightKg, notes }]) => ({
         productId: product.id,
         notes:     notes || null,
         ...(product.sale_type === 'kg'
           ? { weightKg: parseFloat(weightKg) }
           : { quantity: qty }),
       }));
-      await editOrderItems(order.id, items);
+      await editOrderItems(order.id, items, {
+        deliveryType,
+        deliveryFee: parseFloat(deliveryFee) || 0,
+      });
 
-      // 2. Forma de pagamento (se mudou)
+      // 2. Forma de pagamento (se mudou e pedido não está pago)
       if (payMethod !== order.paymentMethod) {
         await markOrderPaidApi(order.id, payMethod);
         if (payMethod === 'fiado' && fiadoClienteId) {
@@ -164,18 +234,20 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
         }
       }
 
-      // 3. Informações de entrega + ajuste de valor + notes
+      // 3. Informações de entrega + ajuste + notes
+      // Envia adjustmentValue sempre que há ajuste ativo ou quando havia antes (para zerar)
+      const hadPreviousAdj = order.adjustmentValue != null && order.adjustmentValue > 0;
       const { data: updated } = await updateOrderInfo(order.id, {
         deliveryType,
         neighborhood:    neighborhood || null,
         customerAddress: address      || null,
         deliveryFee:     parseFloat(deliveryFee) || 0,
         notes:           orderNotes   || null,
-        ...(adj > 0 && {
+        ...(adj > 0 || hadPreviousAdj ? {
           adjustmentType:   adjType,
           adjustmentValue:  adj,
-          adjustmentReason: adjReason || undefined,
-        }),
+          adjustmentReason: adj > 0 ? adjReason.trim() : null,
+        } : {}),
       });
 
       onOrderChanged?.(updated);
@@ -201,6 +273,11 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
           <span className="hidden sm:inline text-[11px] px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 shrink-0">
             {STATUS_LABEL[order.status] ?? order.status}
           </span>
+          {isPaid && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 shrink-0 font-bold">
+              💳 PAGO
+            </span>
+          )}
           {order.customerName && (
             <span className="text-sm text-gray-400 truncate hidden md:inline">
               👤 {order.customerName}
@@ -225,6 +302,13 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
         </button>
       </header>
 
+      {/* Aviso pedido pago */}
+      {isPaid && (
+        <div className="px-5 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-xs text-yellow-300 shrink-0">
+          ⚠️ Este pedido já está pago — edição de itens e valores está bloqueada.
+        </div>
+      )}
+
       {/* ── BODY 3 COLUNAS ───────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 divide-x divide-white/[0.07]">
 
@@ -241,6 +325,7 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
               onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
               className="input w-full text-sm"
               autoFocus
+              disabled={isPaid}
             />
           </div>
 
@@ -257,7 +342,9 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                 Todos
               </button>
               {categories.map(({ name: cat, items }) => {
-                const count = items.filter((p) => cart[p.id]).length;
+                const count = items.filter((p) =>
+                  cartEntries.some(([, e]) => e.product.id === p.id)
+                ).length;
                 return (
                   <button key={cat}
                     onClick={() => setActiveCategory(cat === activeCategory ? null : cat)}
@@ -291,27 +378,31 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
               </div>
             )}
             {!loadingProds && filteredProducts.map((p) => {
-              const inCart = cart[p.id];
+              const inCartQty = cartEntries
+                .filter(([, e]) => e.product.id === p.id)
+                .reduce((s, [, e]) => s + (e.qty || 0), 0);
               return (
-                <button key={p.id} onClick={() => handleAdd(p)}
+                <button key={p.id} onClick={() => !isPaid && handleAdd(p)}
+                  disabled={isPaid}
                   className={[
                     'w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between gap-2',
                     'transition-all duration-100',
-                    inCart
+                    isPaid ? 'opacity-50 cursor-not-allowed' : '',
+                    inCartQty > 0
                       ? 'bg-blue-500/15 ring-1 ring-blue-500/40 hover:bg-blue-500/20'
                       : 'bg-gray-800/50 hover:bg-gray-700/70',
                   ].join(' ')}>
                   <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-semibold truncate leading-tight ${inCart ? 'text-white' : 'text-gray-200'}`}>
+                    <p className={`text-sm font-semibold truncate leading-tight ${inCartQty > 0 ? 'text-white' : 'text-gray-200'}`}>
                       {p.name}
                     </p>
                     <p className="text-[11px] text-gray-500 mt-0.5">
                       {fmt(p.sale_price)}{p.sale_type === 'kg' ? '/kg' : '/un'}
                     </p>
                   </div>
-                  {inCart ? (
+                  {inCartQty > 0 ? (
                     <span className="shrink-0 text-[11px] font-black text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full tabular-nums">
-                      {inCart.qty}×
+                      {inCartQty}×
                     </span>
                   ) : (
                     <span className="shrink-0 text-[11px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full">
@@ -337,9 +428,9 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                   : `${cartEntries.length} ${cartEntries.length === 1 ? 'item' : 'itens'}`}
               </p>
             </div>
-            {cartEntries.length > 0 && (
+            {cartEntries.length > 0 && !isPaid && (
               <span className="text-xs text-gray-500">
-                Clique em − para remover
+                ✂️ Separar = duplica linha com obs diferente
               </span>
             )}
           </div>
@@ -352,22 +443,43 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                 <p className="text-sm italic">Selecione produtos no catálogo</p>
               </div>
             ) : (
-              cartEntries.map(({ product: p, qty, weightKg, notes }) => (
-                <div key={p.id}
-                  className="bg-gray-800/60 rounded-2xl p-3.5 space-y-2.5 border border-white/[0.06] hover:border-white/[0.12] transition-colors">
+              cartEntries.map(([lineKey, { product: p, qty, weightKg, notes }]) => (
+                <div key={lineKey}
+                  className={[
+                    'rounded-2xl p-3.5 space-y-2.5 border transition-colors',
+                    p._removed
+                      ? 'bg-red-900/20 border-red-500/40'
+                      : 'bg-gray-800/60 border-white/[0.06] hover:border-white/[0.12]',
+                  ].join(' ')}>
 
-                  {/* Nome + remover */}
+                  {/* Nome + botões */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-white leading-snug truncate">{p.name}</p>
+                      <p className={`text-sm font-bold leading-snug truncate ${p._removed ? 'text-red-300' : 'text-white'}`}>
+                        {p._removed && <span className="text-[10px] mr-1 text-red-400 font-normal">[indisponível]</span>}
+                        {p.name}
+                      </p>
                       <p className="text-[11px] text-gray-500">{fmt(p.sale_price)}{p.sale_type === 'kg' ? '/kg' : '/un'}</p>
                     </div>
-                    <button onClick={() => handleRemove(p.id)}
-                      className="shrink-0 p-1 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                    {!isPaid && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* Separar: duplica linha com obs vazia */}
+                        {!p._removed && p.sale_type !== 'kg' && (
+                          <button
+                            onClick={() => handleSplit(lineKey)}
+                            title="Separar — criar linha igual para obs diferente"
+                            className="p-1 rounded-lg text-gray-600 hover:text-blue-400 hover:bg-blue-400/10 transition-colors text-[11px] font-bold">
+                            ✂️
+                          </button>
+                        )}
+                        <button onClick={() => handleRemove(lineKey)}
+                          className="p-1 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Qty / Peso */}
@@ -377,23 +489,26 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                         <input
                           type="number" min="0.001" step="0.001"
                           value={weightKg}
-                          onChange={(e) => handleWeight(p.id, e.target.value)}
+                          onChange={(e) => handleWeight(lineKey, e.target.value)}
                           className="input w-20 text-sm py-1.5 text-center"
                           placeholder="0.000"
+                          disabled={isPaid}
                         />
                         <span className="text-xs text-gray-500">kg</span>
                       </div>
                     ) : (
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleQty(p.id, qty - 1)}
-                          className="w-8 h-8 rounded-xl bg-gray-700 hover:bg-red-500/30 hover:text-red-300 text-white font-black flex items-center justify-center text-lg transition-colors">
+                          onClick={() => !isPaid && handleQty(lineKey, qty - 1)}
+                          disabled={isPaid}
+                          className="w-8 h-8 rounded-xl bg-gray-700 hover:bg-red-500/30 hover:text-red-300 text-white font-black flex items-center justify-center text-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                           −
                         </button>
                         <span className="w-8 text-center text-base font-black text-white tabular-nums">{qty}</span>
                         <button
-                          onClick={() => handleQty(p.id, qty + 1)}
-                          className="w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black flex items-center justify-center text-lg transition-colors">
+                          onClick={() => !isPaid && handleQty(lineKey, qty + 1)}
+                          disabled={isPaid}
+                          className="w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black flex items-center justify-center text-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                           +
                         </button>
                       </div>
@@ -409,9 +524,10 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                   <input
                     type="text"
                     value={notes}
-                    onChange={(e) => handleNotes(p.id, e.target.value)}
+                    onChange={(e) => handleNotes(lineKey, e.target.value)}
                     placeholder="Obs: sem cebola, bem passado..."
-                    className="w-full bg-gray-900/60 border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/40 transition-colors"
+                    disabled={isPaid}
+                    className="w-full bg-gray-900/60 border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/40 transition-colors disabled:opacity-50"
                   />
                 </div>
               ))
@@ -452,6 +568,7 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
                   <div className="flex justify-between text-sm">
                     <span className={adjType === 'discount' ? 'text-green-400' : 'text-red-400'}>
                       {adjType === 'discount' ? '🔻 Desconto' : '🔺 Acréscimo'}
+                      {adjReason && <span className="text-gray-500 ml-1 text-[11px]">({adjReason})</span>}
                     </span>
                     <span className={`tabular-nums ${adjType === 'discount' ? 'text-green-400' : 'text-red-400'}`}>
                       {adjType === 'discount' ? '−' : '+'}{fmt(adj)}
@@ -553,29 +670,36 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
             </div>
 
             {/* ── Ajuste de valor ────────────────────────────── */}
-            <div className="bg-gray-800/40 rounded-2xl p-3.5 space-y-2.5 border border-white/[0.05]">
-              <label className="text-xs text-gray-400 font-bold block uppercase tracking-wide">Ajuste de valor</label>
-              <div className="grid grid-cols-2 gap-2">
-                {[{ v: 'discount', l: '🔻 Desconto' }, { v: 'surcharge', l: '🔺 Acréscimo' }].map(({ v, l }) => (
-                  <button key={v} onClick={() => setAdjType(v)}
-                    className={`py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      adjType === v
-                        ? v === 'discount'
-                          ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/30'
-                          : 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
-                        : 'bg-gray-700/60 text-gray-500 hover:bg-gray-700'
-                    }`}>{l}</button>
-                ))}
-              </div>
-              <input type="number" min="0" step="0.01" placeholder="Valor R$"
-                value={adjValue} onChange={(e) => setAdjValue(e.target.value)}
-                className="input w-full text-sm" />
-              {adj > 0 && (
-                <input type="text" placeholder="Motivo (cortesia, frete errado...)"
-                  value={adjReason} onChange={(e) => setAdjReason(e.target.value)}
+            {!isPaid && (
+              <div className="bg-gray-800/40 rounded-2xl p-3.5 space-y-2.5 border border-white/[0.05]">
+                <label className="text-xs text-gray-400 font-bold block uppercase tracking-wide">Ajuste de valor</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{ v: 'discount', l: '🔻 Desconto' }, { v: 'surcharge', l: '🔺 Acréscimo' }].map(({ v, l }) => (
+                    <button key={v} onClick={() => setAdjType(v)}
+                      className={`py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        adjType === v
+                          ? v === 'discount'
+                            ? 'bg-green-500/20 text-green-300 ring-1 ring-green-500/30'
+                            : 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
+                          : 'bg-gray-700/60 text-gray-500 hover:bg-gray-700'
+                      }`}>{l}</button>
+                  ))}
+                </div>
+                <input type="number" min="0" step="0.01" placeholder="Valor R$"
+                  value={adjValue} onChange={(e) => setAdjValue(e.target.value)}
                   className="input w-full text-sm" />
-              )}
-            </div>
+                {adj > 0 && (
+                  <div className="space-y-1">
+                    <input type="text" placeholder="Motivo obrigatório (cortesia, frete errado...)"
+                      value={adjReason} onChange={(e) => setAdjReason(e.target.value)}
+                      className={`input w-full text-sm ${!adjReason.trim() ? 'border-orange-500/40 focus:border-orange-500/70' : ''}`} />
+                    {!adjReason.trim() && (
+                      <p className="text-[10px] text-orange-400">⚠️ Motivo obrigatório para salvar</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Info do cliente ────────────────────────────── */}
             {(order.customerName || order.customerPhone || order.customerAddress) && (
@@ -612,14 +736,16 @@ export default function EditOrderModal({ order, onClose, onSave, onOrderChanged 
           </button>
           <button
             onClick={handleSaveAll}
-            disabled={submitting || cartEntries.length === 0}
+            disabled={submitting || cartEntries.length === 0 || isPaid}
             className="px-6 py-2.5 rounded-xl text-sm font-black text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed
               bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-900/30">
-            {submitting
-              ? '⏳ Salvando...'
-              : saved
-                ? '✅ Salvo!'
-                : `✓ Salvar Alterações · ${fmt(total)}`}
+            {isPaid
+              ? '🔒 Pedido Pago'
+              : submitting
+                ? '⏳ Salvando...'
+                : saved
+                  ? '✅ Salvo!'
+                  : `✓ Salvar Alterações · ${fmt(total)}`}
           </button>
         </div>
       </footer>

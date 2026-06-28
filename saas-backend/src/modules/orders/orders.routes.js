@@ -10,6 +10,8 @@ router.use(authenticate);
 
 // ── Validadores ───────────────────────────────────────────────
 
+const VALID_PAYMENT_METHODS = ['cash', 'pix', 'credit', 'debit', 'fiado', 'voucher', 'pending', 'other'];
+
 const itemRules = [
   body('items').isArray({ min: 1 }).withMessage('items deve ser um array com pelo menos 1 item.'),
   body('items.*.productId').isUUID().withMessage('Cada item deve ter um productId UUID válido.'),
@@ -17,6 +19,16 @@ const itemRules = [
   body('items.*.weightKg').optional().isFloat({ gt: 0 }).withMessage('weightKg deve ser > 0.'),
   body('customerName').optional().isLength({ max: 200 }).withMessage('Nome do cliente muito longo.'),
   body('customerPhone').optional().isLength({ max: 50 }).withMessage('Telefone muito longo.'),
+  // Pagamento dividido (opcional — se omitido, usa paymentMethod simples)
+  body('payments').optional().isArray({ min: 1 }).withMessage('payments deve ter ao menos 1 item.'),
+  body('payments.*.method')
+    .optional()
+    .isIn(VALID_PAYMENT_METHODS)
+    .withMessage(`Método inválido. Use: ${VALID_PAYMENT_METHODS.join(', ')}.`),
+  body('payments.*.amount')
+    .optional()
+    .isFloat({ gt: 0 })
+    .withMessage('payments.*.amount deve ser > 0.'),
 ];
 
 // ── Rotas ─────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ const NAV_GROUPS = [
   {
     label: 'Operação',
     items: [
+      { key: 'pdv',      emoji: '🖥️', label: 'PDV / Venda',   roles: ['owner','manager','staff','caixa'] },
       { key: 'orders',   emoji: '🍽️', label: 'Pedidos' },
       { key: 'kds',      emoji: '👨‍🍳', label: 'KDS Cozinha',  roles: ['owner','manager','staff','cozinha'] },
       { key: 'mesas',    emoji: '🪑', label: 'Mesas / QR',   roles: ['owner','manager'] },

@@ -29,7 +29,7 @@ const PAY_OPTIONS = [
 
 
 // Statuses onde edição de itens é permitida
-const EDITABLE_STATUSES = new Set(['pending', 'confirmed', 'preparing']);
+const EDITABLE_STATUSES = new Set(['pending', 'confirmed', 'preparing', 'ready']);
 
 // ── Timer ─────────────────────────────────────────────────────
 
@@ -158,10 +158,10 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
       case 'confirmed': return [prepare, cancel];
       case 'preparing': return [ready,   cancel];
       case 'ready':
-        if (isPendingPayment) return [];
+        if (isPendingPayment) return [cancel];
         // Para delivery: motoboy faz a entrega — só mostra "Entregar" se não há onAssign
-        if (order.deliveryType === 'delivery' && onAssign) return [];
-        return [deliver];
+        if (order.deliveryType === 'delivery' && onAssign) return [cancel];
+        return [deliver, cancel];
       default:          return [];
     }
   })();
