@@ -527,8 +527,9 @@ export default function PdvPage({ onNavigate }) {
   const [showHeld,   setShowHeld]   = useState(false);
 
   // UI
-  const [submitting, setSubmitting] = useState(false);
-  const [toast,      setToast]      = useState(null);
+  const [submitting,    setSubmitting]    = useState(false);
+  const [toast,         setToast]         = useState(null);
+  const [showCustForm,  setShowCustForm]  = useState(false);
 
   // ── Load caixa ────────────────────────────────────────────
   const refreshCaixa = useCallback(async () => {
@@ -558,6 +559,11 @@ export default function PdvPage({ onNavigate }) {
     refreshCaixa();
     loadCatalog();
   }, [refreshCaixa, loadCatalog]);
+
+  // Expande form de cliente automaticamente quando delivery (telefone obrigatório)
+  useEffect(() => {
+    if (deliveryMode === 'delivery') setShowCustForm(true);
+  }, [deliveryMode]);
 
   // Load fiado clientes quando necessário (single ou split)
   useEffect(() => {
@@ -865,6 +871,7 @@ export default function PdvPage({ onNavigate }) {
     setCustomerName('');
     setCustomerPhone('');
     setCustomerId(null);
+    setShowCustForm(false);
     setDeliveryMode('balcao');
     setTableNumber('');
     setDelivStreet(''); setDelivNumber(''); setDelivNeigh(''); setDelivFee('');
@@ -1139,53 +1146,83 @@ export default function PdvPage({ onNavigate }) {
         </div>
 
         {/* ══ Painel direito: Pedido ═══════════════════════════ */}
-        <div className="w-[360px] xl:w-[420px] shrink-0 flex flex-col bg-gray-900/50 overflow-hidden">
+        <div className="w-[420px] xl:w-[460px] shrink-0 flex flex-col bg-gray-900/50 overflow-hidden">
 
           {/* ── Cliente ───────────────────────────────────────── */}
-          <div className="px-3 pt-3 pb-2 border-b border-white/[0.06] shrink-0">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Cliente</p>
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Consumidor Final (ou buscar cliente)"
-                value={customerName}
-                onChange={(e) => handleCustInput(e.target.value)}
-                onFocus={() => customerName.length >= 2 && setCustSearch(true)}
-                onBlur={() => setTimeout(() => setCustSearch(false), 150)}
-                className="input w-full text-sm pr-8"
-              />
-              {customerName && (
-                <button onClick={() => { setCustomerName(''); setCustomerPhone(''); setCustomerId(null); setCustSuggestions([]); }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs">✕</button>
-              )}
-              <AnimatePresence>
-                {custSearch && custSuggestions.length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                    className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-white/10 rounded-xl shadow-xl z-20 overflow-hidden"
+          <div className="px-3 py-2 border-b border-white/[0.06] shrink-0">
+            {showCustForm ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cliente</p>
+                  <button onClick={() => setShowCustForm(false)}
+                    className="text-[10px] text-gray-600 hover:text-gray-300 transition-colors">✕ Fechar</button>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Nome do cliente..."
+                    value={customerName}
+                    onChange={(e) => handleCustInput(e.target.value)}
+                    onFocus={() => customerName.length >= 2 && setCustSearch(true)}
+                    onBlur={() => setTimeout(() => setCustSearch(false), 150)}
+                    className="input w-full text-sm pr-8"
+                    autoFocus
+                  />
+                  {customerName && (
+                    <button onClick={() => { setCustomerName(''); setCustomerPhone(''); setCustomerId(null); setCustSuggestions([]); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs">✕</button>
+                  )}
+                  <AnimatePresence>
+                    {custSearch && custSuggestions.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                        className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-white/10 rounded-xl shadow-xl z-20 overflow-hidden"
+                      >
+                        {custSuggestions.map((c, i) => (
+                          <button key={i} onMouseDown={() => applyCust(c)}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-white/[0.04] last:border-0">
+                            <p className="text-sm text-gray-200 font-medium truncate">{c.name ?? c.customer_name}</p>
+                            {(c.phone ?? c.customer_phone) && <p className="text-xs text-gray-500">{c.phone ?? c.customer_phone}</p>}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <input
+                  type="tel"
+                  placeholder="Telefone (obrigatório para delivery)"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="input w-full text-sm"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="text-gray-600 text-base shrink-0">👤</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-200 truncate leading-tight">
+                      {customerName || 'Consumidor Final'}
+                    </p>
+                    {customerPhone && <p className="text-[10px] text-gray-500 leading-tight">📱 {customerPhone}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {customerName && (
+                    <button
+                      onClick={() => { setCustomerName(''); setCustomerPhone(''); setCustomerId(null); setCustSuggestions([]); }}
+                      className="text-gray-600 hover:text-red-400 transition-colors text-xs"
+                    >✕</button>
+                  )}
+                  <button
+                    onClick={() => setShowCustForm(true)}
+                    className="text-[10px] px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-white/10 transition-colors whitespace-nowrap"
                   >
-                    {custSuggestions.map((c, i) => (
-                      <button key={i} onMouseDown={() => applyCust(c)}
-                        className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-white/[0.04] last:border-0">
-                        <p className="text-sm text-gray-200 font-medium truncate">{c.name ?? c.customer_name}</p>
-                        {(c.phone ?? c.customer_phone) && <p className="text-xs text-gray-500">{c.phone ?? c.customer_phone}</p>}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-            {customerPhone && (
-              <p className="text-[10px] text-gray-500 mt-1 pl-0.5">📱 {customerPhone}</p>
-            )}
-            {!customerPhone && (
-              <input
-                type="tel"
-                placeholder="Telefone (opcional)"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="input w-full text-sm mt-1.5"
-              />
+                    {customerName ? 'Editar' : 'Identificar'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1194,13 +1231,13 @@ export default function PdvPage({ onNavigate }) {
             <div className="grid grid-cols-4 gap-1">
               {DELIVERY_TABS.map((tab) => (
                 <button key={tab.id} onClick={() => setDeliveryMode(tab.id)}
-                  className={`flex flex-col items-center gap-0.5 py-2 rounded-xl text-[10px] font-bold transition-all border ${
+                  className={`flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-[10px] font-bold transition-all border ${
                     deliveryMode === tab.id
                       ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
                       : 'bg-gray-800/50 text-gray-500 border-white/[0.05] hover:text-gray-300'
                   }`}
                 >
-                  <span className="text-sm">{tab.icon}</span>
+                  <span className="text-xs">{tab.icon}</span>
                   {tab.label}
                 </button>
               ))}
@@ -1237,9 +1274,17 @@ export default function PdvPage({ onNavigate }) {
           </div>
 
           {/* ── Itens do carrinho ─────────────────────────────── */}
-          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+          <div className="px-3 pt-2 pb-0 flex items-center justify-between shrink-0">
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+              Itens do pedido{cartEntries.length > 0 && <span className="text-orange-400 ml-1">({cartEntries.length})</span>}
+            </p>
+            {cartEntries.length > 0 && (
+              <span className="text-[10px] text-gray-600">{fmt(subtotal)}</span>
+            )}
+          </div>
+          <div className="flex-1 min-h-[200px] overflow-y-auto px-3 py-2 space-y-2">
             {cartEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-24 text-gray-600 gap-2">
+              <div className="flex flex-col items-center justify-center h-full min-h-[160px] text-gray-600 gap-2">
                 <span className="text-3xl">🛒</span>
                 <p className="text-xs italic text-center">Selecione produtos à esquerda</p>
               </div>
@@ -1307,7 +1352,8 @@ export default function PdvPage({ onNavigate }) {
           </div>
 
           {/* ── Resumo + Pagamento ────────────────────────────── */}
-          <div className="border-t border-white/[0.06] shrink-0 px-3 py-2.5 space-y-2.5">
+          <div className="border-t border-white/[0.06] shrink-0 overflow-y-auto max-h-[300px]">
+          <div className="px-3 py-2 space-y-2">
 
             {/* Desconto */}
             <div className="flex items-center gap-2">
@@ -1386,12 +1432,12 @@ export default function PdvPage({ onNavigate }) {
                         <button key={value} type="button"
                           onClick={() => { setPayMethod(value); setFiadoClienteId(''); setFiadoSearch(''); }}
                           className={[
-                            'flex flex-col items-center gap-0.5 py-2 rounded-xl text-xs font-bold border-2 transition-all',
+                            'flex items-center justify-center gap-1 py-1.5 rounded-xl text-[10px] font-bold border-2 transition-all',
                             active ? activeCls : 'border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300 bg-gray-800/40',
                           ].join(' ')}
                         >
-                          <span className="text-base">{icon}</span>
-                          <span className="text-[10px]">{name}</span>
+                          <span className="text-xs">{icon}</span>
+                          <span>{name}</span>
                         </button>
                       );
                     })}
@@ -1494,12 +1540,13 @@ export default function PdvPage({ onNavigate }) {
 
             {/* Observação geral */}
             <textarea
-              rows={2}
+              rows={1}
               placeholder="Observação do pedido..."
               value={orderNotes}
               onChange={(e) => setOrderNotes(e.target.value)}
               className="w-full text-xs bg-gray-800/60 border border-white/[0.08] rounded-xl px-3 py-2 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-orange-500/40 resize-none"
             />
+          </div>
           </div>
         </div>
       </div>
