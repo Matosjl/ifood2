@@ -335,38 +335,46 @@ function HeldDrawer({ held, onRestore, onDelete, onClose }) {
 // ── Produto card ─────────────────────────────────────────────
 function ProductCard({ product, inCart, onAdd }) {
   const esgotado = product.stock_qty !== undefined && product.stock_qty !== null && product.stock_qty <= 0;
+  const handleClick = () => {
+    if (esgotado) return;
+    onAdd(product);
+  };
   return (
-    <div className={`relative bg-gray-800/60 border rounded-xl overflow-hidden flex flex-col transition-all ${esgotado ? 'opacity-50 border-white/[0.04]' : 'border-white/[0.07] hover:border-orange-500/30 hover:bg-gray-800/90 cursor-pointer'} ${inCart ? 'ring-1 ring-orange-500/40' : ''}`}>
-      {/* Imagem */}
-      <div className="aspect-video bg-gray-900/80 flex items-center justify-center overflow-hidden shrink-0 relative">
+    <div
+      onClick={handleClick}
+      className={`relative bg-gray-800/60 border rounded-xl overflow-hidden flex flex-col transition-all select-none ${esgotado ? 'opacity-50 border-white/[0.04] cursor-not-allowed' : 'border-white/[0.07] hover:border-orange-500/40 hover:bg-gray-800/90 cursor-pointer active:scale-[0.97]'} ${inCart ? 'ring-1 ring-orange-500/50' : ''}`}
+    >
+      {/* Imagem compacta */}
+      <div className="h-16 bg-gray-900/80 flex items-center justify-center overflow-hidden shrink-0 relative">
         {product.image_url ? (
           <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
         ) : (
-          <span className="text-3xl select-none">🍽️</span>
+          <span className="text-2xl select-none">🍽️</span>
         )}
-        {inCart && (
-          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
+        {inCart > 0 && (
+          <div className="absolute top-1 right-1 min-w-[20px] h-5 px-1 rounded-full bg-orange-500 flex items-center justify-center">
             <span className="text-[10px] font-black text-white">{inCart}</span>
           </div>
         )}
         {esgotado && (
           <div className="absolute inset-0 bg-gray-900/70 flex items-center justify-center">
-            <span className="text-xs text-red-400 font-bold bg-gray-900/80 px-2 py-1 rounded-full">Esgotado</span>
+            <span className="text-[10px] text-red-400 font-bold bg-gray-900/80 px-2 py-0.5 rounded-full">Esgotado</span>
           </div>
         )}
       </div>
       {/* Info */}
-      <div className="p-2.5 flex flex-col flex-1 gap-1.5">
+      <div className="p-2 flex flex-col flex-1 gap-1">
         <p className="text-xs font-bold text-gray-200 leading-tight line-clamp-2">{product.name}</p>
         <div className="flex items-center justify-between gap-1 mt-auto">
           <div>
             <p className="text-sm font-black text-white">{fmt(product.sale_price)}</p>
             {product.sale_type === 'kg' && <p className="text-[10px] text-gray-500">/ kg</p>}
           </div>
+          {/* stopPropagation evita duplo add quando clica no botão (card já tratou) */}
           <button
             disabled={esgotado}
-            onClick={() => !esgotado && onAdd(product)}
-            className="w-7 h-7 rounded-lg bg-orange-500 hover:bg-orange-400 text-white flex items-center justify-center text-sm font-black transition-colors disabled:opacity-30 shrink-0"
+            onClick={(e) => { e.stopPropagation(); handleClick(); }}
+            className="w-6 h-6 rounded-lg bg-orange-500 hover:bg-orange-400 text-white flex items-center justify-center text-xs font-black transition-colors disabled:opacity-30 shrink-0"
           >
             +
           </button>
@@ -653,7 +661,8 @@ export default function PdvPage({ onNavigate }) {
       }
       return { ...prev, [product.id]: { product, qty: 1, weightKg: '', addons: [], notes: '', variation: null, choices: null } };
     });
-  }, []);
+    setToast({ msg: `Adicionado: ${product.name}`, type: 'success' });
+  }, [setToast]);
 
   // ── Scanner global de barcode ─────────────────────────────
   // Deve ficar após handleAddProduct (evita TDZ no dep array em produção).
@@ -1104,7 +1113,7 @@ export default function PdvPage({ onNavigate }) {
           {/* Grid de produtos */}
           <div className="flex-1 overflow-y-auto p-3">
             {prodLoad ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                 {Array.from({ length: 10 }).map((_, i) => (
                   <div key={i} className="aspect-[3/4] bg-gray-800/60 rounded-xl animate-pulse" />
                 ))}
@@ -1115,7 +1124,7 @@ export default function PdvPage({ onNavigate }) {
                 <p className="text-sm">Nenhum produto encontrado</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                 {visibleProducts.map((p) => {
                   const count = Object.values(cart)
                     .filter((e) => e.product.id === p.id)
@@ -1130,7 +1139,7 @@ export default function PdvPage({ onNavigate }) {
         </div>
 
         {/* ══ Painel direito: Pedido ═══════════════════════════ */}
-        <div className="w-80 xl:w-96 shrink-0 flex flex-col bg-gray-900/50 overflow-hidden">
+        <div className="w-[360px] xl:w-[420px] shrink-0 flex flex-col bg-gray-900/50 overflow-hidden">
 
           {/* ── Cliente ───────────────────────────────────────── */}
           <div className="px-3 pt-3 pb-2 border-b border-white/[0.06] shrink-0">
@@ -1241,23 +1250,23 @@ export default function PdvPage({ onNavigate }) {
                 const units = product.sale_type === 'kg' ? parseFloat(weightKg || 0) : qty;
                 const lineTotal = basePrice * units + (addons ?? []).reduce((s, a) => s + parseFloat(a.unit_price || 0) * (a.qty || 1), 0) * (product.sale_type === 'kg' ? 1 : qty);
                 return (
-                  <div key={key} className="bg-gray-800/60 rounded-xl p-2.5 space-y-1.5">
+                  <div key={key} className="bg-gray-800/60 rounded-xl p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-gray-200 leading-tight truncate">{product.name}</p>
+                        <p className="text-sm font-bold text-gray-100 leading-tight">{product.name}</p>
                         {variation?.length > 0 && (
-                          <p className="text-[10px] text-orange-400 leading-none mt-0.5">
+                          <p className="text-xs text-orange-400 leading-none mt-0.5">
                             {variation.map((s) => s.optionName).join(' · ')}
                           </p>
                         )}
                         {addons?.length > 0 && (
-                          <p className="text-[10px] text-gray-500">
+                          <p className="text-xs text-gray-500">
                             {addons.map((a) => `+${a.addon_name}`).join(', ')}
                           </p>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-xs font-black text-white tabular-nums">{fmt(lineTotal)}</span>
+                        <span className="text-sm font-black text-white tabular-nums">{fmt(lineTotal)}</span>
                         <button onClick={() => removeItem(key)} className="text-gray-600 hover:text-red-400 transition-colors">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1274,13 +1283,13 @@ export default function PdvPage({ onNavigate }) {
                         <span className="text-[10px] text-gray-500">kg × {fmt(basePrice)}/kg</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <button onClick={() => updateQty(key, -1)}
-                          className="w-5 h-5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold flex items-center justify-center">−</button>
-                        <span className="w-6 text-center text-xs font-bold text-white">{qty}</span>
+                          className="w-6 h-6 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold flex items-center justify-center">−</button>
+                        <span className="w-7 text-center text-sm font-bold text-white">{qty}</span>
                         <button onClick={() => updateQty(key, +1)}
-                          className="w-5 h-5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold flex items-center justify-center">+</button>
-                        <span className="ml-1 text-[10px] text-gray-500">{fmt(basePrice)} / un</span>
+                          className="w-6 h-6 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold flex items-center justify-center">+</button>
+                        <span className="ml-1 text-xs text-gray-500">{fmt(basePrice)}/un</span>
                       </div>
                     )}
 
