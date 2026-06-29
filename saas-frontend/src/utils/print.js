@@ -468,6 +468,116 @@ export function printOrder(order) {
   return openPrint(html, 300);
 }
 
+// ── Pré-conta do PDV (carrinho ainda não salvo) ──────────────
+// Converte o estado do carrinho do PDV para o formato de printOrder.
+// cart   : objeto { [key]: { product, qty, weightKg, addons, notes, variation, choices } }
+// sale   : { customerName, customerPhone, deliveryMode, tableNumber,
+//            delivStreet, delivNumber, delivNeigh, delivFee,
+//            payMethod, cashReceived, totalAmt, discountAmt, troco,
+//            orderNotes, splitMode, splits }
+export function printPdvCart(cart, sale) {
+  const entries = Object.values(cart ?? {});
+  if (entries.length === 0) return { ok: false, reason: 'no_items' };
+
+  const {
+    customerName, customerPhone,
+    deliveryMode, tableNumber,
+    delivStreet = '', delivNumber = '', delivNeigh = '', delivFee = '',
+    payMethod = 'cash', cashReceived = '',
+    totalAmt = 0, discountAmt = 0, troco: trocoAmt = 0,
+    orderNotes = '', splitMode = false, splits = [],
+  } = sale ?? {};
+
+  // Converte entradas do carrinho → items do printOrder
+  const items = entries.map((entry) => {
+    const { product, qty, weightKg, addons = [], notes, variation, choices } = entry;
+
+    // Preço base: soma das opções de variação ou sale_price
+    const basePrice = variation?.length
+      ? variation.reduce((s, sel) => s + (parseFloat(sel.price) || 0), 0)
+      : parseFloat(product.sale_price) || 0;
+
+    const units    = product.sale_type === 'kg' ? parseFloat(weightKg || 0) : (qty || 1);
+    const addonSum = (addons).reduce((s, a) => s + (parseFloat(a.unit_price || 0) * (a.qty || 1)), 0);
+    const lineTotal = basePrice * units + addonSum * (product.sale_type === 'kg' ? 1 : (qty || 1));
+
+    // Rótulo de variação para cozinha / recibo
+    const variationLabel = variation?.length
+      ? variation.map((v) => v.optionName).join(' · ')
+      : null;
+
+    return {
+      productName:    product.name,
+      quantity:       product.sale_type === 'kg' ? 1    : (qty || 1),
+      weightKg:       product.sale_type === 'kg' ? parseFloat(weightKg || 0) : null,
+      total:          lineTotal,
+      notes:          notes || null,
+      variationLabel,
+      addons: (addons).map((a) => ({
+        addonName: a.addon_name ?? a.addonName ?? '',
+        qty:       a.qty ?? 1,
+        total:     parseFloat(a.unit_price || 0) * (a.qty || 1),
+      })),
+      choices: (choices ?? []).map((c) => ({
+        productName: c.product_name ?? c.productName ?? '',
+        extraPrice:  c.extra_price  ?? c.extraPrice  ?? 0,
+      })),
+    };
+  });
+
+  // Monta array de pagamentos
+  let payments;
+  if (splitMode && splits.length) {
+    payments = splits.map((s) => ({
+      method:          s.method,
+      amount:          parseFloat(s.amount) || 0,
+      received_amount: s.method === 'cash' && s.receivedAmount ? parseFloat(s.receivedAmount) : null,
+      change_amount:   s.method === 'cash' && s.receivedAmount
+        ? Math.max(0, parseFloat(s.receivedAmount) - parseFloat(s.amount))
+        : null,
+    }));
+  } else {
+    const p = { method: payMethod, amount: totalAmt };
+    if (payMethod === 'cash' && cashReceived) {
+      p.received_amount = parseFloat(cashReceived);
+      p.change_amount   = trocoAmt > 0 ? trocoAmt : 0;
+    }
+    payments = [p];
+  }
+
+  const isDelivery = deliveryMode === 'delivery';
+  const address    = isDelivery
+    ? [delivStreet, delivNumber ? `, ${delivNumber}` : '', delivNeigh ? ` - ${delivNeigh}` : ''].join('')
+    : null;
+
+  const modeLabels = { balcao: 'BALCÃO', retirada: 'RETIRADA', delivery: 'DELIVERY', mesa: `MESA ${tableNumber || ''}` };
+
+  const notesParts = [
+    orderNotes,
+    deliveryMode === 'mesa' && tableNumber ? `Mesa ${tableNumber}` : '',
+    discountAmt > 0 ? `Desconto: R$ ${parseFloat(discountAmt).toFixed(2)}` : '',
+  ].filter(Boolean);
+
+  // Usa orderNumber especial para pré-conta
+  const order = {
+    orderNumber:     'PRÉ-CONTA',
+    customerName:    customerName || 'Consumidor Final',
+    customerPhone:   customerPhone || null,
+    deliveryType:    isDelivery ? 'delivery' : 'pickup',
+    channel:         modeLabels[deliveryMode] ?? 'PDV',
+    items,
+    payments,
+    paymentMethod:   splitMode ? 'mixed' : payMethod,
+    deliveryFee:     isDelivery ? parseFloat(delivFee || 0) : 0,
+    customerAddress: address,
+    neighborhood:    isDelivery ? (delivNeigh || null) : null,
+    total:           totalAmt,
+    notes:           notesParts.join(' | ') || null,
+  };
+
+  return printOrder(order);
+}
+
 // ── Comanda de cozinha — 58mm ou 80mm (lê localStorage) ──────
 // Configurável em Configurações → Impressora → Largura da comanda
 // Valores: '58' (padrão) ou '80'

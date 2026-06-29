@@ -12,6 +12,7 @@ import { getProductAddonGroups } from '../api/addons';
 import { listFiadoClientes } from '../api/fiado';
 import { fmt, PAY_OPTIONS } from '../constants/orders';
 import { cartTotal, itemBasePrice } from '../utils/cart';
+import { printPdvCart } from '../utils/print';
 
 // ── Constantes ───────────────────────────────────────────────
 const HELD_KEY = 'zapfome_pdv_held';
@@ -986,6 +987,25 @@ export default function PdvPage({ onNavigate }) {
     }
   };
 
+  // ── Impressão — pré-conta do carrinho ────────────────────
+  const handlePrint = () => {
+    if (cartEntries.length === 0) {
+      setToast({ msg: 'Adicione itens antes de imprimir.', type: 'warn' });
+      return;
+    }
+    const result = printPdvCart(cart, {
+      customerName, customerPhone,
+      deliveryMode, tableNumber,
+      delivStreet, delivNumber, delivNeigh, delivFee,
+      payMethod, cashReceived,
+      totalAmt, discountAmt, troco,
+      orderNotes, splitMode, splits,
+    });
+    if (result === false) {
+      setToast({ msg: 'Impressão bloqueada. Permita popups para este site.', type: 'warn' });
+    }
+  };
+
   // ── Open caixa ────────────────────────────────────────────
   const handleOpenCaixa = async (body) => {
     await openCaixa(body);
@@ -1565,7 +1585,7 @@ export default function PdvPage({ onNavigate }) {
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 text-xs font-semibold transition-colors border border-blue-500/20 disabled:opacity-40">
           👨‍🍳 Cozinha
         </button>
-        <button onClick={() => window.print()}
+        <button onClick={handlePrint}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white text-xs font-semibold transition-colors border border-white/[0.06]">
           🖨 Imprimir
         </button>
