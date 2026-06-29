@@ -243,9 +243,18 @@ export default function useOrders() {
     startAlert();
   }, [startAlert]);
 
-  const handleOrderUpdated = useCallback((order) => {
-    const o = norm(order);
-    setOrders((prev) => prev.map((p) => p.id === o.id ? o : p));
+  const handleOrderUpdated = useCallback((rawOrder) => {
+    const o = norm(rawOrder);
+    setOrders((prev) => prev.map((p) => {
+      if (p.id !== o.id) return p;
+      // Merge defensivo: se o payload não trouxer items (campo ausente),
+      // preserva os itens já conhecidos. Backend pós-fix sempre envia items,
+      // mas isso protege contra payloads parciais de outras origens.
+      if (rawOrder.items === undefined && p.items?.length) {
+        return { ...o, items: p.items };
+      }
+      return o;
+    }));
     acknowledgeOrder(o.id);
   }, [acknowledgeOrder]);
 

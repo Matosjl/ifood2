@@ -321,6 +321,8 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
               <span className="text-xs text-blue-300 font-medium whitespace-nowrap">
                 🛵 Entrega{order.deliveryFee > 0 ? ` +R$${parseFloat(order.deliveryFee).toFixed(2).replace('.', ',')}` : ''}
               </span>
+            ) : order.deliveryType === 'balcao' ? (
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">🏪 Balcão</span>
             ) : (
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">🏪 Retirada</span>
             )}

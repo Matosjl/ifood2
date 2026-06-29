@@ -8,6 +8,7 @@ const AppError             = require('../../utils/AppError');
 const db                   = require('../../config/database');
 const eventService         = require('../../socket/eventService');
 const waNotify             = require('../../services/waNotify.service');
+const orderCache           = require('../../cache/orderCache');
 
 const handleValidation = (req) => {
   const errors = validationResult(req);
@@ -51,10 +52,11 @@ const transitions = asyncHandler(async (req, res) => {
  *
  * Idempotencia: o cliente pode enviar X-Idempotency-Key (UUID).
  * Se omitido, geramos um para esta requisicao.
- * O mesmo key e usado como jobId no BullMQ (dedup em fila) e
- * como idempotency_key no DB (dedup permanente).
+ * Idempotency_key e gravado no DB com constraint UNIQUE — dedup permanente.
  *
- * O pedido e criado com status 'confirmed' pelo worker.
+ * Criação é feita diretamente no service (sem passar pela fila BullMQ) para
+ * evitar que um timeout de 30s no waitUntilFinished cause erro falso no PDV
+ * enquanto o pedido já foi persistido no banco.
  */
 const create = asyncHandler(async (req, res) => {
   handleValidation(req);
@@ -69,20 +71,19 @@ const create = asyncHandler(async (req, res) => {
   }
 
   const idempotencyKey = req.headers['x-idempotency-key'] || uuidv4();
-  const order = await enqueueAndWait(
-    'create',
-    {
-      tenantId: req.user.tenantId,
-      payload: {
-        ...req.body,
-        enforceRequiredVariation: true,
-        userId:          req.user.userId,    // para order_payments.created_by
-        cashRegisterId:  caixaRows[0].id,    // para order_payments.cash_register_id
-      },
-      idempotencyKey,
-    },
-    { idempotencyKey }
-  );
+  const order = await service.createOrder(req.user.tenantId, {
+    ...req.body,
+    enforceRequiredVariation: true,
+    userId:         req.user.userId,   // para order_payments.created_by
+    cashRegisterId: caixaRows[0].id,   // para order_payments.cash_register_id
+    initialStatus:  'confirmed',
+    idempotencyKey,
+  });
+
+  // Cache Redis + socket (antes eram responsabilidade do worker)
+  orderCache.upsertOrder(req.user.tenantId, order).catch(() => {});
+  eventService.orderCreated(req.user.tenantId, order);
+
   res.status(201).json({ success: true, data: order });
 });
 

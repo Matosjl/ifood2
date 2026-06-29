@@ -87,6 +87,8 @@ api.interceptors.response.use(
       api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
       original.headers.Authorization            = `Bearer ${accessToken}`;
 
+      window.dispatchEvent(new CustomEvent('auth:tokenRefreshed', { detail: { token: accessToken } }));
+
       processQueue(null, accessToken);
       return api(original);
     } catch (refreshErr) {

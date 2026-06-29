@@ -683,6 +683,12 @@ const createOrder = async (tenantId, {
       );
     }
 
+    // Auto-set paid_at para pedidos PDV confirmados sem pagamento diferido
+    const DEFERRED_METHODS = new Set(['fiado', 'pending']);
+    if (initialStatus === 'confirmed' && resolvedPayments.every(p => !DEFERRED_METHODS.has(p.method))) {
+      await client.query(`UPDATE orders SET paid_at = NOW() WHERE id = $1`, [order.id]);
+    }
+
     await client.query('COMMIT');
 
     // Incrementa contador mensal de pedidos (fire-and-forget)
@@ -900,7 +906,10 @@ const updateStatus = async (id, tenantId, status, userId = null) => {
   );
   const previousStatus = prev[0]?.status ?? null;
 
-  const updatedOrder = await Order.updateStatus(id, tenantId, status);
+  await Order.updateStatus(id, tenantId, status);
+  // findById retorna o pedido completo (com items + payments) para que o socket
+  // emita um payload hidratado — evita que o card fique em branco no Kanban.
+  const updatedOrder = await Order.findById(id, tenantId);
 
   // Audit log de mudança de status (fora de transaction — falha silenciosa)
   writeAuditLog(tenantId, id, userId, 'status_changed', {
@@ -983,7 +992,7 @@ const cancelOrder = async (id, tenantId, reason = null, userId = null) => {
     );
   }
 
-  const updated = await Order.updateStatus(id, tenantId, 'cancelled', reason);
+  await Order.updateStatus(id, tenantId, 'cancelled', reason);
 
   // Salva cancelled_by e cancelled_at
   await db.query(
@@ -1024,6 +1033,9 @@ const cancelOrder = async (id, tenantId, reason = null, userId = null) => {
       await revertForOrder(tenantId, id);
     }
   }
+
+  // Pedido completo (com items) após todos os updates — evita card em branco no Kanban
+  const updated = await Order.findById(id, tenantId);
 
   // Remove do cache Redis (status = cancelled → hdel automático via upsertOrder)
   orderCache.upsertOrder(tenantId, updated).catch(() => {});

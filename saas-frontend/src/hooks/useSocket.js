@@ -52,10 +52,16 @@ export default function useSocket({
 
     socket.on('connect_error', (err) => {
       console.warn('[Socket] erro de conexão:', err.message);
-      // Token expirado ou inválido → para de reconectar; usuário precisa fazer login
       if (AUTH_ERRORS.has(err.message)) {
-        console.warn('[Socket] sessão expirada — desconectando permanentemente');
-        socket.disconnect();
+        // Token expirado — tenta reconectar com token atual (pode já ter sido renovado pelo interceptor)
+        const freshToken = localStorage.getItem('token');
+        if (freshToken && freshToken !== socket.auth.token) {
+          socket.auth = { token: freshToken };
+          socket.connect();
+        } else {
+          console.warn('[Socket] sessão expirada — aguardando renovação do token');
+          socket.disconnect();
+        }
       }
     });
 
@@ -70,7 +76,24 @@ export default function useSocket({
     socket.on('order:updated', (order)   => handlersRef.current.onOrderUpdated?.(order));
     socket.on('order:deleted', ({ id })  => handlersRef.current.onOrderDeleted?.(id));
 
-    return () => { socket.disconnect(); setConnected(false); };
+    // Axios renovação de token → reconecta socket com novo token
+    const onTokenRefreshed = ({ detail }) => {
+      socket.auth = { token: detail.token };
+      if (!socket.connected) socket.connect();
+    };
+
+    // Logout → desconecta definitivamente
+    const onLogout = () => socket.disconnect();
+
+    window.addEventListener('auth:tokenRefreshed', onTokenRefreshed);
+    window.addEventListener('auth:logout',         onLogout);
+
+    return () => {
+      window.removeEventListener('auth:tokenRefreshed', onTokenRefreshed);
+      window.removeEventListener('auth:logout',         onLogout);
+      socket.disconnect();
+      setConnected(false);
+    };
   }, []); // socket criado uma vez por mount
 
   return connected;

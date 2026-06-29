@@ -18,7 +18,7 @@ import { printPdvCart } from '../utils/print';
 const HELD_KEY = 'zapfome_pdv_held';
 
 const DELIVERY_TABS = [
-  { id: 'balcao',   label: 'Balcão',   icon: '🏪', deliveryType: 'pickup',   channel: 'manual' },
+  { id: 'balcao',   label: 'Balcão',   icon: '🏪', deliveryType: 'balcao',   channel: 'manual' },
   { id: 'retirada', label: 'Retirada', icon: '🏃', deliveryType: 'pickup',   channel: 'manual' },
   { id: 'delivery', label: 'Delivery', icon: '🛵', deliveryType: 'delivery', channel: 'manual' },
   { id: 'mesa',     label: 'Mesa',     icon: '🪑', deliveryType: 'pickup',   channel: 'mesa'   },
@@ -975,7 +975,8 @@ export default function PdvPage({ onNavigate }) {
 
       setToast({ msg: sendToKitchen ? 'Enviado para cozinha!' : 'Venda finalizada!', type: 'success' });
       clearForm();
-      await refreshCaixa();
+      // fire-and-forget — falha no refresh não cancela a venda já criada
+      refreshCaixa().catch(() => {});
     } catch (err) {
       const msg = err?.response?.data?.message || 'Erro ao finalizar venda';
       setToast({ msg, type: 'error' });

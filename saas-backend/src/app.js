@@ -146,6 +146,7 @@ app.use('/api/locations',      locationsRoutes);
 app.use('/api/incidents',      require('./modules/incidents/incidents.routes'));
 app.use('/api/consumo-interno', require('./modules/consumo/consumo.routes'));   // Consumo interno
 app.use('/api/vazamentos',      require('./modules/consumo/vazamentos.routes')); // Centro de Vazamentos
+app.use('/api/dashboard',       require('./modules/dashboard/dashboard.routes')); // Saúde operacional
 
 // GET /api/plans — endpoint público com os planos disponíveis
 app.get('/api/plans', (req, res) => {
