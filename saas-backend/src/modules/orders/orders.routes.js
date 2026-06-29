@@ -15,8 +15,8 @@ const VALID_PAYMENT_METHODS = ['cash', 'pix', 'credit', 'debit', 'fiado', 'vouch
 const itemRules = [
   body('items').isArray({ min: 1 }).withMessage('items deve ser um array com pelo menos 1 item.'),
   body('items.*.productId').isUUID().withMessage('Cada item deve ter um productId UUID válido.'),
-  body('items.*.quantity').optional().isInt({ min: 1 }).withMessage('quantity deve ser inteiro >= 1.'),
-  body('items.*.weightKg').optional().isFloat({ gt: 0 }).withMessage('weightKg deve ser > 0.'),
+  body('items.*.quantity').optional({ nullable: true }).isInt({ min: 1 }).withMessage('quantity deve ser inteiro >= 1.'),
+  body('items.*.weightKg').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('Peso (kg) deve ser maior que zero.'),
   body('customerName').optional().isLength({ max: 200 }).withMessage('Nome do cliente muito longo.'),
   body('customerPhone').optional().isLength({ max: 50 }).withMessage('Telefone muito longo.'),
   // Pagamento dividido (opcional — se omitido, usa paymentMethod simples)
