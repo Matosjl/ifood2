@@ -38,6 +38,44 @@ const writeAuditLog = async (tenantId, orderId, userId, action, changes) => {
 // ── Cashback helpers (compartilhados com public.controller) ───
 
 /** Normaliza telefone: mantém apenas dígitos */
+const DIRECT_CANCEL_BLOCK_MESSAGE = 'Pedido pago ou já preparado não pode ser cancelado diretamente. Registre um estorno/ajuste financeiro.';
+const CANCEL_BLOCK_STATUSES = new Set(['preparing', 'ready', 'delivering', 'delivered', 'completed']);
+const RECEIVED_PAYMENT_METHODS = new Set(['cash', 'pix', 'credit', 'debit', 'voucher', 'other']);
+
+const orderHasReceivedPayment = (order) => {
+  if (!order) return false;
+  if (order.paid_at) return true;
+  if (order.payment_status === 'paid') return true;
+  return (order.payments || []).some((payment) => (
+    RECEIVED_PAYMENT_METHODS.has(String(payment.method || '').toLowerCase()) &&
+    Number(payment.amount || 0) > 0
+  ));
+};
+
+const orderHasClosedCashRegisterImpact = async (orderId, tenantId) => {
+  const { rows } = await db.query(
+    `SELECT 1
+       FROM order_payments op
+       JOIN cash_registers cr ON cr.id = op.cash_register_id
+      WHERE op.order_id = $1
+        AND op.tenant_id = $2
+        AND cr.status = 'closed'
+      LIMIT 1`,
+    [orderId, tenantId]
+  );
+  return rows.length > 0;
+};
+
+const assertOrderCanBeCancelledDirectly = async (order, tenantId) => {
+  if (
+    orderHasReceivedPayment(order) ||
+    CANCEL_BLOCK_STATUSES.has(order.status) ||
+    await orderHasClosedCashRegisterImpact(order.id, tenantId)
+  ) {
+    throw new AppError(DIRECT_CANCEL_BLOCK_MESSAGE, 409);
+  }
+};
+
 const normalizePhone = (phone) => (phone ?? '').replace(/\D/g, '').trim();
 
 /**
@@ -984,13 +1022,7 @@ const cancelOrder = async (id, tenantId, reason = null, userId = null) => {
   const order = await Order.findById(id, tenantId);
   if (!order) throw new AppError('Pedido nao encontrado.', 404);
 
-  // Bloqueia cancelamento de pedido já pago — necessário registrar estorno primeiro
-  if (order.paid_at) {
-    throw new AppError(
-      'Este pedido já possui pagamento registrado. Para cancelar, é necessário registrar estorno/ajuste financeiro.',
-      400
-    );
-  }
+  await assertOrderCanBeCancelledDirectly(order, tenantId);
 
   await Order.updateStatus(id, tenantId, 'cancelled', reason);
 

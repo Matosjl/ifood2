@@ -85,7 +85,19 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
   const cfg = STATUS[order.status] ?? STATUS.pending;
 
   // Pagamento pendente: criado com 'A cobrar' e ainda não recebido
-  const isPendingPayment = order.paymentMethod === 'pending' && !order.paidAt;
+  const hasReceivedPayment = Boolean(order.paidAt || order.paid_at) ||
+    order.paymentStatus === 'paid' ||
+    order.payment_status === 'paid' ||
+    (Array.isArray(order.payments) && order.payments.some((p) => (
+      Number(p.amount) > 0 &&
+      !['fiado', 'pending', 'a_cobrar'].includes(String(p.method || '').toLowerCase())
+    )));
+  const hasOperationalImpact = ['preparing', 'ready', 'delivering', 'delivered', 'completed'].includes(order.status);
+  const canCancelNormally =
+    !hasReceivedPayment &&
+    !hasOperationalImpact &&
+    ['pending', 'confirmed'].includes(order.status);
+  const isPendingPayment = order.paymentMethod === 'pending' && !hasReceivedPayment;
 
   useEffect(() => {
     const t = setTimeout(() => setIsNew(false), 600);
@@ -155,13 +167,13 @@ export default function OrderCard({ order, onStatusChange, onAcknowledge, onMark
 
     switch (order.status) {
       case 'pending':
-      case 'confirmed': return [prepare, cancel];
-      case 'preparing': return [ready,   cancel];
+      case 'confirmed': return canCancelNormally ? [prepare, cancel] : [prepare];
+      case 'preparing': return [ready];
       case 'ready':
-        if (isPendingPayment) return [cancel];
+        if (isPendingPayment) return [];
         // Para delivery: motoboy faz a entrega — só mostra "Entregar" se não há onAssign
-        if (order.deliveryType === 'delivery' && onAssign) return [cancel];
-        return [deliver, cancel];
+        if (order.deliveryType === 'delivery' && onAssign) return [];
+        return [deliver];
       default:          return [];
     }
   })();

@@ -59,6 +59,12 @@ const norm = (o) => ({
   notes:        o.notes        ?? null,
   deliveryType:  o.deliveryType  ?? o.delivery_type  ?? 'pickup',
   paymentMethod: o.paymentMethod ?? o.payment_method ?? 'cash',
+  paymentStatus: o.paymentStatus ?? o.payment_status ?? null,
+  payments: (o.payments ?? []).map((p) => ({
+    id: p.id,
+    method: p.method,
+    amount: parseFloat(p.amount ?? 0),
+  })),
   customerAddress: o.customerAddress ?? o.customer_address ?? null,
   customerName:  o.customerName  ?? o.customer_name  ?? null,
   customerPhone: o.customerPhone ?? o.customer_phone ?? null,
