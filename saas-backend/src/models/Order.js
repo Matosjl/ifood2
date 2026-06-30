@@ -152,16 +152,19 @@ class Order {
                 ) ORDER BY oi.line_no NULLS LAST, oi.id
               ) FILTER (WHERE oi.id IS NOT NULL) AS items,
               COALESCE(
-                (SELECT json_agg(json_build_object(
-                  'id',             op.id,
-                  'method',         op.method,
-                  'amount',         op.amount,
-                  'received_amount', op.received_amount,
-                  'change_amount',  op.change_amount,
-                  'created_at',     op.created_at
-                ) ORDER BY op.created_at),
-                '[]'::json)
-                FROM order_payments op WHERE op.order_id = o.id
+                (
+                  SELECT json_agg(json_build_object(
+                    'id',              op.id,
+                    'method',          op.method,
+                    'amount',          op.amount,
+                    'received_amount', op.received_amount,
+                    'change_amount',   op.change_amount,
+                    'created_at',      op.created_at
+                  ) ORDER BY op.created_at)
+                  FROM order_payments op
+                  WHERE op.order_id = o.id
+                ),
+                '[]'::json
               ) AS payments
        FROM   orders o
        LEFT   JOIN order_items oi ON oi.order_id = o.id

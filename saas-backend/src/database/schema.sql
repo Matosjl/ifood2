@@ -416,6 +416,42 @@ CREATE TABLE IF NOT EXISTS fiado_compras (
 CREATE INDEX IF NOT EXISTS idx_fiado_clientes_tenant2 ON fiado_clientes(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_fiado_compras_cliente2 ON fiado_compras(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_fiado_compras_tenant2  ON fiado_compras(tenant_id);
+-- ORDER PAYMENTS (pagamento dividido / historico por metodo)
+-- Usado pelo PDV, fechamento de caixa e hidratacao de pedidos no Kanban.
+CREATE TABLE IF NOT EXISTS order_payments (
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id        UUID          NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  order_id         UUID          NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  cash_register_id UUID          REFERENCES cash_registers(id) ON DELETE SET NULL,
+  method           VARCHAR(30)   NOT NULL,
+  amount           DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+  received_amount  DECIMAL(10,2),
+  change_amount    DECIMAL(10,2),
+  created_by       UUID          REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_payments_tenant ON order_payments(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_payments_order  ON order_payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_payments_cash   ON order_payments(cash_register_id);
+
+-- ORDER AUDIT LOGS (rastreamento de alteracoes de pedidos)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_by   UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS order_audit_logs (
+  id          UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id   UUID         NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  order_id    UUID         NOT NULL REFERENCES orders(id)  ON DELETE CASCADE,
+  user_id     UUID         REFERENCES users(id) ON DELETE SET NULL,
+  action      VARCHAR(50)  NOT NULL,
+  changes     JSONB        NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_audit_order  ON order_audit_logs(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_audit_tenant ON order_audit_logs(tenant_id, created_at DESC);
 
 -- ── Motoboy / Driver ─────────────────────────────────────────────
 

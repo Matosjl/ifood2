@@ -129,13 +129,17 @@ describe('PATCH /api/orders/:id/status', () => {
     const res = await request(app)
       .patch(`/api/orders/${cancelOrder.id}/status`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ status: 'cancelled' });
+      .send({ status: 'cancelled', cancelReason: 'Teste automatizado' });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(enqueueAndWait).toHaveBeenCalledWith(
       'cancel',
-      expect.objectContaining({ orderId: cancelOrder.id, tenantId })
+      expect.objectContaining({
+        orderId: cancelOrder.id,
+        tenantId,
+        cancelReason: 'Teste automatizado',
+      })
     );
   });
 });
