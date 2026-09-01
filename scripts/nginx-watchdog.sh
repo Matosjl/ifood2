@@ -2,9 +2,17 @@
 # nginx-watchdog.sh
 # Roda dentro do container saas_nginx.
 # Se o backend voltou após uma queda, recarrega nginx para re-resolver o DNS.
-# Adicione ao docker-compose como command override ou como sidecar cron.
+#
+# LIVENESS, não readiness: só prova que o processo Nest está respondendo
+# HTTP, não que dependências (banco etc.) estão OK — suficiente pra decidir
+# "vale a pena recarregar nginx pra re-resolver DNS", que é o único
+# objetivo deste script (ver Fase incidente 2026-09-01).
+#
+# GET / (AppController, @Public(), sem auth, sem DB) é o endpoint mais
+# leve que já existe no backend — não existe /health dedicado, e não foi
+# criado um só pra isto (não inventar endpoint sem necessidade real).
 
-BACKEND_URL="http://backend:3000/health"
+BACKEND_URL="http://zapfome_v2_backend:3000/"
 STATE_FILE="/tmp/backend_was_down"
 
 while true; do

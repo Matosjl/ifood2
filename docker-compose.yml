@@ -48,10 +48,15 @@ services:
       - backend
       - frontend
     restart: unless-stopped
-    # Watchdog roda em paralelo: detecta backend restart e recarrega nginx
+    # Watchdog roda em paralelo: detecta backend restart e recarrega nginx.
+    # Script montado :ro (Fase incidente 2026-09-01) — chmod direto no
+    # arquivo montado read-only falha silenciosamente (o && curto-circuita
+    # e o watchdog nunca chega a rodar). Copia pra /tmp (gravável) antes
+    # do chmod; o mount original continua :ro, sem abrir mão da proteção.
     command: >
-      /bin/sh -c "chmod +x /usr/local/bin/nginx-watchdog.sh &&
-        /usr/local/bin/nginx-watchdog.sh &
+      /bin/sh -c "cp /usr/local/bin/nginx-watchdog.sh /tmp/nginx-watchdog.sh &&
+        chmod +x /tmp/nginx-watchdog.sh &&
+        /tmp/nginx-watchdog.sh &
         nginx -g 'daemon off;'"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
